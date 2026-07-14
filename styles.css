@@ -122,8 +122,20 @@ input, select {
   font-size: 14px;
   font-family: inherit;
   width: 100%;
+  min-width: 0; /* allow shrinking inside flex/grid so inputs never overflow */
 }
 input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.15); }
+
+/* Date inputs: iOS Safari sizes these to their intrinsic content and adds
+   inner margins on the value element, so width:100% is ignored and the field
+   spills past its container. Resetting the appearance makes it honor the width. */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  max-width: 100%;
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .inline-select { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .inline-select select { width: auto; }
 
