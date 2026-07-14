@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -180,6 +181,48 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 .pr-strip { display: flex; flex-wrap: wrap; gap: 8px; }
 .pr-chip { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 12px; }
 .pr-chip b { color: var(--accent); }
+
+/* ---------- Account / auth ---------- */
+.account { display: flex; align-items: center; gap: 10px; }
+.account .acct-email { font-size: 13px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; box-shadow: 0 0 6px var(--good); }
+.account .sync-dot.busy { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 26px;
+  width: 100%; max-width: 400px;
+  box-shadow: var(--shadow);
+}
+.modal h2 { margin: 0 0 8px; font-size: 20px; }
+.modal form { margin-top: 16px; }
+.modal-close { position: absolute; top: 12px; right: 12px; background: transparent; border: 0; color: var(--muted); font-size: 16px; cursor: pointer; padding: 6px; border-radius: 6px; }
+.modal-close:hover { color: var(--text); background: var(--bg-elevated); }
+.auth-status { font-size: 13px; margin: 12px 0 0; min-height: 18px; }
+.auth-status.ok { color: var(--good); }
+.auth-status.err { color: var(--danger); }
+
+.sync-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(160deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+.sync-banner .muted { font-size: 13px; }
 
 /* ---------- Footer ---------- */
 .footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border); }

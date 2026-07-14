@@ -1,6 +1,11 @@
 /* ==========================================================================
    GymTrack — weightlifting & rock climbing progress tracker
-   All data lives in the browser via localStorage. No backend, no build step.
+
+   Storage has two modes:
+     • Local  (signed out / not configured) — data in localStorage, this device.
+     • Cloud  (signed in) — data in Supabase, synced across devices, private per
+       user via Row-Level Security. Magic-link email auth (no passwords).
+   On first sign-in, any local data is offered up for migration to the cloud.
    ========================================================================== */
 
 (function () {
@@ -19,25 +24,171 @@
     '5.14a', '5.14b', '5.14c', '5.14d',
     '5.15a', '5.15b', '5.15c', '5.15d'
   ];
-  const ROPED = new Set(['Sport', 'Top Rope', 'Trad']);
   const gradesFor = (d) => (d === 'Bouldering' ? V_GRADES : YDS_GRADES);
   const gradeRank = (d, g) => gradesFor(d).indexOf(g); // higher = harder
 
-  /* ----- State ----- */
-  let state = load();
+  /* ----- In-memory state (single source the UI renders from) ----- */
+  let state = { lifts: [], climbs: [] };
 
-  function load() {
+  /* ======================================================================
+     Supabase setup
+     ====================================================================== */
+  const cfg = window.SUPABASE_CONFIG || {};
+  const CONFIGURED = !!(
+    cfg.url && cfg.anonKey &&
+    !cfg.url.includes('YOUR-PROJECT') &&
+    !cfg.anonKey.includes('YOUR-ANON') &&
+    window.supabase && window.supabase.createClient
+  );
+  const sb = CONFIGURED ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
+
+  let session = null;            // current auth session (or null)
+  let migrationHandled = false;  // only prompt to migrate once per page load
+
+  /* ----- Local persistence ----- */
+  function loadLocal() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* fall through */ }
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (Array.isArray(d.lifts) && Array.isArray(d.climbs)) return d;
+      }
+    } catch (e) { /* ignore */ }
     return { lifts: [], climbs: [] };
   }
-  function save() {
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  function saveLocal() {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ lifts: state.lifts, climbs: state.climbs }));
+  }
+  function clearLocal() { localStorage.removeItem(STORE_KEY); }
+
+  /* ----- Row mapping between DB and UI shapes ----- */
+  const liftRow = (l) => ({
+    date: l.date, exercise: l.exercise, weight: Number(l.weight),
+    sets: Number(l.sets), reps: Number(l.reps), unit: l.unit, notes: l.notes || ''
+  });
+  const climbRow = (c) => ({
+    date: c.date, discipline: c.discipline, grade: c.grade,
+    attempts: Number(c.attempts), result: c.result, location: c.location || '', notes: c.notes || ''
+  });
+  const fromLift = (r) => ({ id: r.id, ...liftRow(r) });
+  const fromClimb = (r) => ({ id: r.id, ...climbRow(r) });
+
+  const cloudOn = () => !!(sb && session);
+
+  /* ----- Unified data layer ----- */
+  const Store = {
+    async load() {
+      if (cloudOn()) {
+        const [lifts, climbs] = await Promise.all([
+          sb.from('lifts').select('*').order('date', { ascending: true }),
+          sb.from('climbs').select('*').order('date', { ascending: true })
+        ]);
+        if (lifts.error) throw lifts.error;
+        if (climbs.error) throw climbs.error;
+        state.lifts = lifts.data.map(fromLift);
+        state.climbs = climbs.data.map(fromClimb);
+      } else {
+        const local = loadLocal();
+        state.lifts = local.lifts;
+        state.climbs = local.climbs;
+      }
+    },
+    async addLift(entry) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('lifts').insert(liftRow(entry)).select().single();
+        if (error) throw error;
+        state.lifts.push(fromLift(data));
+      } else {
+        state.lifts.push({ id: uid(), ...entry });
+        saveLocal();
+      }
+    },
+    async addClimb(entry) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('climbs').insert(climbRow(entry)).select().single();
+        if (error) throw error;
+        state.climbs.push(fromClimb(data));
+      } else {
+        state.climbs.push({ id: uid(), ...entry });
+        saveLocal();
+      }
+    },
+    async delLift(id) {
+      if (cloudOn()) {
+        const { error } = await sb.from('lifts').delete().eq('id', id);
+        if (error) throw error;
+      }
+      state.lifts = state.lifts.filter((x) => x.id !== id);
+      if (!cloudOn()) saveLocal();
+    },
+    async delClimb(id) {
+      if (cloudOn()) {
+        const { error } = await sb.from('climbs').delete().eq('id', id);
+        if (error) throw error;
+      }
+      state.climbs = state.climbs.filter((x) => x.id !== id);
+      if (!cloudOn()) saveLocal();
+    },
+    async resetAll() {
+      if (cloudOn()) {
+        const uidv = session.user.id;
+        const a = await sb.from('lifts').delete().eq('user_id', uidv);
+        const b = await sb.from('climbs').delete().eq('user_id', uidv);
+        if (a.error) throw a.error;
+        if (b.error) throw b.error;
+        state.lifts = []; state.climbs = [];
+      } else {
+        state = { lifts: [], climbs: [] };
+        saveLocal();
+      }
+    },
+    async importData(data) {
+      if (cloudOn()) {
+        if (data.lifts.length) {
+          const { error } = await sb.from('lifts').insert(data.lifts.map(liftRow));
+          if (error) throw error;
+        }
+        if (data.climbs.length) {
+          const { error } = await sb.from('climbs').insert(data.climbs.map(climbRow));
+          if (error) throw error;
+        }
+        await this.load();
+      } else {
+        state = { lifts: data.lifts, climbs: data.climbs };
+        saveLocal();
+      }
+    }
+  };
+
+  /* ----- Migrate local data into the cloud on first sign-in ----- */
+  async function maybeMigrate() {
+    if (migrationHandled) return;
+    migrationHandled = true;
+    const local = loadLocal();
+    if (!local.lifts.length && !local.climbs.length) return;
+    const msg = `Upload your ${local.lifts.length} local lift set(s) and ${local.climbs.length} climb(s) to your account so they sync across devices?`;
+    if (!confirm(msg)) return;
+    setSync(true);
+    try {
+      if (local.lifts.length) {
+        const { error } = await sb.from('lifts').insert(local.lifts.map(liftRow));
+        if (error) throw error;
+      }
+      if (local.climbs.length) {
+        const { error } = await sb.from('climbs').insert(local.climbs.map(climbRow));
+        if (error) throw error;
+      }
+      clearLocal();
+    } catch (e) {
+      alert('Could not upload local data: ' + (e.message || e));
+    } finally {
+      setSync(false);
+    }
   }
 
-  /* ----- Helpers ----- */
+  /* ======================================================================
+     Helpers
+     ====================================================================== */
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -52,11 +203,29 @@
     const d = new Date(iso + 'T00:00:00');
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
+  function est1RM(weight, reps) { return reps <= 1 ? weight : weight * (1 + reps / 30); }
 
-  // Epley estimated 1-rep max
-  function est1RM(weight, reps) {
-    if (reps <= 1) return weight;
-    return weight * (1 + reps / 30);
+  function escapeHTML(str) {
+    return String(str || '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function mostCommon(arr) {
+    if (!arr.length) return null;
+    const counts = {};
+    arr.forEach((x) => { counts[x] = (counts[x] || 0) + 1; });
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+  }
+
+  // Run an async mutation with the sync indicator + basic error handling
+  async function withSync(fn) {
+    setSync(true);
+    try {
+      await fn();
+    } catch (e) {
+      alert('Sync error: ' + (e.message || e));
+    } finally {
+      setSync(false);
+    }
   }
 
   /* ======================================================================
@@ -81,7 +250,6 @@
     e.preventDefault();
     const f = new FormData(liftForm);
     const entry = {
-      id: uid(),
       date: f.get('date'),
       exercise: f.get('exercise').trim(),
       weight: parseFloat(f.get('weight')),
@@ -91,13 +259,14 @@
       notes: (f.get('notes') || '').trim()
     };
     if (!entry.exercise || isNaN(entry.weight) || isNaN(entry.reps)) return;
-    state.lifts.push(entry);
-    save();
-    liftForm.reset();
-    $('#lift-date').value = todayISO();
-    $('#lift-unit').value = entry.unit;
-    renderLifting();
-    renderDashboard();
+    withSync(async () => {
+      await Store.addLift(entry);
+      liftForm.reset();
+      $('#lift-date').value = todayISO();
+      $('#lift-unit').value = entry.unit;
+      renderLifting();
+      renderDashboard();
+    });
   });
 
   function liftExercises() {
@@ -105,11 +274,9 @@
   }
 
   function renderLifting() {
-    // Populate exercise selectors, preserving selection where possible
     const exercises = liftExercises();
     syncSelect('#lift-filter', exercises, true);
     syncSelect('#lift-chart-exercise', exercises, false);
-
     renderLiftTable();
     renderLiftChart();
   }
@@ -146,8 +313,10 @@
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td><button class="del-btn" title="Delete" aria-label="Delete">✕</button></td>`;
       tr.querySelector('.del-btn').addEventListener('click', () => {
-        state.lifts = state.lifts.filter((x) => x.id !== l.id);
-        save(); renderLifting(); renderDashboard();
+        withSync(async () => {
+          await Store.delLift(l.id);
+          renderLifting(); renderDashboard();
+        });
       });
       tbody.appendChild(tr);
     });
@@ -168,7 +337,6 @@
       .filter((l) => l.exercise === ex)
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    // Best estimated 1RM per date
     const byDate = {};
     entries.forEach((l) => {
       const v = est1RM(l.weight, l.reps);
@@ -179,7 +347,6 @@
 
     drawLineChart(wrap, points, (v) => `${fmtNum(v)} ${unit}`);
 
-    // PRs
     const maxWeight = Math.max(...entries.map((l) => l.weight));
     const max1RM = Math.max(...entries.map((l) => est1RM(l.weight, l.reps)));
     const totalVol = entries.reduce((s, l) => s + l.weight * l.sets * l.reps, 0);
@@ -213,7 +380,6 @@
     e.preventDefault();
     const f = new FormData(climbForm);
     const entry = {
-      id: uid(),
       date: f.get('date'),
       discipline: f.get('discipline'),
       grade: f.get('grade'),
@@ -222,15 +388,16 @@
       location: (f.get('location') || '').trim(),
       notes: (f.get('notes') || '').trim()
     };
-    state.climbs.push(entry);
-    save();
-    const keepDisc = entry.discipline;
-    climbForm.reset();
-    $('#climb-date').value = todayISO();
-    $('#climb-discipline').value = keepDisc;
-    populateGradeSelect();
-    renderClimbing();
-    renderDashboard();
+    withSync(async () => {
+      await Store.addClimb(entry);
+      const keepDisc = entry.discipline;
+      climbForm.reset();
+      $('#climb-date').value = todayISO();
+      $('#climb-discipline').value = keepDisc;
+      populateGradeSelect();
+      renderClimbing();
+      renderDashboard();
+    });
   });
 
   const isSend = (r) => r !== 'Project';
@@ -266,8 +433,10 @@
         <td class="muted">${escapeHTML(c.notes)}</td>
         <td><button class="del-btn" title="Delete" aria-label="Delete">✕</button></td>`;
       tr.querySelector('.del-btn').addEventListener('click', () => {
-        state.climbs = state.climbs.filter((x) => x.id !== c.id);
-        save(); renderClimbing(); renderDashboard();
+        withSync(async () => {
+          await Store.delClimb(c.id);
+          renderClimbing(); renderDashboard();
+        });
       });
       tbody.appendChild(tr);
     });
@@ -288,7 +457,6 @@
       return;
     }
 
-    // Hardest grade sent per date (as numeric rank)
     const byDate = {};
     sends.forEach((c) => {
       const r = gradeRank(d, c.grade);
@@ -327,7 +495,6 @@
     $('#dash-climb-sessions').textContent = climbSessions;
     $('#dash-climb-sends').textContent = totalSends;
 
-    // Recent feeds
     renderFeed('#dash-lift-feed', state.lifts, (l) => ({
       main: l.exercise,
       sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
@@ -360,13 +527,6 @@
     }).join('');
   }
 
-  function mostCommon(arr) {
-    if (!arr.length) return null;
-    const counts = {};
-    arr.forEach((x) => { counts[x] = (counts[x] || 0) + 1; });
-    return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
-  }
-
   /* ======================================================================
      Simple SVG line chart
      ====================================================================== */
@@ -394,14 +554,12 @@
     const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
     const areaPath = `${linePath} L${x(n - 1).toFixed(1)},${(padT + innerH).toFixed(1)} L${x(0).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
 
-    // Y axis ticks (3)
     const ticks = [min + (max - min) * 0.1, (min + max) / 2, max - (max - min) * 0.1];
     const yTicks = ticks.map((t) =>
       `<line class="chart-axis" x1="${padL}" y1="${y(t).toFixed(1)}" x2="${W - padR}" y2="${y(t).toFixed(1)}" opacity="0.4"/>
        <text class="chart-label" x="${padL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end">${fmtValue(t)}</text>`
     ).join('');
 
-    // X labels (first, middle, last)
     const idxs = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
     const xLabels = [...new Set(idxs)].map((i) =>
       `<text class="chart-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${fmtDateShort(points[i].date)}</text>`
@@ -431,7 +589,7 @@
      Export / Import / Reset
      ====================================================================== */
   $('#export-btn').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ lifts: state.lifts, climbs: state.climbs }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -446,31 +604,103 @@
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      let data;
       try {
-        const data = JSON.parse(reader.result);
+        data = JSON.parse(reader.result);
         if (!Array.isArray(data.lifts) || !Array.isArray(data.climbs)) throw new Error('bad format');
-        state = data;
-        save();
-        renderAll();
       } catch (err) {
         alert('Could not import: the file is not a valid GymTrack export.');
+        return;
       }
+      withSync(async () => {
+        await Store.importData(data);
+        renderAll();
+      });
     };
     reader.readAsText(file);
     e.target.value = '';
   });
 
   $('#reset-btn').addEventListener('click', () => {
-    if (!confirm('Delete ALL logged data? This cannot be undone.')) return;
-    state = { lifts: [], climbs: [] };
-    save();
-    renderAll();
+    const scope = cloudOn() ? 'your account' : 'this browser';
+    if (!confirm(`Delete ALL logged data from ${scope}? This cannot be undone.`)) return;
+    withSync(async () => {
+      await Store.resetAll();
+      renderAll();
+    });
   });
 
-  /* ----- Utility ----- */
-  function escapeHTML(str) {
-    return String(str || '').replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* ======================================================================
+     Auth UI
+     ====================================================================== */
+  const accountEl = $('#account');
+  const modal = $('#auth-modal');
+  const authForm = $('#auth-form');
+  const authStatus = $('#auth-status');
+
+  function openModal() { modal.hidden = false; setTimeout(() => $('#auth-email').focus(), 50); }
+  function closeModal() { modal.hidden = true; authStatus.textContent = ''; authStatus.className = 'auth-status'; }
+
+  $('#auth-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#auth-email').value.trim();
+    if (!email) return;
+    const submit = $('#auth-submit');
+    submit.disabled = true;
+    authStatus.className = 'auth-status';
+    authStatus.textContent = 'Sending…';
+    try {
+      const redirectTo = location.href.split('#')[0].split('?')[0];
+      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+      if (error) throw error;
+      authStatus.className = 'auth-status ok';
+      authStatus.textContent = 'Check your email for the login link. You can close this once you click it.';
+    } catch (err) {
+      authStatus.className = 'auth-status err';
+      authStatus.textContent = 'Error: ' + (err.message || err);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  function renderAccount() {
+    if (!CONFIGURED) { accountEl.hidden = true; return; }
+    accountEl.hidden = false;
+    if (session) {
+      const email = session.user.email || 'Signed in';
+      accountEl.innerHTML = `
+        <span class="sync-dot" id="sync-dot" title="Synced to cloud"></span>
+        <span class="acct-email" title="${escapeHTML(email)}">${escapeHTML(email)}</span>
+        <button class="btn ghost" id="signout-btn">Sign out</button>`;
+      $('#signout-btn').addEventListener('click', async () => { await sb.auth.signOut(); });
+    } else {
+      accountEl.innerHTML = `<button class="btn primary" id="signin-btn">☁ Sign in to sync</button>`;
+      $('#signin-btn').addEventListener('click', openModal);
+    }
+    renderBanner();
+  }
+
+  function renderBanner() {
+    const existing = $('#sync-banner');
+    if (existing) existing.remove();
+    if (!CONFIGURED || session) return;
+    const container = $('.container');
+    const banner = document.createElement('div');
+    banner.className = 'sync-banner';
+    banner.id = 'sync-banner';
+    banner.innerHTML = `
+      <span>☁ <b>Your data is only on this device.</b> <span class="muted">Sign in to sync it across your phone, tablet, and laptop.</span></span>
+      <button class="btn primary" id="banner-signin">Sign in</button>`;
+    container.insertBefore(banner, container.firstChild);
+    $('#banner-signin').addEventListener('click', openModal);
+  }
+
+  function setSync(busy) {
+    const dot = $('#sync-dot');
+    if (dot) dot.classList.toggle('busy', !!busy);
   }
 
   /* ======================================================================
@@ -481,5 +711,42 @@
     renderLifting();
     renderClimbing();
   }
-  renderAll();
+
+  async function refresh() {
+    setSync(true);
+    try {
+      await Store.load();
+    } catch (e) {
+      alert('Could not load data: ' + (e.message || e));
+    } finally {
+      setSync(false);
+    }
+    renderAll();
+  }
+
+  async function boot() {
+    if (sb) {
+      // React to sign-in / sign-out (also fires once on initial load)
+      sb.auth.onAuthStateChange(async (event, newSession) => {
+        session = newSession;
+        if (event === 'SIGNED_IN') {
+          closeModal();
+          await maybeMigrate();
+        }
+        renderAccount();
+        await refresh();
+      });
+
+      const { data } = await sb.auth.getSession();
+      session = data.session;
+      renderAccount();
+      await refresh();
+    } else {
+      // Local-only mode (Supabase not configured)
+      renderAccount();
+      await refresh();
+    }
+  }
+
+  boot();
 })();
