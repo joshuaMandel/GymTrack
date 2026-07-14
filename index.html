@@ -8,7 +8,16 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏋️</text></svg>" />
 </head>
-<body>
+<body class="booting">
+  <!-- Shown only while checking sign-in state, so the app never flashes before the gate -->
+  <div class="boot-splash" id="boot-splash" aria-hidden="true">
+    <span class="brand-mark">🏋️</span>
+    <div class="boot-spinner"></div>
+  </div>
+  <script>
+    // Safety valve: if scripts fail to load, reveal the app rather than a blank page.
+    setTimeout(function () { document.body.classList.remove('booting'); }, 6000);
+  </script>
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">🏋️</span>

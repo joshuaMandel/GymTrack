@@ -194,6 +194,31 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .pr-chip { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 12px; }
 .pr-chip b { color: var(--accent); }
 
+/* ---------- Boot splash ---------- */
+/* While checking sign-in state, hide the app and gate entirely so neither
+   flashes before we know which one to show. */
+body.booting .topbar,
+body.booting .container { display: none !important; }
+.boot-splash { display: none; }
+body.booting .boot-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 70vh;
+}
+.boot-splash .brand-mark { font-size: 44px; }
+.boot-spinner {
+  width: 26px; height: 26px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .boot-spinner { animation: none; } }
+
 /* ---------- Sign-in gate ---------- */
 /* When signed out (and Supabase is configured), only the gate is shown. */
 body.auth-gated .tabs,

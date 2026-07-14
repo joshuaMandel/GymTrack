@@ -654,10 +654,13 @@
   let namePrompted = false;
 
   // Show only the gate when Supabase is configured and nobody is signed in.
+  // Also lifts the boot splash — by the time this runs, auth state is known,
+  // so we can reveal the right screen without the app flashing first.
   function applyGate() {
     const gated = CONFIGURED && !session;
     document.body.classList.toggle('auth-gated', gated);
     gate.hidden = !gated;
+    document.body.classList.remove('booting');
   }
 
   // Send the magic-link sign-in email (gate form)
