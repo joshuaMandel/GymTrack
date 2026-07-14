@@ -282,33 +282,6 @@
      ====================================================================== */
   const liftForm = $('#lift-form');
   $('#lift-date').value = todayISO();
-  let editingLiftId = null;
-
-  function setLiftEditMode(id) {
-    editingLiftId = id;
-    $('#lift-submit').textContent = id ? 'Save changes' : 'Add set';
-    $('#lift-cancel').hidden = !id;
-    liftForm.closest('.panel').classList.toggle('is-editing', !!id);
-  }
-
-  function startEditLift(l) {
-    liftForm.elements.date.value = l.date;
-    liftForm.elements.exercise.value = l.exercise;
-    liftForm.elements.weight.value = l.weight;
-    liftForm.elements.sets.value = l.sets;
-    liftForm.elements.reps.value = l.reps;
-    liftForm.elements.unit.value = l.unit;
-    liftForm.elements.notes.value = l.notes || '';
-    setLiftEditMode(l.id);
-    // Scroll only — focusing a field here pops the keyboard (and zoom) on mobile.
-    liftForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  $('#lift-cancel').addEventListener('click', () => {
-    liftForm.reset();
-    $('#lift-date').value = todayISO();
-    setLiftEditMode(null);
-  });
 
   liftForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -324,15 +297,10 @@
     };
     if (!entry.exercise || isNaN(entry.weight) || isNaN(entry.reps)) return;
     withSync(async () => {
-      if (editingLiftId) {
-        await Store.updateLift(editingLiftId, entry);
-      } else {
-        await Store.addLift(entry);
-      }
+      await Store.addLift(entry);
       liftForm.reset();
       $('#lift-date').value = todayISO();
       $('#lift-unit').value = entry.unit;
-      setLiftEditMode(null);
       renderLifting();
       renderDashboard();
     });
@@ -384,9 +352,8 @@
           <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
           <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
         </td>`;
-      tr.querySelector('.edit-btn').addEventListener('click', () => startEditLift(l));
+      tr.querySelector('.edit-btn').addEventListener('click', () => openEditLift(l));
       tr.querySelector('.del-btn').addEventListener('click', () => {
-        if (editingLiftId === l.id) { liftForm.reset(); $('#lift-date').value = todayISO(); setLiftEditMode(null); }
         withSync(async () => {
           await Store.delLift(l.id);
           renderLifting(); renderDashboard();
@@ -450,35 +417,6 @@
   $('#climb-discipline').addEventListener('change', populateGradeSelect);
   populateGradeSelect();
 
-  let editingClimbId = null;
-
-  function setClimbEditMode(id) {
-    editingClimbId = id;
-    $('#climb-submit').textContent = id ? 'Save changes' : 'Add climb';
-    $('#climb-cancel').hidden = !id;
-    climbForm.closest('.panel').classList.toggle('is-editing', !!id);
-  }
-
-  function startEditClimb(c) {
-    climbForm.elements.date.value = c.date;
-    climbForm.elements.discipline.value = c.discipline;
-    populateGradeSelect();
-    climbForm.elements.grade.value = c.grade;
-    climbForm.elements.attempts.value = c.attempts;
-    climbForm.elements.result.value = c.result;
-    climbForm.elements.location.value = c.location || '';
-    climbForm.elements.notes.value = c.notes || '';
-    setClimbEditMode(c.id);
-    climbForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  $('#climb-cancel').addEventListener('click', () => {
-    climbForm.reset();
-    $('#climb-date').value = todayISO();
-    populateGradeSelect();
-    setClimbEditMode(null);
-  });
-
   climbForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const f = new FormData(climbForm);
@@ -492,17 +430,12 @@
       notes: (f.get('notes') || '').trim()
     };
     withSync(async () => {
-      if (editingClimbId) {
-        await Store.updateClimb(editingClimbId, entry);
-      } else {
-        await Store.addClimb(entry);
-      }
+      await Store.addClimb(entry);
       const keepDisc = entry.discipline;
       climbForm.reset();
       $('#climb-date').value = todayISO();
       $('#climb-discipline').value = keepDisc;
       populateGradeSelect();
-      setClimbEditMode(null);
       renderClimbing();
       renderDashboard();
     });
@@ -543,9 +476,8 @@
           <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
           <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
         </td>`;
-      tr.querySelector('.edit-btn').addEventListener('click', () => startEditClimb(c));
+      tr.querySelector('.edit-btn').addEventListener('click', () => openEditClimb(c));
       tr.querySelector('.del-btn').addEventListener('click', () => {
-        if (editingClimbId === c.id) { climbForm.reset(); $('#climb-date').value = todayISO(); populateGradeSelect(); setClimbEditMode(null); }
         withSync(async () => {
           await Store.delClimb(c.id);
           renderClimbing(); renderDashboard();
@@ -591,6 +523,112 @@
 
   $('#climb-filter').addEventListener('change', renderClimbTable);
   $('#climb-chart-discipline').addEventListener('change', renderClimbChart);
+
+  /* ======================================================================
+     Edit-entry modal
+     ====================================================================== */
+  const editModal = $('#edit-modal');
+  const editLiftForm = $('#edit-lift-form');
+  const editClimbForm = $('#edit-climb-form');
+  const editStatus = $('#edit-status');
+  let editingLiftId = null;
+  let editingClimbId = null;
+
+  function populateEditGradeSelect() {
+    const d = $('#edit-climb-discipline').value;
+    const sel = $('#edit-climb-grade');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    gradesFor(d).forEach((g) => sel.add(new Option(g, g)));
+    if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  }
+  $('#edit-climb-discipline').addEventListener('change', populateEditGradeSelect);
+
+  function openEditModal(kind) {
+    editLiftForm.hidden = kind !== 'lift';
+    editClimbForm.hidden = kind !== 'climb';
+    $('#edit-title').textContent = kind === 'lift' ? 'Edit set' : 'Edit climb';
+    editStatus.textContent = '';
+    editStatus.className = 'auth-status';
+    editModal.hidden = false;
+  }
+  function closeEditModal() {
+    editModal.hidden = true;
+    editingLiftId = null;
+    editingClimbId = null;
+  }
+  $('#edit-close').addEventListener('click', closeEditModal);
+  editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEditModal(); });
+
+  function openEditLift(l) {
+    editingLiftId = l.id;
+    editLiftForm.elements.date.value = l.date;
+    editLiftForm.elements.exercise.value = l.exercise;
+    editLiftForm.elements.weight.value = l.weight;
+    editLiftForm.elements.sets.value = l.sets;
+    editLiftForm.elements.reps.value = l.reps;
+    editLiftForm.elements.unit.value = l.unit;
+    editLiftForm.elements.notes.value = l.notes || '';
+    openEditModal('lift');
+  }
+
+  function openEditClimb(c) {
+    editingClimbId = c.id;
+    editClimbForm.elements.date.value = c.date;
+    editClimbForm.elements.discipline.value = c.discipline;
+    populateEditGradeSelect();
+    editClimbForm.elements.grade.value = c.grade;
+    editClimbForm.elements.attempts.value = c.attempts;
+    editClimbForm.elements.result.value = c.result;
+    editClimbForm.elements.location.value = c.location || '';
+    editClimbForm.elements.notes.value = c.notes || '';
+    openEditModal('climb');
+  }
+
+  editLiftForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!editingLiftId) return;
+    const f = new FormData(editLiftForm);
+    const entry = {
+      date: f.get('date'),
+      exercise: f.get('exercise').trim(),
+      weight: parseFloat(f.get('weight')),
+      sets: parseInt(f.get('sets'), 10),
+      reps: parseInt(f.get('reps'), 10),
+      unit: f.get('unit'),
+      notes: (f.get('notes') || '').trim()
+    };
+    if (!entry.exercise || isNaN(entry.weight) || isNaN(entry.reps)) return;
+    const id = editingLiftId;
+    withSync(async () => {
+      await Store.updateLift(id, entry);
+      closeEditModal();
+      renderLifting();
+      renderDashboard();
+    });
+  });
+
+  editClimbForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!editingClimbId) return;
+    const f = new FormData(editClimbForm);
+    const entry = {
+      date: f.get('date'),
+      discipline: f.get('discipline'),
+      grade: f.get('grade'),
+      attempts: parseInt(f.get('attempts'), 10) || 1,
+      result: f.get('result'),
+      location: (f.get('location') || '').trim(),
+      notes: (f.get('notes') || '').trim()
+    };
+    const id = editingClimbId;
+    withSync(async () => {
+      await Store.updateClimb(id, entry);
+      closeEditModal();
+      renderClimbing();
+      renderDashboard();
+    });
+  });
 
   /* ======================================================================
      Dashboard

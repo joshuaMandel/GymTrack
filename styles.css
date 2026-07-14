@@ -178,10 +178,6 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .del-btn:hover { color: var(--danger); background: rgba(248, 113, 113, 0.1); }
 .edit-btn:hover { color: var(--accent); background: rgba(245, 165, 36, 0.1); }
 
-/* Form in edit mode */
-.panel.is-editing { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.12), var(--shadow); }
-.btn.cancel-edit { width: 100%; margin-top: 8px; background: transparent; }
-.btn.cancel-edit:hover { border-color: var(--danger); color: var(--danger); }
 
 .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.boulder { background: rgba(56, 189, 248, 0.15); color: var(--accent-2); }
@@ -281,6 +277,8 @@ body.auth-gated .footer { display: none !important; }
   padding: 26px;
   width: 100%; max-width: 400px;
   box-shadow: var(--shadow);
+  max-height: 88vh;        /* longer forms (edit entry) scroll inside the dialog */
+  overflow-y: auto;
 }
 .modal h2 { margin: 0 0 8px; font-size: 20px; }
 .modal form { margin-top: 16px; }

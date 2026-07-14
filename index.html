@@ -34,6 +34,83 @@
     <div class="account" id="account" hidden></div>
   </header>
 
+  <!-- Edit-entry modal -->
+  <div class="modal-overlay" id="edit-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+      <button class="modal-close" id="edit-close" aria-label="Close">✕</button>
+      <h2 id="edit-title">Edit entry</h2>
+
+      <form id="edit-lift-form" autocomplete="off" hidden>
+        <label>Date
+          <input type="date" name="date" required />
+        </label>
+        <label>Exercise
+          <input type="text" name="exercise" list="exercise-list" required />
+        </label>
+        <div class="row-3">
+          <label>Weight
+            <input type="number" name="weight" min="0" step="0.5" required />
+          </label>
+          <label>Sets
+            <input type="number" name="sets" min="1" step="1" required />
+          </label>
+          <label>Reps
+            <input type="number" name="reps" min="1" step="1" required />
+          </label>
+        </div>
+        <label>Units
+          <select name="unit">
+            <option value="lbs">lbs</option>
+            <option value="kg">kg</option>
+          </select>
+        </label>
+        <label>Notes <span class="opt">(optional)</span>
+          <input type="text" name="notes" />
+        </label>
+        <button type="submit" class="btn primary">Save changes</button>
+      </form>
+
+      <form id="edit-climb-form" autocomplete="off" hidden>
+        <label>Date
+          <input type="date" name="date" required />
+        </label>
+        <label>Discipline
+          <select name="discipline" id="edit-climb-discipline">
+            <option value="Bouldering">Bouldering</option>
+            <option value="Sport">Sport (lead)</option>
+            <option value="Top Rope">Top Rope</option>
+            <option value="Trad">Trad</option>
+          </select>
+        </label>
+        <label>Grade
+          <select name="grade" id="edit-climb-grade"></select>
+        </label>
+        <div class="row-2">
+          <label>Attempts
+            <input type="number" name="attempts" min="1" step="1" required />
+          </label>
+          <label>Result
+            <select name="result">
+              <option value="Send">Send</option>
+              <option value="Flash">Flash</option>
+              <option value="Onsight">Onsight</option>
+              <option value="Project">Project (no send)</option>
+            </select>
+          </label>
+        </div>
+        <label>Location <span class="opt">(optional)</span>
+          <input type="text" name="location" />
+        </label>
+        <label>Notes <span class="opt">(optional)</span>
+          <input type="text" name="notes" />
+        </label>
+        <button type="submit" class="btn primary">Save changes</button>
+      </form>
+
+      <p class="auth-status" id="edit-status" role="status"></p>
+    </div>
+  </div>
+
   <!-- Edit-name modal -->
   <div class="modal-overlay" id="profile-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
@@ -153,7 +230,6 @@
             <input type="text" name="notes" placeholder="Felt strong, RPE 8…" />
           </label>
           <button type="submit" class="btn primary" id="lift-submit">Add set</button>
-          <button type="button" class="btn cancel-edit" id="lift-cancel" hidden>Cancel editing</button>
         </form>
 
         <div class="panel">
@@ -231,7 +307,6 @@
             <input type="text" name="notes" placeholder="Crimpy crux, slab…" />
           </label>
           <button type="submit" class="btn primary" id="climb-submit">Add climb</button>
-          <button type="button" class="btn cancel-edit" id="climb-cancel" hidden>Cancel editing</button>
         </form>
 
         <div class="panel">
