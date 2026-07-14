@@ -180,7 +180,8 @@
       }
       clearLocal();
     } catch (e) {
-      alert('Could not upload local data: ' + (e.message || e));
+      console.error('Migration error:', e);
+      alert('Could not upload local data: ' + errMsg(e));
     } finally {
       setSync(false);
     }
@@ -216,13 +217,25 @@
     return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
   }
 
+  // Extract a human-readable message from a Supabase / fetch error object
+  function errMsg(e) {
+    if (!e) return 'unknown error';
+    if (typeof e === 'string') return e;
+    const m = e.message || e.error_description || e.msg || e.error || e.hint;
+    if (m) return m;
+    if (e.status || e.code) return `request failed (${e.code || e.status})`;
+    try { const s = JSON.stringify(e); if (s && s !== '{}') return s; } catch (x) { /* ignore */ }
+    return 'request failed — check the browser console for details';
+  }
+
   // Run an async mutation with the sync indicator + basic error handling
   async function withSync(fn) {
     setSync(true);
     try {
       await fn();
     } catch (e) {
-      alert('Sync error: ' + (e.message || e));
+      console.error('Sync error:', e);
+      alert('Sync error: ' + errMsg(e));
     } finally {
       setSync(false);
     }
@@ -659,8 +672,9 @@
       authStatus.className = 'auth-status ok';
       authStatus.textContent = 'Check your email for the login link. You can close this once you click it.';
     } catch (err) {
+      console.error('Sign-in error:', err);
       authStatus.className = 'auth-status err';
-      authStatus.textContent = 'Error: ' + (err.message || err);
+      authStatus.textContent = 'Error: ' + errMsg(err);
     } finally {
       submit.disabled = false;
     }
@@ -717,7 +731,8 @@
     try {
       await Store.load();
     } catch (e) {
-      alert('Could not load data: ' + (e.message || e));
+      console.error('Load error:', e);
+      alert('Could not load data: ' + errMsg(e));
     } finally {
       setSync(false);
     }
