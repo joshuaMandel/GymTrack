@@ -40,6 +40,13 @@
     !cfg.anonKey.includes('YOUR-ANON') &&
     window.supabase && window.supabase.createClient
   );
+  // If the magic-link redirect carried an error (expired/pre-consumed link),
+  // capture it before the client is created — the client mutates the hash.
+  let authHashError = (() => {
+    const m = /error_description=([^&]+)/.exec(location.hash || '');
+    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
+  })();
+
   const sb = CONFIGURED ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
 
   let session = null;            // current auth session (or null)
@@ -1056,6 +1063,17 @@
   const profileModal = $('#profile-modal');
   let namePrompted = false;
 
+  // Strip leftover auth tokens/errors from the address bar. Supabase puts the
+  // session in the URL hash on magic-link redirects; if a stale hash survives
+  // into a reload, the client re-parses an expired token and auth misbehaves.
+  // Only call this after the client has finished its URL detection.
+  function cleanAuthHash() {
+    const h = location.hash || '';
+    if (h === '#' || /[#&](access_token|refresh_token|expires_in|expires_at|token_type|type|error|error_code|error_description|code)=/.test(h)) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+
   // Show only the gate when Supabase is configured and nobody is signed in.
   // Also lifts the boot splash — by the time this runs, auth state is known,
   // so we can reveal the right screen without the app flashing first.
@@ -1064,6 +1082,13 @@
     document.body.classList.toggle('auth-gated', gated);
     gate.hidden = !gated;
     document.body.classList.remove('booting');
+    // A failed magic link (expired / already used) redirects here with the
+    // error in the hash — explain it instead of showing a blank gate.
+    if (gated && authHashError) {
+      authStatus.className = 'auth-status err';
+      authStatus.textContent = `Sign-in link problem: ${authHashError}. Request a new link below.`;
+      authHashError = null;
+    }
   }
 
   // Send the magic-link sign-in email (gate form)
@@ -1189,6 +1214,7 @@
         session = newSession;
         applyGate();
         if (event === 'SIGNED_IN') {
+          cleanAuthHash(); // tokens are consumed by now; drop them from the URL
           await maybeMigrate();
           maybePromptName();
         }
@@ -1198,13 +1224,17 @@
         }
       });
 
+      // getSession() awaits client initialization, which includes consuming
+      // any auth tokens from the URL — safe to clean the hash after it.
       const { data } = await sb.auth.getSession();
       session = data.session;
+      cleanAuthHash();
       applyGate();
       renderAccount();
       await refresh();
     } else {
       // Supabase not configured — run in local-only mode (no gate).
+      cleanAuthHash();
       applyGate();
       renderAccount();
       await refresh();
