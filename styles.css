@@ -184,6 +184,31 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .inline-select { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .inline-select select { width: auto; }
 
+/* ---------- Type-ahead suggestions ---------- */
+.suggest-wrap { position: relative; }
+.suggest-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  z-index: 40;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  max-height: 216px;
+  overflow-y: auto;
+}
+.suggest-item {
+  padding: 11px 12px;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text);
+  cursor: pointer;
+}
+.suggest-item + .suggest-item { border-top: 1px solid var(--border); }
+.suggest-item.is-active, .suggest-item:hover { background: rgba(245, 165, 36, 0.12); }
+.suggest-item b { color: var(--accent); font-weight: 600; }
+
 .btn {
   border: 1px solid var(--border);
   background: var(--panel-2);

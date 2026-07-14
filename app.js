@@ -338,20 +338,83 @@
 
   const DEFAULT_EXERCISES = ['Back Squat', 'Front Squat', 'Bench Press', 'Overhead Press', 'Deadlift', 'Barbell Row', 'Pull-up'];
 
-  function refreshExerciseDatalist() {
-    const dl = $('#exercise-list');
+  // User's own exercises first, then remaining defaults, deduped by key.
+  function exerciseSuggestions() {
     const seen = new Set();
     const names = [];
-    // User's own exercises first, then remaining defaults
     Object.values(exerciseDisplayMap()).sort().forEach((n) => {
       if (!seen.has(exKey(n))) { seen.add(exKey(n)); names.push(n); }
     });
     DEFAULT_EXERCISES.forEach((n) => {
       if (!seen.has(exKey(n))) { seen.add(exKey(n)); names.push(n); }
     });
-    dl.innerHTML = '';
-    names.forEach((n) => dl.appendChild(new Option(n, n)));
+    return names;
   }
+
+  /* Custom type-ahead dropdown. iOS renders <datalist> suggestions inside the
+     keyboard's QuickType bar, which is easy to miss — this panel shows them
+     directly under the input instead, on every platform. */
+  function attachSuggest(input) {
+    const panel = input.parentElement.querySelector('.suggest-panel');
+    let active = -1; // keyboard-highlighted item
+
+    function matches() {
+      const q = input.value.trim().toLowerCase();
+      const all = exerciseSuggestions();
+      const hits = q ? all.filter((n) => n.toLowerCase().includes(q)) : all;
+      // Don't show a single suggestion that's already exactly what's typed
+      if (hits.length === 1 && hits[0].toLowerCase() === q) return [];
+      return hits.slice(0, 8);
+    }
+
+    function render() {
+      const hits = matches();
+      active = -1;
+      if (!hits.length) { panel.hidden = true; panel.innerHTML = ''; return; }
+      const q = input.value.trim();
+      panel.innerHTML = hits.map((n) => {
+        const i = q ? n.toLowerCase().indexOf(q.toLowerCase()) : -1;
+        const label = i === -1 ? escapeHTML(n)
+          : escapeHTML(n.slice(0, i)) + '<b>' + escapeHTML(n.slice(i, i + q.length)) + '</b>' + escapeHTML(n.slice(i + q.length));
+        return `<div class="suggest-item" data-value="${escapeHTML(n)}">${label}</div>`;
+      }).join('');
+      panel.hidden = false;
+      // pointerdown (not click) so choosing an item wins over the input's blur
+      panel.querySelectorAll('.suggest-item').forEach((el) => {
+        el.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          input.value = el.dataset.value;
+          hide();
+        });
+      });
+    }
+
+    function hide() { panel.hidden = true; panel.innerHTML = ''; active = -1; }
+
+    input.addEventListener('input', render);
+    input.addEventListener('focus', render);
+    input.addEventListener('blur', () => setTimeout(hide, 120));
+    input.addEventListener('keydown', (e) => {
+      const items = [...panel.querySelectorAll('.suggest-item')];
+      if (panel.hidden || !items.length) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        active = e.key === 'ArrowDown'
+          ? (active + 1) % items.length
+          : (active - 1 + items.length) % items.length;
+        items.forEach((el, i) => el.classList.toggle('is-active', i === active));
+        items[active].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' && active >= 0) {
+        e.preventDefault(); // choose the suggestion instead of submitting
+        input.value = items[active].dataset.value;
+        hide();
+      } else if (e.key === 'Escape') {
+        hide();
+      }
+    });
+  }
+
+  $$('input[data-suggest="exercise"]').forEach(attachSuggest);
 
   function renderLifting() {
     const map = exerciseDisplayMap();
@@ -362,7 +425,6 @@
     Object.keys(map).sort((a, b) => map[a].localeCompare(map[b])).forEach((k) => el.add(new Option(map[k], k)));
     if ([...el.options].some((o) => o.value === prev)) el.value = prev;
 
-    refreshExerciseDatalist();
     renderLiftTable();
     renderLiftChart();
   }

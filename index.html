@@ -57,7 +57,10 @@
           <input type="date" name="date" required />
         </label>
         <label>Exercise
-          <input type="text" name="exercise" list="exercise-list" required />
+          <div class="suggest-wrap">
+            <input type="text" name="exercise" required autocomplete="off" autocapitalize="words" data-suggest="exercise" />
+            <div class="suggest-panel" hidden></div>
+          </div>
         </label>
         <div class="row-3">
           <label>Weight
@@ -228,16 +231,10 @@
             <input type="date" name="date" id="lift-date" required />
           </label>
           <label>Exercise
-            <input type="text" name="exercise" list="exercise-list" placeholder="e.g. Back Squat" required />
-            <datalist id="exercise-list">
-              <option>Back Squat</option>
-              <option>Front Squat</option>
-              <option>Bench Press</option>
-              <option>Overhead Press</option>
-              <option>Deadlift</option>
-              <option>Barbell Row</option>
-              <option>Pull-up</option>
-            </datalist>
+            <div class="suggest-wrap">
+              <input type="text" name="exercise" placeholder="e.g. Back Squat" required autocomplete="off" autocapitalize="words" data-suggest="exercise" />
+              <div class="suggest-panel" hidden></div>
+            </div>
           </label>
           <div class="row-3">
             <label>Weight
