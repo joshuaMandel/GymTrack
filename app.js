@@ -280,6 +280,7 @@
       $$('.tab, .bnav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
       $$('.view').forEach((v) => v.classList.remove('is-active'));
       $('#view-' + view).classList.add('is-active');
+      window.scrollTo(0, 0); // each page opens from its top
     });
   });
 
