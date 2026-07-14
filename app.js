@@ -1035,12 +1035,11 @@
     if (!CONFIGURED || !session) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
     const label = currentDisplayName() || session.user.email || 'Account';
+    // Compact chip: name opens the profile modal (edit name / sign out).
     accountEl.innerHTML = `
       <span class="sync-dot" id="sync-dot" title="Synced"></span>
-      <button class="acct-name" id="profile-btn" title="Edit your name">${escapeHTML(label)} <span class="edit-ico">✎</span></button>
-      <button class="btn ghost" id="signout-btn">Sign out</button>`;
+      <button class="acct-name" id="profile-btn" title="Account">${escapeHTML(label)} <span class="edit-ico">✎</span></button>`;
     $('#profile-btn').addEventListener('click', () => openProfile(false));
-    $('#signout-btn').addEventListener('click', async () => { await sb.auth.signOut(); });
   }
 
   // ----- Edit-name modal -----
@@ -1054,6 +1053,10 @@
   function closeProfile() { profileModal.hidden = true; }
   $('#profile-close').addEventListener('click', closeProfile);
   profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfile(); });
+  $('#modal-signout').addEventListener('click', async () => {
+    closeProfile();
+    await sb.auth.signOut();
+  });
 
   $('#profile-form').addEventListener('submit', async (e) => {
     e.preventDefault();

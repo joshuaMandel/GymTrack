@@ -21,18 +21,17 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">🏋️</span>
-      <div>
-        <h1>GymTrack</h1>
-        <p class="tagline">Weightlifting &amp; rock climbing progress</p>
-      </div>
+      <h1>GymTrack</h1>
     </div>
-    <nav class="tabs" role="tablist" aria-label="Trackers">
+    <div class="account" id="account" hidden></div>
+  </header>
+  <nav class="tabs-bar" aria-label="Trackers">
+    <div class="tabs" role="tablist">
       <button class="tab is-active" role="tab" data-view="dashboard">Dashboard</button>
       <button class="tab" role="tab" data-view="lifting">Weightlifting</button>
       <button class="tab" role="tab" data-view="climbing">Rock Climbing</button>
-    </nav>
-    <div class="account" id="account" hidden></div>
-  </header>
+    </div>
+  </nav>
 
   <!-- Edit-entry modal -->
   <div class="modal-overlay" id="edit-modal" hidden>
@@ -124,6 +123,7 @@
         <button type="submit" class="btn primary" id="profile-submit">Save name</button>
       </form>
       <p class="auth-status" id="profile-status" role="status"></p>
+      <button type="button" class="btn ghost danger modal-signout" id="modal-signout">Sign out</button>
     </div>
   </div>
 

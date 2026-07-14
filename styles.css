@@ -26,37 +26,44 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- Top bar ---------- */
+/* ---------- Top bar ----------
+   The brand row scrolls away with the page; only the slim tab bar below it
+   stays sticky, so the pinned area is a single row while scrolling. */
 .topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+}
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brand-mark { font-size: 22px; }
+.brand h1 { font-size: 17px; margin: 0; letter-spacing: 0.3px; }
+
+.tabs-bar {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 22px;
+  padding: 8px 14px;
   background: rgba(14, 17, 22, 0.85);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
 }
-.brand { display: flex; align-items: center; gap: 12px; }
-.brand-mark { font-size: 30px; }
-.brand h1 { font-size: 20px; margin: 0; letter-spacing: 0.3px; }
-.tagline { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
-
-.tabs { display: flex; gap: 6px; background: var(--panel); padding: 5px; border-radius: 12px; border: 1px solid var(--border); }
+.tabs { display: flex; gap: 4px; background: var(--panel); padding: 4px; border-radius: 11px; border: 1px solid var(--border); width: 100%; max-width: 560px; }
 .tab {
   border: 0;
   background: transparent;
   color: var(--muted);
-  padding: 8px 16px;
+  padding: 7px 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex: 1;
+  white-space: nowrap;
 }
 .tab:hover { color: var(--text); }
 .tab.is-active { background: var(--accent); color: #1b1300; }
@@ -77,8 +84,8 @@ body {
 .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 @media (max-width: 780px) {
   .two-col { grid-template-columns: 1fr; }
-  .tabs { width: 100%; }
-  .tab { flex: 1; }
+  .tabs-bar { padding: 6px 10px; }
+  .tab { padding: 7px 6px; font-size: 12.5px; }
 }
 
 /* ---------- Panels ---------- */
@@ -207,6 +214,7 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 /* While checking sign-in state, hide the app and gate entirely so neither
    flashes before we know which one to show. */
 body.booting .topbar,
+body.booting .tabs-bar,
 body.booting .container { display: none !important; }
 .boot-splash { display: none; }
 body.booting .boot-splash {
@@ -230,7 +238,7 @@ body.booting .boot-splash {
 
 /* ---------- Sign-in gate ---------- */
 /* When signed out (and Supabase is configured), only the gate is shown. */
-body.auth-gated .tabs,
+body.auth-gated .tabs-bar,
 body.auth-gated .account,
 body.auth-gated .view,
 body.auth-gated .footer { display: none !important; }
@@ -291,6 +299,7 @@ body.auth-gated .footer { display: none !important; }
 .auth-status { font-size: 13px; margin: 12px 0 0; min-height: 18px; }
 .auth-status.ok { color: var(--good); }
 .auth-status.err { color: var(--danger); }
+.modal-signout { width: 100%; margin-top: 14px; }
 
 .sync-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
