@@ -113,6 +113,30 @@
         saveLocal();
       }
     },
+    async updateLift(id, entry) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('lifts').update(liftRow(entry)).eq('id', id).select().single();
+        if (error) throw error;
+        const i = state.lifts.findIndex((x) => x.id === id);
+        if (i !== -1) state.lifts[i] = fromLift(data);
+      } else {
+        const i = state.lifts.findIndex((x) => x.id === id);
+        if (i !== -1) state.lifts[i] = { id, ...entry };
+        saveLocal();
+      }
+    },
+    async updateClimb(id, entry) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('climbs').update(climbRow(entry)).eq('id', id).select().single();
+        if (error) throw error;
+        const i = state.climbs.findIndex((x) => x.id === id);
+        if (i !== -1) state.climbs[i] = fromClimb(data);
+      } else {
+        const i = state.climbs.findIndex((x) => x.id === id);
+        if (i !== -1) state.climbs[i] = { id, ...entry };
+        saveLocal();
+      }
+    },
     async delLift(id) {
       if (cloudOn()) {
         const { error } = await sb.from('lifts').delete().eq('id', id);
@@ -258,6 +282,33 @@
      ====================================================================== */
   const liftForm = $('#lift-form');
   $('#lift-date').value = todayISO();
+  let editingLiftId = null;
+
+  function setLiftEditMode(id) {
+    editingLiftId = id;
+    $('#lift-submit').textContent = id ? 'Save changes' : 'Add set';
+    $('#lift-cancel').hidden = !id;
+    liftForm.closest('.panel').classList.toggle('is-editing', !!id);
+  }
+
+  function startEditLift(l) {
+    liftForm.elements.date.value = l.date;
+    liftForm.elements.exercise.value = l.exercise;
+    liftForm.elements.weight.value = l.weight;
+    liftForm.elements.sets.value = l.sets;
+    liftForm.elements.reps.value = l.reps;
+    liftForm.elements.unit.value = l.unit;
+    liftForm.elements.notes.value = l.notes || '';
+    setLiftEditMode(l.id);
+    liftForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    liftForm.elements.exercise.focus();
+  }
+
+  $('#lift-cancel').addEventListener('click', () => {
+    liftForm.reset();
+    $('#lift-date').value = todayISO();
+    setLiftEditMode(null);
+  });
 
   liftForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -273,10 +324,15 @@
     };
     if (!entry.exercise || isNaN(entry.weight) || isNaN(entry.reps)) return;
     withSync(async () => {
-      await Store.addLift(entry);
+      if (editingLiftId) {
+        await Store.updateLift(editingLiftId, entry);
+      } else {
+        await Store.addLift(entry);
+      }
       liftForm.reset();
       $('#lift-date').value = todayISO();
       $('#lift-unit').value = entry.unit;
+      setLiftEditMode(null);
       renderLifting();
       renderDashboard();
     });
@@ -324,8 +380,13 @@
         <td>${l.sets} × ${l.reps}</td>
         <td>${fmtNum(est1RM(l.weight, l.reps))} ${l.unit}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
-        <td><button class="del-btn" title="Delete" aria-label="Delete">✕</button></td>`;
+        <td class="row-actions">
+          <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
+          <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
+        </td>`;
+      tr.querySelector('.edit-btn').addEventListener('click', () => startEditLift(l));
       tr.querySelector('.del-btn').addEventListener('click', () => {
+        if (editingLiftId === l.id) { liftForm.reset(); $('#lift-date').value = todayISO(); setLiftEditMode(null); }
         withSync(async () => {
           await Store.delLift(l.id);
           renderLifting(); renderDashboard();
@@ -389,6 +450,35 @@
   $('#climb-discipline').addEventListener('change', populateGradeSelect);
   populateGradeSelect();
 
+  let editingClimbId = null;
+
+  function setClimbEditMode(id) {
+    editingClimbId = id;
+    $('#climb-submit').textContent = id ? 'Save changes' : 'Add climb';
+    $('#climb-cancel').hidden = !id;
+    climbForm.closest('.panel').classList.toggle('is-editing', !!id);
+  }
+
+  function startEditClimb(c) {
+    climbForm.elements.date.value = c.date;
+    climbForm.elements.discipline.value = c.discipline;
+    populateGradeSelect();
+    climbForm.elements.grade.value = c.grade;
+    climbForm.elements.attempts.value = c.attempts;
+    climbForm.elements.result.value = c.result;
+    climbForm.elements.location.value = c.location || '';
+    climbForm.elements.notes.value = c.notes || '';
+    setClimbEditMode(c.id);
+    climbForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  $('#climb-cancel').addEventListener('click', () => {
+    climbForm.reset();
+    $('#climb-date').value = todayISO();
+    populateGradeSelect();
+    setClimbEditMode(null);
+  });
+
   climbForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const f = new FormData(climbForm);
@@ -402,12 +492,17 @@
       notes: (f.get('notes') || '').trim()
     };
     withSync(async () => {
-      await Store.addClimb(entry);
+      if (editingClimbId) {
+        await Store.updateClimb(editingClimbId, entry);
+      } else {
+        await Store.addClimb(entry);
+      }
       const keepDisc = entry.discipline;
       climbForm.reset();
       $('#climb-date').value = todayISO();
       $('#climb-discipline').value = keepDisc;
       populateGradeSelect();
+      setClimbEditMode(null);
       renderClimbing();
       renderDashboard();
     });
@@ -444,8 +539,13 @@
         <td>${c.attempts}</td>
         <td class="muted">${escapeHTML(c.location)}</td>
         <td class="muted">${escapeHTML(c.notes)}</td>
-        <td><button class="del-btn" title="Delete" aria-label="Delete">✕</button></td>`;
+        <td class="row-actions">
+          <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
+          <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
+        </td>`;
+      tr.querySelector('.edit-btn').addEventListener('click', () => startEditClimb(c));
       tr.querySelector('.del-btn').addEventListener('click', () => {
+        if (editingClimbId === c.id) { climbForm.reset(); $('#climb-date').value = todayISO(); populateGradeSelect(); setClimbEditMode(null); }
         withSync(async () => {
           await Store.delClimb(c.id);
           renderClimbing(); renderDashboard();

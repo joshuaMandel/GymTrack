@@ -171,8 +171,15 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .log-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .log-table tr:last-child td { border-bottom: 0; }
 .log-table .empty-row td { text-align: center; color: var(--muted); padding: 26px; }
-.del-btn { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
+.row-actions { white-space: nowrap; }
+.del-btn, .edit-btn { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
 .del-btn:hover { color: var(--danger); background: rgba(248, 113, 113, 0.1); }
+.edit-btn:hover { color: var(--accent); background: rgba(245, 165, 36, 0.1); }
+
+/* Form in edit mode */
+.panel.is-editing { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.12), var(--shadow); }
+.btn.cancel-edit { width: 100%; margin-top: 8px; background: transparent; }
+.btn.cancel-edit:hover { border-color: var(--danger); color: var(--danger); }
 
 .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.boulder { background: rgba(56, 189, 248, 0.15); color: var(--accent-2); }
