@@ -76,6 +76,8 @@ body {
 
 .view-head { margin-bottom: 20px; }
 .view-head h2 { margin: 0 0 4px; font-size: 24px; }
+.view-head.has-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.btn.add-btn { width: auto; margin-top: 0; white-space: nowrap; flex: none; }
 .muted { color: var(--muted); margin: 0; }
 .small { font-size: 12px; }
 
@@ -247,6 +249,10 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .edit-btn:hover { color: var(--accent); background: rgba(245, 165, 36, 0.1); }
 
 
+/* Follow-up sets of the same exercise in the same session */
+.log-table tr.grouped td { border-top: 0; padding-top: 7px; padding-bottom: 7px; }
+.set-cont { color: var(--muted); font-size: 12px; }
+
 .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.boulder { background: rgba(56, 189, 248, 0.15); color: var(--accent-2); }
 .badge.rope { background: rgba(52, 211, 153, 0.15); color: var(--good); }
@@ -361,6 +367,8 @@ body.auth-gated .footer { display: none !important; }
 .auth-status.ok { color: var(--good); }
 .auth-status.err { color: var(--danger); }
 .modal-signout { width: 100%; margin-top: 14px; }
+.btn.add-another { width: 100%; margin-top: 8px; background: transparent; }
+.btn.add-another:hover { border-color: var(--accent); color: var(--accent); }
 
 .sync-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

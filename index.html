@@ -80,9 +80,10 @@
           </select>
         </label>
         <label>Notes <span class="opt">(optional)</span>
-          <input type="text" name="notes" />
+          <input type="text" name="notes" placeholder="Felt strong, RPE 8…" />
         </label>
-        <button type="submit" class="btn primary">Save changes</button>
+        <button type="submit" class="btn primary" id="edit-lift-submit">Save changes</button>
+        <button type="button" class="btn add-another" id="lift-another" hidden>Save &amp; add another set</button>
       </form>
 
       <form id="edit-climb-form" autocomplete="off" hidden>
@@ -114,12 +115,13 @@
           </label>
         </div>
         <label>Location <span class="opt">(optional)</span>
-          <input type="text" name="location" />
+          <input type="text" name="location" placeholder="Gym / crag name" />
         </label>
         <label>Notes <span class="opt">(optional)</span>
-          <input type="text" name="notes" />
+          <input type="text" name="notes" placeholder="Crimpy crux, slab…" />
         </label>
-        <button type="submit" class="btn primary">Save changes</button>
+        <button type="submit" class="btn primary" id="edit-climb-submit">Save changes</button>
+        <button type="button" class="btn add-another" id="climb-another" hidden>Save &amp; add another climb</button>
       </form>
 
       <p class="auth-status" id="edit-status" role="status"></p>
@@ -219,61 +221,28 @@
 
     <!-- ===================== WEIGHTLIFTING ===================== -->
     <section class="view" id="view-lifting">
-      <div class="view-head">
-        <h2>Weightlifting</h2>
-        <p class="muted">Log your sets and watch your estimated 1-rep max climb.</p>
+      <div class="view-head has-action">
+        <div>
+          <h2>Weightlifting</h2>
+          <p class="muted">Track your lifting progress session by session.</p>
+        </div>
+        <button class="btn primary add-btn" id="lift-add-btn">＋ Log a set</button>
       </div>
 
-      <div class="two-col">
-        <form class="panel form" id="lift-form" autocomplete="off">
-          <h3>Log a set</h3>
-          <label>Date
-            <input type="date" name="date" id="lift-date" required />
-          </label>
-          <label>Exercise
-            <div class="suggest-wrap">
-              <input type="text" name="exercise" placeholder="e.g. Back Squat" required autocomplete="off" autocapitalize="words" data-suggest="exercise" />
-              <div class="suggest-panel" hidden></div>
-            </div>
-          </label>
-          <div class="row-3">
-            <label>Weight
-              <input type="number" name="weight" min="0" step="0.5" placeholder="0" required />
-            </label>
-            <label>Sets
-              <input type="number" name="sets" min="1" step="1" value="1" required />
-            </label>
-            <label>Reps
-              <input type="number" name="reps" min="1" step="1" placeholder="0" required />
-            </label>
-          </div>
-          <label>Units
-            <select name="unit" id="lift-unit">
-              <option value="lbs">lbs</option>
-              <option value="kg">kg</option>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Progress</h3>
+          <label class="inline-select">Metric
+            <select id="lift-chart-metric">
+              <option value="top">Top weight</option>
+              <option value="volume">Session volume</option>
+              <option value="reps">Total reps</option>
             </select>
           </label>
-          <label>Notes <span class="opt">(optional)</span>
-            <input type="text" name="notes" placeholder="Felt strong, RPE 8…" />
-          </label>
-          <button type="submit" class="btn primary" id="lift-submit">Add set</button>
-        </form>
-
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Progress</h3>
-            <label class="inline-select">Metric
-              <select id="lift-chart-metric">
-                <option value="top">Top weight</option>
-                <option value="volume">Session volume</option>
-                <option value="reps">Total reps</option>
-              </select>
-            </label>
-          </div>
-          <p class="muted small">Per-session progress for every exercise, over time.</p>
-          <div class="chart-wrap" id="lift-chart"></div>
-          <div class="pr-strip" id="lift-prs"></div>
         </div>
+        <p class="muted small">Per-session progress for every exercise, over time.</p>
+        <div class="chart-wrap" id="lift-chart"></div>
+        <div class="pr-strip" id="lift-prs"></div>
       </div>
 
       <div class="panel">
@@ -296,64 +265,27 @@
 
     <!-- ===================== ROCK CLIMBING ===================== -->
     <section class="view" id="view-climbing">
-      <div class="view-head">
-        <h2>Rock Climbing</h2>
-        <p class="muted">Track sends across bouldering and roped climbing.</p>
+      <div class="view-head has-action">
+        <div>
+          <h2>Rock Climbing</h2>
+          <p class="muted">Track sends across bouldering and roped climbing.</p>
+        </div>
+        <button class="btn primary add-btn" id="climb-add-btn">＋ Log a climb</button>
       </div>
 
-      <div class="two-col">
-        <form class="panel form" id="climb-form" autocomplete="off">
-          <h3>Log a climb</h3>
-          <label>Date
-            <input type="date" name="date" id="climb-date" required />
-          </label>
-          <label>Discipline
-            <select name="discipline" id="climb-discipline">
-              <option value="Bouldering">Bouldering</option>
-              <option value="Sport">Sport (lead)</option>
-              <option value="Top Rope">Top Rope</option>
-              <option value="Trad">Trad</option>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Progress</h3>
+          <label class="inline-select">Metric
+            <select id="climb-chart-metric">
+              <option value="hardest">Hardest send</option>
+              <option value="sends">Sends per session</option>
             </select>
           </label>
-          <label>Grade
-            <select name="grade" id="climb-grade"></select>
-          </label>
-          <div class="row-2">
-            <label>Attempts
-              <input type="number" name="attempts" min="1" step="1" value="1" required />
-            </label>
-            <label>Result
-              <select name="result">
-                <option value="Send">Send</option>
-                <option value="Flash">Flash</option>
-                <option value="Onsight">Onsight</option>
-                <option value="Project">Project (no send)</option>
-              </select>
-            </label>
-          </div>
-          <label>Location <span class="opt">(optional)</span>
-            <input type="text" name="location" placeholder="Gym / crag name" />
-          </label>
-          <label>Notes <span class="opt">(optional)</span>
-            <input type="text" name="notes" placeholder="Crimpy crux, slab…" />
-          </label>
-          <button type="submit" class="btn primary" id="climb-submit">Add climb</button>
-        </form>
-
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Progress</h3>
-            <label class="inline-select">Metric
-              <select id="climb-chart-metric">
-                <option value="hardest">Hardest send</option>
-                <option value="sends">Sends per session</option>
-              </select>
-            </label>
-          </div>
-          <p class="muted small">Progress across every discipline, over time.</p>
-          <div class="chart-wrap" id="climb-chart"></div>
-          <div class="pr-strip" id="climb-prs"></div>
         </div>
+        <p class="muted small">Progress across every discipline, over time.</p>
+        <div class="chart-wrap" id="climb-chart"></div>
+        <div class="pr-strip" id="climb-prs"></div>
       </div>
 
       <div class="panel">
