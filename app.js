@@ -459,14 +459,20 @@
     });
   }
 
+  // '30'/'60'/'90' -> cutoff ISO date; 'all' -> null (no cutoff)
+  function rangeCutoff(sel) {
+    const v = $(sel).value;
+    return v === 'all' ? null : daysAgoISO(parseInt(v, 10));
+  }
+
   // Per-exercise, per-session series for the selected metric.
   // metric: 'top' (heaviest weight), 'volume' (weight×sets×reps), 'reps' (sets×reps)
   // Exercises are grouped case-insensitively (see exKey).
-  function liftSeries(metric) {
+  function liftSeries(metric, lifts) {
     const unit = dominantUnit();
     const display = exerciseDisplayMap();
     const byEx = {};
-    state.lifts.forEach((l) => {
+    lifts.forEach((l) => {
       const w = toUnit(l.weight, l.unit, unit);
       const k = exKey(l.exercise);
       const ex = (byEx[k] = byEx[k] || {});
@@ -483,28 +489,31 @@
 
   function renderLiftChart() {
     const metric = $('#lift-chart-metric').value;
+    const cutoff = rangeCutoff('#lift-range');
     const prStrip = $('#lift-prs');
     const wrap = $('#lift-chart');
     const unit = dominantUnit();
 
-    if (!state.lifts.length) {
-      wrap.innerHTML = '<div class="chart-empty">Log a set to see progress.</div>';
+    const lifts = cutoff ? state.lifts.filter((l) => l.date >= cutoff) : state.lifts;
+    if (!lifts.length) {
+      wrap.innerHTML = `<div class="chart-empty">${state.lifts.length ? 'No sets in this range.' : 'Log a set to see progress.'}</div>`;
       prStrip.innerHTML = '';
       return;
     }
 
     const fmt = metric === 'reps' ? (v) => fmtNum(Math.round(v)) : (v) => `${fmtCompact(v)} ${unit}`;
-    drawChart(wrap, liftSeries(metric), fmt);
+    drawChart(wrap, liftSeries(metric, lifts), fmt);
 
-    // PR chips (all-time, across every exercise)
+    // PR chips for the selected range
+    const suffix = cutoff ? '' : ' (all-time)';
     const display = exerciseDisplayMap();
     let heaviest = null;
-    state.lifts.forEach((l) => {
+    lifts.forEach((l) => {
       const w = toUnit(l.weight, l.unit, unit);
       if (!heaviest || w > heaviest.w) heaviest = { w, exercise: display[exKey(l.exercise)] || l.exercise };
     });
     const volByDate = {};
-    state.lifts.forEach((l) => {
+    lifts.forEach((l) => {
       volByDate[l.date] = (volByDate[l.date] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
     });
     const bestSession = Math.max(...Object.values(volByDate));
@@ -512,11 +521,12 @@
     prStrip.innerHTML = `
       <span class="pr-chip">Heaviest lift <b>${fmtNum(heaviest.w)} ${unit}</b> (${escapeHTML(heaviest.exercise)})</span>
       <span class="pr-chip">Best session volume <b>${fmtCompact(bestSession)} ${unit}</b></span>
-      <span class="pr-chip">All-time volume <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
+      <span class="pr-chip">Total volume${suffix} <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
   }
 
   $('#lift-filter').addEventListener('change', renderLiftTable);
   $('#lift-chart-metric').addEventListener('change', renderLiftChart);
+  $('#lift-range').addEventListener('change', renderLiftChart);
 
   /* ======================================================================
      Rock climbing
@@ -571,10 +581,10 @@
   const ROPE_DISCIPLINES = ['Sport', 'Top Rope', 'Trad'];
 
   // Hardest grade sent per session for one discipline (values are grade ranks).
-  function hardestSeries(discipline) {
+  function hardestSeries(discipline, sends) {
     const byDate = {};
-    state.climbs
-      .filter((c) => c.discipline === discipline && isSend(c.result))
+    sends
+      .filter((c) => c.discipline === discipline)
       .forEach((c) => {
         const r = gradeRank(discipline, c.grade);
         if (byDate[c.date] === undefined || r > byDate[c.date]) byDate[c.date] = r;
@@ -586,10 +596,10 @@
   }
 
   // Sends per session for one discipline.
-  function sendsSeries(discipline) {
+  function sendsSeries(discipline, sends) {
     const byDate = {};
-    state.climbs
-      .filter((c) => c.discipline === discipline && isSend(c.result))
+    sends
+      .filter((c) => c.discipline === discipline)
       .forEach((c) => { byDate[c.date] = (byDate[c.date] || 0) + 1; });
     return {
       label: discipline,
@@ -599,24 +609,25 @@
 
   function renderClimbChart() {
     const metric = $('#climb-chart-metric').value;
+    const cutoff = rangeCutoff('#climb-range');
     const wrap = $('#climb-chart');
     const prStrip = $('#climb-prs');
 
-    const sends = state.climbs.filter((c) => isSend(c.result));
+    const sends = state.climbs.filter((c) => isSend(c.result) && (!cutoff || c.date >= cutoff));
     if (!sends.length) {
-      wrap.innerHTML = '<div class="chart-empty">Log a send to see progress.</div>';
+      wrap.innerHTML = `<div class="chart-empty">${state.climbs.length ? 'No sends in this range.' : 'Log a send to see progress.'}</div>`;
       prStrip.innerHTML = '';
       return;
     }
 
     if (metric === 'sends') {
-      drawChart(wrap, ALL_DISCIPLINES.map(sendsSeries), (v) => fmtNum(Math.round(v)));
+      drawChart(wrap, ALL_DISCIPLINES.map((d) => sendsSeries(d, sends)), (v) => fmtNum(Math.round(v)));
     } else {
       // Hardest sends: bouldering (V scale) and ropes (YDS) use different
       // scales, so each gets its own chart and axis.
       wrap.innerHTML = '';
-      const boulder = hardestSeries('Bouldering');
-      const ropes = ROPE_DISCIPLINES.map(hardestSeries).filter((s) => s.points.length);
+      const boulder = hardestSeries('Bouldering', sends);
+      const ropes = ROPE_DISCIPLINES.map((d) => hardestSeries(d, sends)).filter((s) => s.points.length);
       if (boulder.points.length) {
         const t = document.createElement('p');
         t.className = 'subchart-title';
@@ -653,6 +664,7 @@
 
   $('#climb-filter').addEventListener('change', renderClimbTable);
   $('#climb-chart-metric').addEventListener('change', renderClimbChart);
+  $('#climb-range').addEventListener('change', renderClimbChart);
 
   /* ======================================================================
      Entry modal — used both to log new sets/climbs and to edit existing ones.
@@ -821,53 +833,56 @@
   /* ======================================================================
      Dashboard
      ====================================================================== */
-  // "▲ 12% vs prior 30 days" — trend annotation under a stat value
-  function setDelta(sel, cur, prev) {
+  // "▲ 12% vs prior 30d" — trend annotation under a stat value
+  function setDelta(sel, cur, prev, rangeDays) {
     const el = $(sel);
     el.classList.remove('up', 'down');
     if (!cur && !prev) { el.textContent = ''; return; }
     if (!prev) { el.textContent = 'new this period'; el.classList.add('up'); return; }
     const diff = cur - prev;
-    if (diff === 0) { el.textContent = 'same as prior 30d'; return; }
+    if (diff === 0) { el.textContent = `same as prior ${rangeDays}d`; return; }
     const pct = Math.round(Math.abs(diff) / prev * 100);
-    el.textContent = `${diff > 0 ? '▲' : '▼'} ${pct}% vs prior 30d`;
+    el.textContent = `${diff > 0 ? '▲' : '▼'} ${pct}% vs prior ${rangeDays}d`;
     el.classList.add(diff > 0 ? 'up' : 'down');
   }
 
   function renderDashboard() {
     const unit = dominantUnit();
-    const cut30 = daysAgoISO(30);
-    const cut60 = daysAgoISO(60);
-    const inLast30 = (x) => x.date >= cut30;
-    const inPrev30 = (x) => x.date >= cut60 && x.date < cut30;
+    const R = parseInt($('#dash-range').value, 10) || 30;
+    const cutCur = daysAgoISO(R);
+    const cutPrev = daysAgoISO(R * 2);
+    const inCurrent = (x) => x.date >= cutCur;
+    const inPrevious = (x) => x.date >= cutPrev && x.date < cutCur;
+    $$('.stat-label .rng').forEach((el) => { el.textContent = `${R}d`; });
 
-    // Lifting: sessions + volume, last 30 days vs the 30 before
+    // Lifting: sessions + volume, last R days vs the R before
     const liftVol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
     const liftSess = (rows) => new Set(rows.map((l) => l.date)).size;
-    const lifts30 = state.lifts.filter(inLast30);
-    const liftsPrev = state.lifts.filter(inPrev30);
+    const liftsCur = state.lifts.filter(inCurrent);
+    const liftsPrev = state.lifts.filter(inPrevious);
 
-    $('#dash-lift-sessions').textContent = liftSess(lifts30);
-    setDelta('#dash-lift-sessions-delta', liftSess(lifts30), liftSess(liftsPrev));
-    $('#dash-lift-volume').textContent = fmtCompact(liftVol(lifts30));
+    $('#dash-lift-sessions').textContent = liftSess(liftsCur);
+    setDelta('#dash-lift-sessions-delta', liftSess(liftsCur), liftSess(liftsPrev), R);
+    $('#dash-lift-volume').textContent = fmtCompact(liftVol(liftsCur));
     $('#dash-lift-volume-unit').textContent = unit + ' moved';
-    setDelta('#dash-lift-volume-delta', Math.round(liftVol(lifts30)), Math.round(liftVol(liftsPrev)));
+    setDelta('#dash-lift-volume-delta', Math.round(liftVol(liftsCur)), Math.round(liftVol(liftsPrev)), R);
 
     // Climbing: sessions + sends
     const climbSess = (rows) => new Set(rows.map((c) => c.date)).size;
     const sendCount = (rows) => rows.filter((c) => isSend(c.result)).length;
-    const climbs30 = state.climbs.filter(inLast30);
-    const climbsPrev = state.climbs.filter(inPrev30);
+    const climbsCur = state.climbs.filter(inCurrent);
+    const climbsPrev = state.climbs.filter(inPrevious);
 
-    $('#dash-climb-sessions').textContent = climbSess(climbs30);
-    setDelta('#dash-climb-sessions-delta', climbSess(climbs30), climbSess(climbsPrev));
-    $('#dash-climb-sends').textContent = sendCount(climbs30);
-    setDelta('#dash-climb-sends-delta', sendCount(climbs30), sendCount(climbsPrev));
+    $('#dash-climb-sessions').textContent = climbSess(climbsCur);
+    setDelta('#dash-climb-sessions-delta', climbSess(climbsCur), climbSess(climbsPrev), R);
+    $('#dash-climb-sends').textContent = sendCount(climbsCur);
+    setDelta('#dash-climb-sends-delta', sendCount(climbsCur), sendCount(climbsPrev), R);
 
-    // Weekly trend charts (last 12 weeks, empty weeks shown as zero)
+    // Weekly trend charts spanning the selected range (empty weeks shown as zero)
+    const nWeeks = Math.ceil(R / 7) + 1;
     const weeks = [];
-    const start = weekStart(daysAgoISO(7 * 11));
-    for (let i = 0; i < 12; i++) {
+    const start = weekStart(daysAgoISO(7 * (nWeeks - 1)));
+    for (let i = 0; i < nWeeks; i++) {
       const d = new Date(start + 'T00:00:00');
       d.setDate(d.getDate() + i * 7);
       weeks.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
@@ -910,6 +925,8 @@
       date: c.date
     }), 'No climbing logged yet.');
   }
+
+  $('#dash-range').addEventListener('change', renderDashboard);
 
   function renderFeed(sel, items, mapFn, emptyMsg) {
     const el = $(sel);

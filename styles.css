@@ -136,8 +136,9 @@ body {
   margin-bottom: 18px;
 }
 .panel h3 { margin: 0 0 14px; font-size: 16px; }
-.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 .panel-head h3 { margin: 0; }
+.panel-controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ---------- Stats ---------- */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }

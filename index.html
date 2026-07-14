@@ -165,30 +165,39 @@
 
     <!-- ===================== DASHBOARD ===================== -->
     <section class="view is-active" id="view-dashboard">
-      <div class="view-head">
-        <h2>Dashboard</h2>
-        <p class="muted">Your training over the last 30 days, and how it compares to the 30 before.</p>
+      <div class="view-head has-action">
+        <div>
+          <h2>Dashboard</h2>
+          <p class="muted">Your training over the selected period, compared to the period before it.</p>
+        </div>
+        <label class="inline-select">Range
+          <select id="dash-range">
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </label>
       </div>
 
       <div class="stat-grid">
         <div class="stat-card">
-          <span class="stat-label">Lifting sessions · 30d</span>
+          <span class="stat-label">Lifting sessions · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-lift-sessions">0</span>
           <span class="stat-sub" id="dash-lift-sessions-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Volume lifted · 30d</span>
+          <span class="stat-label">Volume lifted · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-lift-volume">0</span>
           <span class="stat-sub" id="dash-lift-volume-unit"></span>
           <span class="stat-sub" id="dash-lift-volume-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Climbing sessions · 30d</span>
+          <span class="stat-label">Climbing sessions · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-climb-sessions">0</span>
           <span class="stat-sub" id="dash-climb-sessions-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Sends · 30d</span>
+          <span class="stat-label">Sends · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-climb-sends">0</span>
           <span class="stat-sub" id="dash-climb-sends-delta"></span>
         </div>
@@ -197,12 +206,12 @@
       <div class="two-col">
         <div class="panel">
           <h3>Lifting volume by week</h3>
-          <p class="muted small">Total weight moved per week, last 12 weeks.</p>
+          <p class="muted small">Total weight moved per week over the selected range.</p>
           <div class="chart-wrap" id="dash-lift-chart"></div>
         </div>
         <div class="panel">
           <h3>Climbing sends by week</h3>
-          <p class="muted small">Sends per week by discipline, last 12 weeks.</p>
+          <p class="muted small">Sends per week by discipline over the selected range.</p>
           <div class="chart-wrap" id="dash-climb-chart"></div>
         </div>
       </div>
@@ -232,13 +241,23 @@
       <div class="panel">
         <div class="panel-head">
           <h3>Progress</h3>
-          <label class="inline-select">Metric
-            <select id="lift-chart-metric">
-              <option value="top">Top weight</option>
-              <option value="volume">Session volume</option>
-              <option value="reps">Total reps</option>
-            </select>
-          </label>
+          <div class="panel-controls">
+            <label class="inline-select">Metric
+              <select id="lift-chart-metric">
+                <option value="top">Top weight</option>
+                <option value="volume">Session volume</option>
+                <option value="reps">Total reps</option>
+              </select>
+            </label>
+            <label class="inline-select">Range
+              <select id="lift-range">
+                <option value="all">All time</option>
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </label>
+          </div>
         </div>
         <p class="muted small">Per-session progress for every exercise, over time.</p>
         <div class="chart-wrap" id="lift-chart"></div>
@@ -276,12 +295,22 @@
       <div class="panel">
         <div class="panel-head">
           <h3>Progress</h3>
-          <label class="inline-select">Metric
-            <select id="climb-chart-metric">
-              <option value="hardest">Hardest send</option>
-              <option value="sends">Sends per session</option>
-            </select>
-          </label>
+          <div class="panel-controls">
+            <label class="inline-select">Metric
+              <select id="climb-chart-metric">
+                <option value="hardest">Hardest send</option>
+                <option value="sends">Sends per session</option>
+              </select>
+            </label>
+            <label class="inline-select">Range
+              <select id="climb-range">
+                <option value="all">All time</option>
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </label>
+          </div>
         </div>
         <p class="muted small">Progress across every discipline, over time.</p>
         <div class="chart-wrap" id="climb-chart"></div>
