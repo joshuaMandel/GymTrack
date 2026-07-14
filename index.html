@@ -23,28 +23,43 @@
       <span class="brand-mark">🏋️</span>
       <h1>GymTrack</h1>
     </div>
-    <div class="account" id="account" hidden></div>
+    <div class="topbar-right">
+      <div class="streak-pill" id="streak-pill" title="Consecutive weeks with at least one session" hidden>🔥 <b id="streak-count">0</b></div>
+      <div class="account" id="account" hidden></div>
+    </div>
   </header>
   <nav class="tabs-bar" aria-label="Trackers">
     <div class="tabs" role="tablist">
-      <button class="tab is-active" role="tab" data-view="dashboard">Dashboard</button>
+      <button class="tab is-active" role="tab" data-view="dashboard">Home</button>
       <button class="tab" role="tab" data-view="lifting">Weightlifting</button>
       <button class="tab" role="tab" data-view="climbing">Rock Climbing</button>
     </div>
   </nav>
 
-  <!-- Mobile bottom navigation (shown instead of the top tab bar on small screens) -->
-  <nav class="bottom-nav" aria-label="Trackers">
-    <button class="bnav-btn is-active" data-view="dashboard">
-      <span class="bnav-ico" aria-hidden="true">📊</span><span>Dashboard</span>
-    </button>
-    <button class="bnav-btn" data-view="lifting">
-      <span class="bnav-ico" aria-hidden="true">🏋️</span><span>Lifting</span>
-    </button>
-    <button class="bnav-btn" data-view="climbing">
-      <span class="bnav-ico" aria-hidden="true">🧗</span><span>Climbing</span>
-    </button>
-  </nav>
+  <!-- Bottom dock: mobile nav pill + global log button -->
+  <div class="bottom-dock">
+    <nav class="bottom-nav" aria-label="Trackers">
+      <button class="bnav-btn is-active" data-view="dashboard">
+        <span class="bnav-ico" aria-hidden="true">🏠</span><span>Home</span>
+      </button>
+      <button class="bnav-btn" data-view="lifting">
+        <span class="bnav-ico" aria-hidden="true">🏋️</span><span>Lifting</span>
+      </button>
+      <button class="bnav-btn" data-view="climbing">
+        <span class="bnav-ico" aria-hidden="true">🧗</span><span>Climbing</span>
+      </button>
+      <button class="bnav-btn" id="nav-profile" hidden>
+        <span class="bnav-ico" aria-hidden="true">👤</span><span>Profile</span>
+      </button>
+    </nav>
+    <div class="fab-wrap">
+      <div class="fab-menu" id="fab-menu" hidden>
+        <button class="fab-item" id="fab-lift">🏋️ Log a set</button>
+        <button class="fab-item" id="fab-climb">🧗 Log a climb</button>
+      </div>
+      <button class="fab" id="fab" aria-label="Log an entry">＋</button>
+    </div>
+  </div>
 
   <!-- Edit-entry modal -->
   <div class="modal-overlay" id="edit-modal" hidden>
@@ -163,12 +178,49 @@
       </div>
     </div>
 
-    <!-- ===================== DASHBOARD ===================== -->
+    <!-- ===================== HOME ===================== -->
     <section class="view is-active" id="view-dashboard">
-      <div class="view-head has-action">
+      <!-- Last 7 days -->
+      <div class="week-strip" id="week-strip"></div>
+
+      <!-- This week hero -->
+      <div class="panel hero-card">
         <div>
-          <h2>Dashboard</h2>
-          <p class="muted">Your training over the selected period, compared to the period before it.</p>
+          <span class="hero-value" id="hero-sessions">0</span>
+          <span class="hero-label">Sessions this week</span>
+        </div>
+        <div class="hero-ring" id="hero-ring"><span class="hero-ico">🏋️</span></div>
+      </div>
+
+      <div class="mini-grid">
+        <div class="mini-card">
+          <span class="mini-value" id="mini-volume">0</span>
+          <span class="mini-label">Volume this week</span>
+          <div class="mini-ring">🏋️</div>
+        </div>
+        <div class="mini-card">
+          <span class="mini-value" id="mini-sends">0</span>
+          <span class="mini-label">Sends this week</span>
+          <div class="mini-ring">🧗</div>
+        </div>
+        <div class="mini-card">
+          <span class="mini-value" id="mini-top">—</span>
+          <span class="mini-label">Top lift this week</span>
+          <div class="mini-ring">🔥</div>
+        </div>
+      </div>
+
+      <!-- Recent activity -->
+      <h3 class="section-title">Recent activity</h3>
+      <div class="panel">
+        <ul class="feed" id="recent-feed"><li class="empty">Tap ＋ to log your first set or climb.</li></ul>
+      </div>
+
+      <!-- Trends -->
+      <div class="view-head has-action" style="margin-top: 26px;">
+        <div>
+          <h3 class="section-title" style="margin: 0 0 4px;">Trends</h3>
+          <p class="muted small">The selected period, compared to the period before it.</p>
         </div>
         <label class="inline-select">Range
           <select id="dash-range">
@@ -216,26 +268,13 @@
         </div>
       </div>
 
-      <div class="two-col">
-        <div class="panel">
-          <h3>Recent weightlifting</h3>
-          <ul class="feed" id="dash-lift-feed"><li class="empty">No lifting logged yet.</li></ul>
-        </div>
-        <div class="panel">
-          <h3>Recent climbing</h3>
-          <ul class="feed" id="dash-climb-feed"><li class="empty">No climbing logged yet.</li></ul>
-        </div>
-      </div>
     </section>
 
     <!-- ===================== WEIGHTLIFTING ===================== -->
     <section class="view" id="view-lifting">
-      <div class="view-head has-action">
-        <div>
-          <h2>Weightlifting</h2>
-          <p class="muted">Track your lifting progress session by session.</p>
-        </div>
-        <button class="btn primary add-btn" id="lift-add-btn">＋ Log a set</button>
+      <div class="view-head">
+        <h2>Weightlifting</h2>
+        <p class="muted">Track your lifting progress session by session.</p>
       </div>
 
       <div class="panel">
@@ -284,12 +323,9 @@
 
     <!-- ===================== ROCK CLIMBING ===================== -->
     <section class="view" id="view-climbing">
-      <div class="view-head has-action">
-        <div>
-          <h2>Rock Climbing</h2>
-          <p class="muted">Track sends across bouldering and roped climbing.</p>
-        </div>
-        <button class="btn primary add-btn" id="climb-add-btn">＋ Log a climb</button>
+      <div class="view-head">
+        <h2>Rock Climbing</h2>
+        <p class="muted">Track sends across bouldering and roped climbing.</p>
       </div>
 
       <div class="panel">

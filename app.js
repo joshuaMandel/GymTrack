@@ -274,15 +274,28 @@
      Tabs
      ====================================================================== */
   // Top tab bar and mobile bottom nav both switch views; keep them in sync.
-  $$('.tab, .bnav-btn').forEach((btn) => {
+  // (Profile in the bottom nav has no data-view — it opens a modal instead.)
+  $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
-      $$('.tab, .bnav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
+      $$('.tab[data-view], .bnav-btn[data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
       $$('.view').forEach((v) => v.classList.remove('is-active'));
       $('#view-' + view).classList.add('is-active');
       window.scrollTo(0, 0); // each page opens from its top
     });
   });
+
+  /* ----- Floating "+" button: log a set or a climb from anywhere ----- */
+  const fabMenu = $('#fab-menu');
+  $('#fab').addEventListener('click', (e) => {
+    e.stopPropagation();
+    fabMenu.hidden = !fabMenu.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!fabMenu.hidden && !e.target.closest('.fab-wrap')) fabMenu.hidden = true;
+  });
+  $('#fab-lift').addEventListener('click', () => { fabMenu.hidden = true; openAddLift(); });
+  $('#fab-climb').addEventListener('click', () => { fabMenu.hidden = true; openAddClimb(); });
 
   /* ======================================================================
      Weightlifting
@@ -763,7 +776,6 @@
 
   editLiftForm.addEventListener('submit', (e) => { e.preventDefault(); saveLift(false); });
   $('#lift-another').addEventListener('click', () => saveLift(true));
-  $('#lift-add-btn').addEventListener('click', openAddLift);
 
   /* ----- Climbs ----- */
   function openAddClimb() {
@@ -828,7 +840,6 @@
 
   editClimbForm.addEventListener('submit', (e) => { e.preventDefault(); saveClimb(false); });
   $('#climb-another').addEventListener('click', () => saveClimb(true));
-  $('#climb-add-btn').addEventListener('click', openAddClimb);
 
   /* ======================================================================
      Dashboard
@@ -912,25 +923,92 @@
     });
     drawChart($('#dash-climb-chart'), sendSeries, (v) => fmtNum(Math.round(v)));
 
-    // Recent activity feeds
-    renderFeed('#dash-lift-feed', state.lifts, (l) => ({
-      main: l.exercise,
-      sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
-      date: l.date
-    }), 'No lifting logged yet.');
-
-    renderFeed('#dash-climb-feed', state.climbs, (c) => ({
-      main: `${c.grade} · ${c.discipline}`,
-      sub: `${c.result}${c.location ? ' · ' + c.location : ''}`,
-      date: c.date
-    }), 'No climbing logged yet.');
+    // Home top section: week strip, hero, mini cards, streak, recent feed
+    renderHome();
   }
 
   $('#dash-range').addEventListener('change', renderDashboard);
 
+  function renderHome() {
+    const unit = dominantUnit();
+    const display = exerciseDisplayMap();
+    const activeDates = new Set([...state.lifts, ...state.climbs].map((x) => x.date));
+
+    // ----- Week strip: last 7 days ending today -----
+    const strip = $('#week-strip');
+    const todayIso = todayISO();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      days.push({
+        iso,
+        dow: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        num: d.getDate()
+      });
+    }
+    strip.innerHTML = days.map((d) => `
+      <div class="day${activeDates.has(d.iso) ? ' active' : ''}${d.iso === todayIso ? ' today' : ''}" title="${d.iso}">
+        <span class="dow">${d.dow}</span>
+        <span class="dnum">${d.num}</span>
+      </div>`).join('');
+
+    // ----- This week (since Monday) -----
+    const wkStart = weekStart(todayIso);
+    const liftsWk = state.lifts.filter((l) => l.date >= wkStart);
+    const climbsWk = state.climbs.filter((c) => c.date >= wkStart);
+    const sessionDates = new Set([...liftsWk, ...climbsWk].map((x) => x.date));
+
+    $('#hero-sessions').textContent = sessionDates.size;
+    const pct = Math.min(100, Math.round(sessionDates.size / 7 * 100));
+    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #eef0f4 0)`;
+
+    const volWk = liftsWk.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
+    $('#mini-volume').textContent = volWk ? `${fmtCompact(volWk)} ${unit}` : '0';
+    $('#mini-sends').textContent = climbsWk.filter((c) => isSend(c.result)).length;
+    const topWk = liftsWk.length ? Math.max(...liftsWk.map((l) => toUnit(l.weight, l.unit, unit))) : 0;
+    $('#mini-top').textContent = topWk ? `${fmtNum(topWk)} ${unit}` : '—';
+
+    // ----- Weekly streak: consecutive weeks (ending now) with ≥1 session -----
+    const weekSet = new Set([...activeDates].map(weekStart));
+    let streak = 0;
+    let cursor = weekStart(todayIso);
+    if (!weekSet.has(cursor)) { // grace: a quiet Monday doesn't break the streak
+      const prev = new Date(cursor + 'T00:00:00');
+      prev.setDate(prev.getDate() - 7);
+      cursor = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+    }
+    while (weekSet.has(cursor)) {
+      streak++;
+      const prev = new Date(cursor + 'T00:00:00');
+      prev.setDate(prev.getDate() - 7);
+      cursor = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+    }
+    $('#streak-count').textContent = streak;
+    $('#streak-pill').hidden = false;
+
+    // ----- Recent activity: lifts + climbs merged -----
+    const items = [
+      ...state.lifts.map((l) => ({
+        icon: '🏋️',
+        main: display[exKey(l.exercise)] || l.exercise,
+        sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
+        date: l.date
+      })),
+      ...state.climbs.map((c) => ({
+        icon: '🧗',
+        main: `${c.grade} · ${c.discipline}`,
+        sub: `${c.result}${c.location ? ' · ' + c.location : ''}`,
+        date: c.date
+      }))
+    ];
+    renderFeed('#recent-feed', items, (m) => m, 'Tap ＋ to log your first set or climb.');
+  }
+
   function renderFeed(sel, items, mapFn, emptyMsg) {
     const el = $(sel);
-    const rows = items.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 5);
+    const rows = items.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 6);
     if (!rows.length) {
       el.innerHTML = `<li class="empty">${emptyMsg}</li>`;
       return;
@@ -938,9 +1016,12 @@
     el.innerHTML = rows.map((it) => {
       const m = mapFn(it);
       return `<li>
-        <div>
-          <div class="feed-main">${escapeHTML(m.main)}</div>
-          <div class="feed-sub">${escapeHTML(m.sub)}</div>
+        <div class="feed-left">
+          ${m.icon ? `<span class="feed-ico">${m.icon}</span>` : ''}
+          <div>
+            <div class="feed-main">${escapeHTML(m.main)}</div>
+            <div class="feed-sub">${escapeHTML(m.sub)}</div>
+          </div>
         </div>
         <div class="feed-date">${fmtDateShort(m.date)}</div>
       </li>`;
@@ -1144,7 +1225,9 @@
   }
 
   function renderAccount() {
-    if (!CONFIGURED || !session) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
+    const signedIn = CONFIGURED && !!session;
+    $('#nav-profile').hidden = !signedIn; // mobile bottom-nav Profile
+    if (!signedIn) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
     const label = currentDisplayName() || session.user.email || 'Account';
     // Compact chip: name opens the profile modal (edit name / sign out).
@@ -1153,6 +1236,8 @@
       <button class="acct-name" id="profile-btn" title="Account">${escapeHTML(label)} <span class="edit-ico">✎</span></button>`;
     $('#profile-btn').addEventListener('click', () => openProfile(false));
   }
+
+  $('#nav-profile').addEventListener('click', () => { if (CONFIGURED && session) openProfile(false); });
 
   // ----- Edit-name modal -----
   function openProfile(onboarding) {
