@@ -149,26 +149,43 @@
     <section class="view is-active" id="view-dashboard">
       <div class="view-head">
         <h2>Dashboard</h2>
-        <p class="muted">A snapshot of everything you've logged.</p>
+        <p class="muted">Your training over the last 30 days, and how it compares to the 30 before.</p>
       </div>
 
       <div class="stat-grid">
         <div class="stat-card">
-          <span class="stat-label">Lifting sessions</span>
+          <span class="stat-label">Lifting sessions · 30d</span>
           <span class="stat-value" id="dash-lift-sessions">0</span>
+          <span class="stat-sub" id="dash-lift-sessions-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Total volume lifted</span>
+          <span class="stat-label">Volume lifted · 30d</span>
           <span class="stat-value" id="dash-lift-volume">0</span>
           <span class="stat-sub" id="dash-lift-volume-unit"></span>
+          <span class="stat-sub" id="dash-lift-volume-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Climbing sessions</span>
+          <span class="stat-label">Climbing sessions · 30d</span>
           <span class="stat-value" id="dash-climb-sessions">0</span>
+          <span class="stat-sub" id="dash-climb-sessions-delta"></span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Total sends</span>
+          <span class="stat-label">Sends · 30d</span>
           <span class="stat-value" id="dash-climb-sends">0</span>
+          <span class="stat-sub" id="dash-climb-sends-delta"></span>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <h3>Lifting volume by week</h3>
+          <p class="muted small">Total weight moved per week, last 12 weeks.</p>
+          <div class="chart-wrap" id="dash-lift-chart"></div>
+        </div>
+        <div class="panel">
+          <h3>Climbing sends by week</h3>
+          <p class="muted small">Sends per week by discipline, last 12 weeks.</p>
+          <div class="chart-wrap" id="dash-climb-chart"></div>
         </div>
       </div>
 
@@ -235,11 +252,15 @@
         <div class="panel">
           <div class="panel-head">
             <h3>Progress</h3>
-            <label class="inline-select">Exercise
-              <select id="lift-chart-exercise"></select>
+            <label class="inline-select">Metric
+              <select id="lift-chart-metric">
+                <option value="top">Top weight</option>
+                <option value="volume">Session volume</option>
+                <option value="reps">Total reps</option>
+              </select>
             </label>
           </div>
-          <p class="muted small">Estimated 1-rep max over time (Epley formula).</p>
+          <p class="muted small">Per-session progress for every exercise, over time.</p>
           <div class="chart-wrap" id="lift-chart"></div>
           <div class="pr-strip" id="lift-prs"></div>
         </div>
@@ -255,7 +276,7 @@
         <div class="table-wrap">
           <table class="log-table" id="lift-table">
             <thead>
-              <tr><th>Date</th><th>Exercise</th><th>Weight</th><th>Sets×Reps</th><th>Est. 1RM</th><th>Notes</th><th></th></tr>
+              <tr><th>Date</th><th>Exercise</th><th>Weight</th><th>Sets×Reps</th><th>Notes</th><th></th></tr>
             </thead>
             <tbody></tbody>
           </table>
@@ -312,16 +333,14 @@
         <div class="panel">
           <div class="panel-head">
             <h3>Progress</h3>
-            <label class="inline-select">Discipline
-              <select id="climb-chart-discipline">
-                <option value="Bouldering">Bouldering</option>
-                <option value="Sport">Sport (lead)</option>
-                <option value="Top Rope">Top Rope</option>
-                <option value="Trad">Trad</option>
+            <label class="inline-select">Metric
+              <select id="climb-chart-metric">
+                <option value="hardest">Hardest send</option>
+                <option value="sends">Sends per session</option>
               </select>
             </label>
           </div>
-          <p class="muted small">Hardest grade sent over time.</p>
+          <p class="muted small">Progress across every discipline, over time.</p>
           <div class="chart-wrap" id="climb-chart"></div>
           <div class="pr-strip" id="climb-prs"></div>
         </div>

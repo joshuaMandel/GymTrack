@@ -228,8 +228,6 @@
     const d = new Date(iso + 'T00:00:00');
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
-  function est1RM(weight, reps) { return reps <= 1 ? weight : weight * (1 + reps / 30); }
-
   function escapeHTML(str) {
     return String(str || '').replace(/[&<>"']/g, (c) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -311,9 +309,7 @@
   }
 
   function renderLifting() {
-    const exercises = liftExercises();
-    syncSelect('#lift-filter', exercises, true);
-    syncSelect('#lift-chart-exercise', exercises, false);
+    syncSelect('#lift-filter', liftExercises(), true);
     renderLiftTable();
     renderLiftChart();
   }
@@ -336,7 +332,7 @@
 
     tbody.innerHTML = '';
     if (!rows.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No sets logged yet.</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No sets logged yet.</td></tr>';
       return;
     }
     rows.forEach((l) => {
@@ -346,7 +342,6 @@
         <td>${escapeHTML(l.exercise)}</td>
         <td>${fmtNum(l.weight)} ${l.unit}</td>
         <td>${l.sets} × ${l.reps}</td>
-        <td>${fmtNum(est1RM(l.weight, l.reps))} ${l.unit}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td class="row-actions">
           <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
@@ -363,42 +358,60 @@
     });
   }
 
+  // Per-exercise, per-session series for the selected metric.
+  // metric: 'top' (heaviest weight), 'volume' (weight×sets×reps), 'reps' (sets×reps)
+  function liftSeries(metric) {
+    const unit = dominantUnit();
+    const byEx = {};
+    state.lifts.forEach((l) => {
+      const w = toUnit(l.weight, l.unit, unit);
+      const ex = (byEx[l.exercise] = byEx[l.exercise] || {});
+      const day = (ex[l.date] = ex[l.date] || { top: 0, volume: 0, reps: 0 });
+      day.top = Math.max(day.top, w);
+      day.volume += w * l.sets * l.reps;
+      day.reps += l.sets * l.reps;
+    });
+    return Object.keys(byEx).sort().map((exName) => ({
+      label: exName,
+      points: Object.keys(byEx[exName]).sort().map((d) => ({ date: d, value: byEx[exName][d][metric] }))
+    }));
+  }
+
   function renderLiftChart() {
-    const ex = $('#lift-chart-exercise').value;
+    const metric = $('#lift-chart-metric').value;
     const prStrip = $('#lift-prs');
     const wrap = $('#lift-chart');
+    const unit = dominantUnit();
 
-    if (!ex) {
+    if (!state.lifts.length) {
       wrap.innerHTML = '<div class="chart-empty">Log a set to see progress.</div>';
       prStrip.innerHTML = '';
       return;
     }
 
-    const entries = state.lifts
-      .filter((l) => l.exercise === ex)
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const fmt = metric === 'reps' ? (v) => fmtNum(Math.round(v)) : (v) => `${fmtCompact(v)} ${unit}`;
+    drawChart(wrap, liftSeries(metric), fmt);
 
-    const byDate = {};
-    entries.forEach((l) => {
-      const v = est1RM(l.weight, l.reps);
-      if (!byDate[l.date] || v > byDate[l.date].value) byDate[l.date] = { value: v, unit: l.unit };
+    // PR chips (all-time, across every exercise)
+    let heaviest = null;
+    state.lifts.forEach((l) => {
+      const w = toUnit(l.weight, l.unit, unit);
+      if (!heaviest || w > heaviest.w) heaviest = { w, exercise: l.exercise };
     });
-    const points = Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d].value }));
-    const unit = entries.length ? entries[entries.length - 1].unit : '';
-
-    drawLineChart(wrap, points, (v) => `${fmtNum(v)} ${unit}`);
-
-    const maxWeight = Math.max(...entries.map((l) => l.weight));
-    const max1RM = Math.max(...entries.map((l) => est1RM(l.weight, l.reps)));
-    const totalVol = entries.reduce((s, l) => s + l.weight * l.sets * l.reps, 0);
+    const volByDate = {};
+    state.lifts.forEach((l) => {
+      volByDate[l.date] = (volByDate[l.date] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
+    });
+    const bestSession = Math.max(...Object.values(volByDate));
+    const totalVol = Object.values(volByDate).reduce((s, v) => s + v, 0);
     prStrip.innerHTML = `
-      <span class="pr-chip">Top weight <b>${fmtNum(maxWeight)} ${unit}</b></span>
-      <span class="pr-chip">Best est. 1RM <b>${fmtNum(max1RM)} ${unit}</b></span>
-      <span class="pr-chip">Volume <b>${fmtNum(totalVol)} ${unit}</b></span>`;
+      <span class="pr-chip">Heaviest lift <b>${fmtNum(heaviest.w)} ${unit}</b> (${escapeHTML(heaviest.exercise)})</span>
+      <span class="pr-chip">Best session volume <b>${fmtCompact(bestSession)} ${unit}</b></span>
+      <span class="pr-chip">All-time volume <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
   }
 
   $('#lift-filter').addEventListener('change', renderLiftTable);
-  $('#lift-chart-exercise').addEventListener('change', renderLiftChart);
+  $('#lift-chart-metric').addEventListener('change', renderLiftChart);
 
   /* ======================================================================
      Rock climbing
@@ -487,42 +500,92 @@
     });
   }
 
+  const ALL_DISCIPLINES = ['Bouldering', 'Sport', 'Top Rope', 'Trad'];
+  const ROPE_DISCIPLINES = ['Sport', 'Top Rope', 'Trad'];
+
+  // Hardest grade sent per session for one discipline (values are grade ranks).
+  function hardestSeries(discipline) {
+    const byDate = {};
+    state.climbs
+      .filter((c) => c.discipline === discipline && isSend(c.result))
+      .forEach((c) => {
+        const r = gradeRank(discipline, c.grade);
+        if (byDate[c.date] === undefined || r > byDate[c.date]) byDate[c.date] = r;
+      });
+    return {
+      label: discipline,
+      points: Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }))
+    };
+  }
+
+  // Sends per session for one discipline.
+  function sendsSeries(discipline) {
+    const byDate = {};
+    state.climbs
+      .filter((c) => c.discipline === discipline && isSend(c.result))
+      .forEach((c) => { byDate[c.date] = (byDate[c.date] || 0) + 1; });
+    return {
+      label: discipline,
+      points: Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }))
+    };
+  }
+
   function renderClimbChart() {
-    const d = $('#climb-chart-discipline').value;
+    const metric = $('#climb-chart-metric').value;
     const wrap = $('#climb-chart');
     const prStrip = $('#climb-prs');
 
-    const sends = state.climbs
-      .filter((c) => c.discipline === d && isSend(c.result))
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-
+    const sends = state.climbs.filter((c) => isSend(c.result));
     if (!sends.length) {
       wrap.innerHTML = '<div class="chart-empty">Log a send to see progress.</div>';
       prStrip.innerHTML = '';
       return;
     }
 
-    const byDate = {};
-    sends.forEach((c) => {
-      const r = gradeRank(d, c.grade);
-      if (byDate[c.date] === undefined || r > byDate[c.date]) byDate[c.date] = r;
-    });
-    const grades = gradesFor(d);
-    const points = Object.keys(byDate).sort().map((dt) => ({ date: dt, value: byDate[dt] }));
+    if (metric === 'sends') {
+      drawChart(wrap, ALL_DISCIPLINES.map(sendsSeries), (v) => fmtNum(Math.round(v)));
+    } else {
+      // Hardest sends: bouldering (V scale) and ropes (YDS) use different
+      // scales, so each gets its own chart and axis.
+      wrap.innerHTML = '';
+      const boulder = hardestSeries('Bouldering');
+      const ropes = ROPE_DISCIPLINES.map(hardestSeries).filter((s) => s.points.length);
+      if (boulder.points.length) {
+        const t = document.createElement('p');
+        t.className = 'subchart-title';
+        t.textContent = 'Bouldering (V scale)';
+        const div = document.createElement('div');
+        wrap.appendChild(t); wrap.appendChild(div);
+        drawChart(div, [boulder], (v) => V_GRADES[Math.round(v)] || '');
+      }
+      if (ropes.length) {
+        const t = document.createElement('p');
+        t.className = 'subchart-title';
+        t.textContent = 'Ropes (YDS)';
+        const div = document.createElement('div');
+        wrap.appendChild(t); wrap.appendChild(div);
+        drawChart(div, ropes, (v) => YDS_GRADES[Math.round(v)] || '');
+      }
+    }
 
-    drawLineChart(wrap, points, (v) => grades[Math.round(v)] || '');
-
-    const hardestRank = Math.max(...sends.map((c) => gradeRank(d, c.grade)));
-    const totalSends = sends.length;
-    const flashes = sends.filter((c) => c.result === 'Flash' || c.result === 'Onsight').length;
-    prStrip.innerHTML = `
-      <span class="pr-chip">Hardest <b>${grades[hardestRank]}</b></span>
-      <span class="pr-chip">Sends <b>${totalSends}</b></span>
-      <span class="pr-chip">Flash/Onsight <b>${flashes}</b></span>`;
+    // PR chips across all disciplines
+    const boulderSends = sends.filter((c) => c.discipline === 'Bouldering');
+    const ropeSends = sends.filter((c) => ROPE_DISCIPLINES.includes(c.discipline));
+    const chips = [];
+    if (boulderSends.length) {
+      const best = Math.max(...boulderSends.map((c) => gradeRank('Bouldering', c.grade)));
+      chips.push(`<span class="pr-chip">Hardest boulder <b>${V_GRADES[best]}</b></span>`);
+    }
+    if (ropeSends.length) {
+      const best = Math.max(...ropeSends.map((c) => gradeRank(c.discipline, c.grade)));
+      chips.push(`<span class="pr-chip">Hardest route <b>${YDS_GRADES[best]}</b></span>`);
+    }
+    chips.push(`<span class="pr-chip">Total sends <b>${sends.length}</b></span>`);
+    prStrip.innerHTML = chips.join('');
   }
 
   $('#climb-filter').addEventListener('change', renderClimbTable);
-  $('#climb-chart-discipline').addEventListener('change', renderClimbChart);
+  $('#climb-chart-metric').addEventListener('change', renderClimbChart);
 
   /* ======================================================================
      Edit-entry modal
@@ -633,19 +696,83 @@
   /* ======================================================================
      Dashboard
      ====================================================================== */
+  // "▲ 12% vs prior 30 days" — trend annotation under a stat value
+  function setDelta(sel, cur, prev) {
+    const el = $(sel);
+    el.classList.remove('up', 'down');
+    if (!cur && !prev) { el.textContent = ''; return; }
+    if (!prev) { el.textContent = 'new this period'; el.classList.add('up'); return; }
+    const diff = cur - prev;
+    if (diff === 0) { el.textContent = 'same as prior 30d'; return; }
+    const pct = Math.round(Math.abs(diff) / prev * 100);
+    el.textContent = `${diff > 0 ? '▲' : '▼'} ${pct}% vs prior 30d`;
+    el.classList.add(diff > 0 ? 'up' : 'down');
+  }
+
   function renderDashboard() {
-    const liftSessions = new Set(state.lifts.map((l) => l.date)).size;
-    const climbSessions = new Set(state.climbs.map((c) => c.date)).size;
-    const totalVol = state.lifts.reduce((s, l) => s + l.weight * l.sets * l.reps, 0);
-    const totalSends = state.climbs.filter((c) => isSend(c.result)).length;
-    const commonUnit = mostCommon(state.lifts.map((l) => l.unit)) || '';
+    const unit = dominantUnit();
+    const cut30 = daysAgoISO(30);
+    const cut60 = daysAgoISO(60);
+    const inLast30 = (x) => x.date >= cut30;
+    const inPrev30 = (x) => x.date >= cut60 && x.date < cut30;
 
-    $('#dash-lift-sessions').textContent = liftSessions;
-    $('#dash-lift-volume').textContent = fmtNum(totalVol);
-    $('#dash-lift-volume-unit').textContent = totalVol ? commonUnit + ' moved' : '';
-    $('#dash-climb-sessions').textContent = climbSessions;
-    $('#dash-climb-sends').textContent = totalSends;
+    // Lifting: sessions + volume, last 30 days vs the 30 before
+    const liftVol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
+    const liftSess = (rows) => new Set(rows.map((l) => l.date)).size;
+    const lifts30 = state.lifts.filter(inLast30);
+    const liftsPrev = state.lifts.filter(inPrev30);
 
+    $('#dash-lift-sessions').textContent = liftSess(lifts30);
+    setDelta('#dash-lift-sessions-delta', liftSess(lifts30), liftSess(liftsPrev));
+    $('#dash-lift-volume').textContent = fmtCompact(liftVol(lifts30));
+    $('#dash-lift-volume-unit').textContent = unit + ' moved';
+    setDelta('#dash-lift-volume-delta', Math.round(liftVol(lifts30)), Math.round(liftVol(liftsPrev)));
+
+    // Climbing: sessions + sends
+    const climbSess = (rows) => new Set(rows.map((c) => c.date)).size;
+    const sendCount = (rows) => rows.filter((c) => isSend(c.result)).length;
+    const climbs30 = state.climbs.filter(inLast30);
+    const climbsPrev = state.climbs.filter(inPrev30);
+
+    $('#dash-climb-sessions').textContent = climbSess(climbs30);
+    setDelta('#dash-climb-sessions-delta', climbSess(climbs30), climbSess(climbsPrev));
+    $('#dash-climb-sends').textContent = sendCount(climbs30);
+    setDelta('#dash-climb-sends-delta', sendCount(climbs30), sendCount(climbsPrev));
+
+    // Weekly trend charts (last 12 weeks, empty weeks shown as zero)
+    const weeks = [];
+    const start = weekStart(daysAgoISO(7 * 11));
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(start + 'T00:00:00');
+      d.setDate(d.getDate() + i * 7);
+      weeks.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+    const wIndex = new Set(weeks);
+
+    const volByWeek = {};
+    state.lifts.forEach((l) => {
+      const w = weekStart(l.date);
+      if (wIndex.has(w)) volByWeek[w] = (volByWeek[w] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
+    });
+    drawChart($('#dash-lift-chart'),
+      [{ label: 'Volume', points: weeks.map((w) => ({ date: w, value: volByWeek[w] || 0 })) }],
+      (v) => `${fmtCompact(v)} ${unit}`);
+
+    const sendSeries = ALL_DISCIPLINES.map((disc) => {
+      const byWeek = {};
+      state.climbs
+        .filter((c) => c.discipline === disc && isSend(c.result))
+        .forEach((c) => {
+          const w = weekStart(c.date);
+          if (wIndex.has(w)) byWeek[w] = (byWeek[w] || 0) + 1;
+        });
+      return Object.keys(byWeek).length
+        ? { label: disc, points: weeks.map((w) => ({ date: w, value: byWeek[w] || 0 })) }
+        : { label: disc, points: [] };
+    });
+    drawChart($('#dash-climb-chart'), sendSeries, (v) => fmtNum(Math.round(v)));
+
+    // Recent activity feeds
     renderFeed('#dash-lift-feed', state.lifts, (l) => ({
       main: l.exercise,
       sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
@@ -679,31 +806,33 @@
   }
 
   /* ======================================================================
-     Simple SVG line chart
+     Multi-series SVG line chart
+     series: [{ label, points: [{date, value}] }] — dates form a shared x axis.
      ====================================================================== */
-  function drawLineChart(wrap, points, fmtValue) {
-    if (!points.length) {
+  const CHART_COLORS = ['#f5a524', '#38bdf8', '#34d399', '#f472b6', '#a78bfa', '#fb923c', '#22d3ee', '#facc15'];
+
+  function drawChart(wrap, series, fmtValue) {
+    series = series.filter((s) => s.points.length);
+    if (!series.length) {
       wrap.innerHTML = '<div class="chart-empty">No data yet.</div>';
       return;
     }
 
-    const W = 480, H = 200, padL = 46, padR = 14, padT = 14, padB = 28;
-    const innerW = W - padL - padR;
-    const innerH = H - padT - padB;
-
-    const values = points.map((p) => p.value);
+    const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p.date)))].sort();
+    const xi = new Map(dates.map((d, i) => [d, i]));
+    const values = series.flatMap((s) => s.points.map((p) => p.value));
     let min = Math.min(...values);
     let max = Math.max(...values);
     if (min === max) { min -= 1; max += 1; }
-    const pad = (max - min) * 0.1;
-    min -= pad; max += pad;
+    const vpad = (max - min) * 0.1;
+    min -= vpad; max += vpad;
 
-    const n = points.length;
+    const W = 480, H = 200, padL = 46, padR = 14, padT = 14, padB = 28;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+    const n = dates.length;
     const x = (i) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
     const y = (v) => padT + innerH - ((v - min) / (max - min)) * innerH;
-
-    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
-    const areaPath = `${linePath} L${x(n - 1).toFixed(1)},${(padT + innerH).toFixed(1)} L${x(0).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
 
     const ticks = [min + (max - min) * 0.1, (min + max) / 2, max - (max - min) * 0.1];
     const yTicks = ticks.map((t) =>
@@ -713,28 +842,53 @@
 
     const idxs = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
     const xLabels = [...new Set(idxs)].map((i) =>
-      `<text class="chart-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${fmtDateShort(points[i].date)}</text>`
+      `<text class="chart-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${fmtDateShort(dates[i])}</text>`
     ).join('');
 
-    const dots = points.map((p, i) =>
-      `<circle class="chart-dot" cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5"><title>${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></circle>`
-    ).join('');
+    const seriesSvg = series.map((s, si) => {
+      const color = CHART_COLORS[si % CHART_COLORS.length];
+      const pts = s.points.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+      const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(xi.get(p.date)).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+      const dots = pts.map((p) =>
+        `<circle cx="${x(xi.get(p.date)).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3" fill="${color}"><title>${escapeHTML(s.label)} — ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></circle>`
+      ).join('');
+      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>${dots}`;
+    }).join('');
+
+    const legend = series.length > 1
+      ? `<div class="chart-legend">${series.map((s, si) =>
+          `<span class="legend-item"><span class="legend-dot" style="background:${CHART_COLORS[si % CHART_COLORS.length]}"></span>${escapeHTML(s.label)}</span>`
+        ).join('')}</div>`
+      : '';
 
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Progress chart">
-        <defs>
-          <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.6"/>
-            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
         ${yTicks}
-        <path class="chart-area" d="${areaPath}"/>
-        <path class="chart-line" d="${linePath}"/>
-        ${dots}
+        ${seriesSvg}
         ${xLabels}
-      </svg>`;
+      </svg>${legend}`;
   }
+
+  /* ----- Unit + time helpers for progress metrics ----- */
+  function dominantUnit() {
+    return mostCommon(state.lifts.map((l) => l.unit)) || 'lbs';
+  }
+  function toUnit(w, from, to) {
+    if (from === to) return w;
+    return from === 'kg' ? w * 2.20462 : w / 2.20462;
+  }
+  function weekStart(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+  function daysAgoISO(days) {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
+  const fmtCompact = (n) => Number(n).toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 
   /* ======================================================================
      Export / Import / Reset

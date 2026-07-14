@@ -7,14 +7,17 @@ backend.
 
 ## Features
 
-- **Dashboard** — totals (lifting sessions, total volume, climbing sessions,
-  total sends) plus recent activity for both sports.
+- **Dashboard** — your last 30 days vs the 30 before (sessions, volume,
+  sends, with trend deltas), weekly trend charts for lifting volume and
+  climbing sends, and recent activity for both sports.
 - **Weightlifting tracker** — log sets (exercise, weight, sets × reps, lbs/kg,
-  notes); automatic **estimated 1-rep max** (Epley); per-exercise progress
-  chart; PR chips (top weight, best 1RM, total volume).
+  notes); multi-line progress chart with one line per exercise and selectable
+  metric (top weight / session volume / total reps per session); PR chips
+  (heaviest lift, best session volume, all-time volume).
 - **Rock climbing tracker** — bouldering (V-scale) and roped disciplines
   (Sport / Top Rope / Trad, YDS 5.x); result tracking (Send / Flash / Onsight /
-  Project), attempts, location, notes; hardest-grade-over-time chart.
+  Project), attempts, location, notes; progress charts for hardest send over
+  time (per scale) and sends per session by discipline.
 - **Two storage modes:**
   - **Local (default)** — data stays in your browser via `localStorage`. No
     account needed.
