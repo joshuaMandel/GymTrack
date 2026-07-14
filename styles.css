@@ -76,8 +76,10 @@ body {
 
 .view-head { margin-bottom: 20px; }
 .view-head h2 { margin: 0 0 4px; font-size: 24px; }
-.view-head.has-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.btn.add-btn { width: auto; margin-top: 0; white-space: nowrap; flex: none; }
+.view-head.has-action { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.view-head.has-action > div { flex: 1; min-width: 0; }
+/* .view-head scope outranks .btn.primary's width:100%, which is declared later */
+.view-head.has-action .btn.add-btn { width: auto; margin-top: 4px; white-space: nowrap; flex: none; }
 .muted { color: var(--muted); margin: 0; }
 .small { font-size: 12px; }
 
