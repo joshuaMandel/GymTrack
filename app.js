@@ -47,7 +47,23 @@
     return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
   })();
 
-  const sb = CONFIGURED ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
+  // Explicit session persistence: the login (refresh token) lives in
+  // localStorage and is silently renewed on every visit, so you stay signed
+  // in across visits until you sign out or the browser evicts site storage.
+  const sb = CONFIGURED ? window.supabase.createClient(cfg.url, cfg.anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: window.localStorage
+    }
+  }) : null;
+
+  // Best effort: ask the browser to treat this site's storage as persistent,
+  // reducing the chance it evicts the saved login under storage pressure.
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
 
   let session = null;            // current auth session (or null)
   let migrationHandled = false;  // only prompt to migrate once per page load
