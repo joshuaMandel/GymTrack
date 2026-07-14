@@ -286,7 +286,7 @@
     const f = new FormData(liftForm);
     const entry = {
       date: f.get('date'),
-      exercise: f.get('exercise').trim(),
+      exercise: canonicalExercise(f.get('exercise')),
       weight: parseFloat(f.get('weight')),
       sets: parseInt(f.get('sets'), 10),
       reps: parseInt(f.get('reps'), 10),
@@ -304,30 +304,74 @@
     });
   });
 
-  function liftExercises() {
-    return Array.from(new Set(state.lifts.map((l) => l.exercise))).sort();
+  /* ----- Exercise-name normalization -----
+     "back squat", "Back  Squat", and "BACK SQUAT" are the same exercise.
+     Entries are grouped case-insensitively everywhere, and names are
+     canonicalized on save so stored data converges on one spelling. */
+  const exKey = (name) => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+  // key -> display spelling (most common; title-cased if it starts lowercase)
+  function exerciseDisplayMap() {
+    const counts = {};
+    state.lifts.forEach((l) => {
+      const k = exKey(l.exercise);
+      counts[k] = counts[k] || {};
+      counts[k][l.exercise.trim().replace(/\s+/g, ' ')] = (counts[k][l.exercise.trim().replace(/\s+/g, ' ')] || 0) + 1;
+    });
+    const map = {};
+    Object.keys(counts).forEach((k) => {
+      const best = Object.entries(counts[k]).sort((a, b) => b[1] - a[1])[0][0];
+      map[k] = /^[a-z]/.test(best) ? titleCase(best) : best;
+    });
+    return map;
+  }
+
+  // The spelling an entry should be stored under.
+  function canonicalExercise(input) {
+    const clean = String(input || '').trim().replace(/\s+/g, ' ');
+    if (!clean) return clean;
+    const existing = exerciseDisplayMap()[exKey(clean)];
+    return existing || (/^[a-z]/.test(clean) ? titleCase(clean) : clean);
+  }
+
+  const DEFAULT_EXERCISES = ['Back Squat', 'Front Squat', 'Bench Press', 'Overhead Press', 'Deadlift', 'Barbell Row', 'Pull-up'];
+
+  function refreshExerciseDatalist() {
+    const dl = $('#exercise-list');
+    const seen = new Set();
+    const names = [];
+    // User's own exercises first, then remaining defaults
+    Object.values(exerciseDisplayMap()).sort().forEach((n) => {
+      if (!seen.has(exKey(n))) { seen.add(exKey(n)); names.push(n); }
+    });
+    DEFAULT_EXERCISES.forEach((n) => {
+      if (!seen.has(exKey(n))) { seen.add(exKey(n)); names.push(n); }
+    });
+    dl.innerHTML = '';
+    names.forEach((n) => dl.appendChild(new Option(n, n)));
   }
 
   function renderLifting() {
-    syncSelect('#lift-filter', liftExercises(), true);
+    const map = exerciseDisplayMap();
+    const el = $('#lift-filter');
+    const prev = el.value;
+    el.innerHTML = '';
+    el.add(new Option('All exercises', ''));
+    Object.keys(map).sort((a, b) => map[a].localeCompare(map[b])).forEach((k) => el.add(new Option(map[k], k)));
+    if ([...el.options].some((o) => o.value === prev)) el.value = prev;
+
+    refreshExerciseDatalist();
     renderLiftTable();
     renderLiftChart();
   }
 
-  function syncSelect(sel, options, includeAll) {
-    const el = $(sel);
-    const prev = el.value;
-    el.innerHTML = '';
-    if (includeAll) el.add(new Option('All exercises', ''));
-    options.forEach((o) => el.add(new Option(o, o)));
-    if ([...el.options].some((o) => o.value === prev)) el.value = prev;
-  }
-
   function renderLiftTable() {
     const tbody = $('#lift-table tbody');
-    const filter = $('#lift-filter').value;
+    const filter = $('#lift-filter').value; // an exercise key, or ''
+    const display = exerciseDisplayMap();
     const rows = state.lifts
-      .filter((l) => !filter || l.exercise === filter)
+      .filter((l) => !filter || exKey(l.exercise) === filter)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
     tbody.innerHTML = '';
@@ -339,7 +383,7 @@
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${fmtDate(l.date)}</td>
-        <td>${escapeHTML(l.exercise)}</td>
+        <td>${escapeHTML(display[exKey(l.exercise)] || l.exercise)}</td>
         <td>${fmtNum(l.weight)} ${l.unit}</td>
         <td>${l.sets} × ${l.reps}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
@@ -360,20 +404,23 @@
 
   // Per-exercise, per-session series for the selected metric.
   // metric: 'top' (heaviest weight), 'volume' (weight×sets×reps), 'reps' (sets×reps)
+  // Exercises are grouped case-insensitively (see exKey).
   function liftSeries(metric) {
     const unit = dominantUnit();
+    const display = exerciseDisplayMap();
     const byEx = {};
     state.lifts.forEach((l) => {
       const w = toUnit(l.weight, l.unit, unit);
-      const ex = (byEx[l.exercise] = byEx[l.exercise] || {});
+      const k = exKey(l.exercise);
+      const ex = (byEx[k] = byEx[k] || {});
       const day = (ex[l.date] = ex[l.date] || { top: 0, volume: 0, reps: 0 });
       day.top = Math.max(day.top, w);
       day.volume += w * l.sets * l.reps;
       day.reps += l.sets * l.reps;
     });
-    return Object.keys(byEx).sort().map((exName) => ({
-      label: exName,
-      points: Object.keys(byEx[exName]).sort().map((d) => ({ date: d, value: byEx[exName][d][metric] }))
+    return Object.keys(byEx).sort((a, b) => display[a].localeCompare(display[b])).map((k) => ({
+      label: display[k],
+      points: Object.keys(byEx[k]).sort().map((d) => ({ date: d, value: byEx[k][d][metric] }))
     }));
   }
 
@@ -393,10 +440,11 @@
     drawChart(wrap, liftSeries(metric), fmt);
 
     // PR chips (all-time, across every exercise)
+    const display = exerciseDisplayMap();
     let heaviest = null;
     state.lifts.forEach((l) => {
       const w = toUnit(l.weight, l.unit, unit);
-      if (!heaviest || w > heaviest.w) heaviest = { w, exercise: l.exercise };
+      if (!heaviest || w > heaviest.w) heaviest = { w, exercise: display[exKey(l.exercise)] || l.exercise };
     });
     const volByDate = {};
     state.lifts.forEach((l) => {
@@ -654,7 +702,7 @@
     const f = new FormData(editLiftForm);
     const entry = {
       date: f.get('date'),
-      exercise: f.get('exercise').trim(),
+      exercise: canonicalExercise(f.get('exercise')),
       weight: parseFloat(f.get('weight')),
       sets: parseInt(f.get('sets'), 10),
       reps: parseInt(f.get('reps'), 10),
