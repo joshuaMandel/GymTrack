@@ -644,19 +644,23 @@
   });
 
   /* ======================================================================
-     Auth UI
+     Auth UI + sign-in gate
      ====================================================================== */
   const accountEl = $('#account');
-  const modal = $('#auth-modal');
+  const gate = $('#gate');
   const authForm = $('#auth-form');
   const authStatus = $('#auth-status');
+  const profileModal = $('#profile-modal');
+  let namePrompted = false;
 
-  function openModal() { modal.hidden = false; setTimeout(() => $('#auth-email').focus(), 50); }
-  function closeModal() { modal.hidden = true; authStatus.textContent = ''; authStatus.className = 'auth-status'; }
+  // Show only the gate when Supabase is configured and nobody is signed in.
+  function applyGate() {
+    const gated = CONFIGURED && !session;
+    document.body.classList.toggle('auth-gated', gated);
+    gate.hidden = !gated;
+  }
 
-  $('#auth-close').addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-
+  // Send the magic-link sign-in email (gate form)
   authForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = $('#auth-email').value.trim();
@@ -670,7 +674,7 @@
       const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
       if (error) throw error;
       authStatus.className = 'auth-status ok';
-      authStatus.textContent = 'Check your email for the login link. You can close this once you click it.';
+      authStatus.textContent = 'Check your email for the login link, then come back here.';
     } catch (err) {
       console.error('Sign-in error:', err);
       authStatus.className = 'auth-status err';
@@ -680,36 +684,66 @@
     }
   });
 
-  function renderAccount() {
-    if (!CONFIGURED) { accountEl.hidden = true; return; }
-    accountEl.hidden = false;
-    if (session) {
-      const email = session.user.email || 'Signed in';
-      accountEl.innerHTML = `
-        <span class="sync-dot" id="sync-dot" title="Synced to cloud"></span>
-        <span class="acct-email" title="${escapeHTML(email)}">${escapeHTML(email)}</span>
-        <button class="btn ghost" id="signout-btn">Sign out</button>`;
-      $('#signout-btn').addEventListener('click', async () => { await sb.auth.signOut(); });
-    } else {
-      accountEl.innerHTML = `<button class="btn primary" id="signin-btn">☁ Sign in to sync</button>`;
-      $('#signin-btn').addEventListener('click', openModal);
-    }
-    renderBanner();
+  function currentDisplayName() {
+    return (session && session.user && session.user.user_metadata && session.user.user_metadata.display_name) || '';
   }
 
-  function renderBanner() {
-    const existing = $('#sync-banner');
-    if (existing) existing.remove();
-    if (!CONFIGURED || session) return;
-    const container = $('.container');
-    const banner = document.createElement('div');
-    banner.className = 'sync-banner';
-    banner.id = 'sync-banner';
-    banner.innerHTML = `
-      <span>☁ <b>Your data is only on this device.</b> <span class="muted">Sign in to sync it across your phone, tablet, and laptop.</span></span>
-      <button class="btn primary" id="banner-signin">Sign in</button>`;
-    container.insertBefore(banner, container.firstChild);
-    $('#banner-signin').addEventListener('click', openModal);
+  function renderAccount() {
+    if (!CONFIGURED || !session) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
+    accountEl.hidden = false;
+    const label = currentDisplayName() || session.user.email || 'Account';
+    accountEl.innerHTML = `
+      <span class="sync-dot" id="sync-dot" title="Synced"></span>
+      <button class="acct-name" id="profile-btn" title="Edit your name">${escapeHTML(label)} <span class="edit-ico">✎</span></button>
+      <button class="btn ghost" id="signout-btn">Sign out</button>`;
+    $('#profile-btn').addEventListener('click', () => openProfile(false));
+    $('#signout-btn').addEventListener('click', async () => { await sb.auth.signOut(); });
+  }
+
+  // ----- Edit-name modal -----
+  function openProfile(onboarding) {
+    $('#profile-name').value = currentDisplayName();
+    $('#profile-title').textContent = onboarding ? 'Welcome! What should we call you?' : 'Your name';
+    const status = $('#profile-status'); status.textContent = ''; status.className = 'auth-status';
+    profileModal.hidden = false;
+    setTimeout(() => $('#profile-name').focus(), 50);
+  }
+  function closeProfile() { profileModal.hidden = true; }
+  $('#profile-close').addEventListener('click', closeProfile);
+  profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfile(); });
+
+  $('#profile-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('#profile-name').value.trim();
+    const submit = $('#profile-submit');
+    const status = $('#profile-status');
+    submit.disabled = true;
+    status.className = 'auth-status';
+    status.textContent = 'Saving…';
+    try {
+      const { error } = await sb.auth.updateUser({ data: { display_name: name } });
+      if (error) throw error;
+      if (session && session.user) {
+        session.user.user_metadata = Object.assign({}, session.user.user_metadata, { display_name: name });
+      }
+      renderAccount();
+      closeProfile();
+    } catch (err) {
+      console.error('Save name error:', err);
+      status.className = 'auth-status err';
+      status.textContent = 'Error: ' + errMsg(err);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  // On first sign-in with no name yet, gently prompt for one.
+  function maybePromptName() {
+    if (namePrompted) return;
+    if (session && !currentDisplayName()) {
+      namePrompted = true;
+      openProfile(true);
+    }
   }
 
   function setSync(busy) {
@@ -741,23 +775,28 @@
 
   async function boot() {
     if (sb) {
-      // React to sign-in / sign-out (also fires once on initial load)
+      // React to sign-in / sign-out / profile updates
       sb.auth.onAuthStateChange(async (event, newSession) => {
         session = newSession;
+        applyGate();
         if (event === 'SIGNED_IN') {
-          closeModal();
           await maybeMigrate();
+          maybePromptName();
         }
         renderAccount();
-        await refresh();
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+          await refresh();
+        }
       });
 
       const { data } = await sb.auth.getSession();
       session = data.session;
+      applyGate();
       renderAccount();
       await refresh();
     } else {
-      // Local-only mode (Supabase not configured)
+      // Supabase not configured — run in local-only mode (no gate).
+      applyGate();
       renderAccount();
       await refresh();
     }

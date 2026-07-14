@@ -25,23 +25,39 @@
     <div class="account" id="account" hidden></div>
   </header>
 
-  <!-- Login modal -->
-  <div class="modal-overlay" id="auth-modal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-      <button class="modal-close" id="auth-close" aria-label="Close">✕</button>
-      <h2 id="auth-title">Sign in to sync</h2>
-      <p class="muted small">Enter your email and we'll send you a one-tap login link — no password needed. Sign in on any device to access the same data.</p>
-      <form id="auth-form" autocomplete="on">
-        <label>Email
-          <input type="email" name="email" id="auth-email" placeholder="you@example.com" required />
+  <!-- Edit-name modal -->
+  <div class="modal-overlay" id="profile-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+      <button class="modal-close" id="profile-close" aria-label="Close">✕</button>
+      <h2 id="profile-title">Your name</h2>
+      <p class="muted small">This is the name shown in the app. It doesn't change your login email.</p>
+      <form id="profile-form" autocomplete="off">
+        <label>Display name
+          <input type="text" name="name" id="profile-name" placeholder="e.g. Josh" maxlength="60" />
         </label>
-        <button type="submit" class="btn primary" id="auth-submit">Send login link</button>
+        <button type="submit" class="btn primary" id="profile-submit">Save name</button>
       </form>
-      <p class="auth-status" id="auth-status" role="status"></p>
+      <p class="auth-status" id="profile-status" role="status"></p>
     </div>
   </div>
 
   <main class="container">
+
+    <!-- ===================== SIGN-IN GATE ===================== -->
+    <div class="gate" id="gate" hidden>
+      <div class="gate-card">
+        <span class="gate-mark">🏋️</span>
+        <h2>Sign in to GymTrack</h2>
+        <p class="muted">Track your weightlifting and rock climbing progress, synced across all your devices. Sign in with your email to get started — no password needed.</p>
+        <form id="auth-form" autocomplete="on">
+          <label>Email
+            <input type="email" name="email" id="auth-email" placeholder="you@example.com" required />
+          </label>
+          <button type="submit" class="btn primary" id="auth-submit">Send login link</button>
+        </form>
+        <p class="auth-status" id="auth-status" role="status"></p>
+      </div>
+    </div>
 
     <!-- ===================== DASHBOARD ===================== -->
     <section class="view is-active" id="view-dashboard">
@@ -249,7 +265,7 @@
     </section>
 
     <footer class="footer">
-      <p>Your data is stored only in this browser (localStorage).</p>
+      <p>Your data is saved to your account and synced across your devices.</p>
       <div class="footer-actions">
         <button class="btn ghost" id="export-btn">Export data</button>
         <button class="btn ghost" id="import-btn">Import data</button>

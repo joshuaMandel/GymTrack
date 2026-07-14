@@ -194,9 +194,40 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .pr-chip { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 12px; }
 .pr-chip b { color: var(--accent); }
 
+/* ---------- Sign-in gate ---------- */
+/* When signed out (and Supabase is configured), only the gate is shown. */
+body.auth-gated .tabs,
+body.auth-gated .account,
+body.auth-gated .view,
+body.auth-gated .footer { display: none !important; }
+
+.gate { display: flex; justify-content: center; padding: 40px 0 20px; }
+.gate-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 34px 30px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+.gate-mark { font-size: 44px; display: block; margin-bottom: 6px; }
+.gate-card h2 { margin: 0 0 10px; font-size: 22px; }
+.gate-card .muted { font-size: 14px; line-height: 1.6; margin-bottom: 22px; }
+.gate-card form { text-align: left; }
+
 /* ---------- Account / auth ---------- */
 .account { display: flex; align-items: center; gap: 10px; }
 .account .acct-email { font-size: 13px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account .acct-name {
+  background: transparent; border: 0; color: var(--text); font-family: inherit;
+  font-size: 13px; font-weight: 600; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.account .acct-name:hover { background: var(--bg-elevated); color: var(--text); }
+.account .acct-name .edit-ico { color: var(--muted); font-size: 11px; }
 .account .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; box-shadow: 0 0 6px var(--good); }
 .account .sync-dot.busy { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
