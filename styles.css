@@ -117,9 +117,11 @@ input, select {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 10px 12px;
+  padding: 9px 12px;
   border-radius: 9px;
-  font-size: 14px;
+  /* 16px minimum: below that, iOS Safari force-zooms the page when a field
+     is focused (e.g. when editing an entry), leaving the layout zoomed in. */
+  font-size: 16px;
   font-family: inherit;
   width: 100%;
   min-width: 0; /* allow shrinking inside flex/grid so inputs never overflow */

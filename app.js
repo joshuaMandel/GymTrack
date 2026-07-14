@@ -300,8 +300,8 @@
     liftForm.elements.unit.value = l.unit;
     liftForm.elements.notes.value = l.notes || '';
     setLiftEditMode(l.id);
+    // Scroll only — focusing a field here pops the keyboard (and zoom) on mobile.
     liftForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    liftForm.elements.exercise.focus();
   }
 
   $('#lift-cancel').addEventListener('click', () => {
