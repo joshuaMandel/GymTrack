@@ -33,6 +33,19 @@
     </div>
   </nav>
 
+  <!-- Mobile bottom navigation (shown instead of the top tab bar on small screens) -->
+  <nav class="bottom-nav" aria-label="Trackers">
+    <button class="bnav-btn is-active" data-view="dashboard">
+      <span class="bnav-ico" aria-hidden="true">📊</span><span>Dashboard</span>
+    </button>
+    <button class="bnav-btn" data-view="lifting">
+      <span class="bnav-ico" aria-hidden="true">🏋️</span><span>Lifting</span>
+    </button>
+    <button class="bnav-btn" data-view="climbing">
+      <span class="bnav-ico" aria-hidden="true">🧗</span><span>Climbing</span>
+    </button>
+  </nav>
+
   <!-- Edit-entry modal -->
   <div class="modal-overlay" id="edit-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">

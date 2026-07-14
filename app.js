@@ -266,12 +266,13 @@
   /* ======================================================================
      Tabs
      ====================================================================== */
-  $$('.tab').forEach((btn) => {
+  // Top tab bar and mobile bottom nav both switch views; keep them in sync.
+  $$('.tab, .bnav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      $$('.tab').forEach((b) => b.classList.remove('is-active'));
+      const view = btn.dataset.view;
+      $$('.tab, .bnav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
       $$('.view').forEach((v) => v.classList.remove('is-active'));
-      btn.classList.add('is-active');
-      $('#view-' + btn.dataset.view).classList.add('is-active');
+      $('#view-' + view).classList.add('is-active');
     });
   });
 

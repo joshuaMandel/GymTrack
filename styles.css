@@ -82,10 +82,44 @@ body {
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+/* ---------- Bottom navigation (mobile) ---------- */
+.bottom-nav { display: none; }
+
 @media (max-width: 780px) {
   .two-col { grid-template-columns: 1fr; }
-  .tabs-bar { padding: 6px 10px; }
-  .tab { padding: 7px 6px; font-size: 12.5px; }
+
+  /* On phones the top tab bar is replaced by a fixed bottom nav */
+  .tabs-bar { display: none; }
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 30;
+    background: rgba(14, 17, 22, 0.92);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  .bnav-btn {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .bnav-ico { font-size: 20px; line-height: 1; }
+  .bnav-btn.is-active { color: var(--accent); }
+
+  /* Keep page content clear of the fixed bar */
+  .container { padding-bottom: 100px; }
 }
 
 /* ---------- Panels ---------- */
@@ -215,6 +249,7 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
    flashes before we know which one to show. */
 body.booting .topbar,
 body.booting .tabs-bar,
+body.booting .bottom-nav,
 body.booting .container { display: none !important; }
 .boot-splash { display: none; }
 body.booting .boot-splash {
@@ -239,6 +274,7 @@ body.booting .boot-splash {
 /* ---------- Sign-in gate ---------- */
 /* When signed out (and Supabase is configured), only the gate is shown. */
 body.auth-gated .tabs-bar,
+body.auth-gated .bottom-nav,
 body.auth-gated .account,
 body.auth-gated .view,
 body.auth-gated .footer { display: none !important; }
