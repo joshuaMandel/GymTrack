@@ -11,6 +11,6 @@
    saved in this browser, no sync) and the "Sign in to sync" button is hidden.
    ============================================================================ */
 window.SUPABASE_CONFIG = {
-  url: "https://YOUR-PROJECT.supabase.co",
-  anonKey: "YOUR-ANON-PUBLIC-KEY"
+  url: "https://thrxeddfjhbvxnxeokcy.supabase.co",
+  anonKey: "sb_publishable_tkjgr8WxOXz41eeHApgcyQ_QrjjSfsz"
 };
