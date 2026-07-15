@@ -188,24 +188,19 @@ body.auth-gated .footer { display: none !important; }
 .tab.is-active { background: var(--ink); color: var(--cream); }
 
 /* ---------- Weightlifting visibility (owner-only) ----------
-   By default the app is climbing-only: lifting UI is hidden and the
-   climbing-only replacements show. body.lifting-on (set for the owner)
-   flips it back to the full dual-sport app. */
-.climb-only { display: none; }
-body:not(.lifting-on) .climb-only { display: flex; }
-body.lifting-on .climb-only { display: none !important; }
+   The Home dashboard is climbing-only for everyone; lifting lives on the
+   Weightlifting page, which only the owner (body.lifting-on) can reach.
+   These rules hide the lifting nav, logging entries, and stray lift-only
+   bits for everyone else. */
 body:not(.lifting-on) .lift-only { display: none !important; }
-/* Nav + logging entries for lifting */
 body:not(.lifting-on) .tab[data-view="lifting"],
 body:not(.lifting-on) .bnav-btn[data-view="lifting"],
 body:not(.lifting-on) #fab-lift,
 body:not(.lifting-on) #log-lift { display: none !important; }
-/* Reflow the Home grids once the lifting cards / chart are gone
-   (the mini-grid is auto-fit, so it flows on its own). */
-body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(3, 1fr); }
-body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
+/* Home's trend grid is three cards for everyone */
+#view-dashboard .stat-grid { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 780px) {
-  body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  #view-dashboard .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ---------- Layout ---------- */

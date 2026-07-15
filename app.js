@@ -833,6 +833,7 @@
 
     renderLiftTable();
     renderLiftChart();
+    renderLiftWeekChart();
   }
 
   function renderLiftTable() {
@@ -908,6 +909,31 @@
       label: display[k],
       points: Object.keys(byEx[k]).sort().map((d) => ({ date: d, value: byEx[k][d][metric] }))
     }));
+  }
+
+  // Weekly volume bars on the Weightlifting page — last 12 weeks, empty
+  // weeks shown as zero so gaps in training are visible.
+  function renderLiftWeekChart() {
+    const wrap = $('#lift-week-chart');
+    if (!wrap) return;
+    const unit = dominantUnit();
+    const nWeeks = 12;
+    const weeks = [];
+    const start = weekStart(daysAgoISO(7 * (nWeeks - 1)));
+    for (let i = 0; i < nWeeks; i++) {
+      const d = new Date(start + 'T00:00:00');
+      d.setDate(d.getDate() + i * 7);
+      weeks.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+    const wIndex = new Set(weeks);
+    const volByWeek = {};
+    state.lifts.forEach((l) => {
+      const w = weekStart(l.date);
+      if (wIndex.has(w)) volByWeek[w] = (volByWeek[w] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
+    });
+    drawBars(wrap,
+      weeks.map((w) => ({ date: w, value: volByWeek[w] || 0 })),
+      (v) => `${fmtCompact(v)} ${unit}`);
   }
 
   function renderLiftChart() {
@@ -1131,8 +1157,8 @@
       const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
       const sub = r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${g.scale} · ${r.sessions} sessions`;
       return `
-        <div class="rating-card ${g.key}" title="Skill rating from grade, style, and attempts — sending harder than expected raises it.">
-          <span class="rating-label">${g.label} rating</span>
+        <div class="rating-card ${g.key}" title="Your Send Score — built from grade, style, and attempts; sending harder than expected raises it.">
+          <span class="rating-label">${g.label} Send Score</span>
           <span class="rating-value">${r.rating}${delta}</span>
           <span class="rating-sub">${sub}</span>
         </div>`;
@@ -1169,7 +1195,7 @@
     $('#rating-panel').hidden = !!getSettings().hide_rating;
     if (getSettings().hide_rating) {
       const wk = weekStart(todayISO());
-      const dates = new Set([...state.lifts, ...state.climbs].filter((x) => x.date >= wk).map((x) => x.date));
+      const dates = new Set(state.climbs.filter((x) => x.date >= wk).map((x) => x.date));
       const goal = weeklyGoal();
       const pct = Math.min(100, Math.round(dates.size / goal * 100));
       $('#rh-label').textContent = 'This week';
@@ -1186,11 +1212,11 @@
     const other = RATING_GROUPS.find((x) => x.key !== pg);
     const r = climberRating(pg);
     const ro = climberRating(other.key);
-    $('#rh-label').textContent = `${g.label} rating`;
+    $('#rh-label').textContent = `${g.label} Send Score`;
     if (!r.hasData) {
       $('#rh-value').textContent = '—';
       de.textContent = ''; de.className = 'rating-delta';
-      $('#rh-sub').textContent = 'Log a climb to start your rating';
+      $('#rh-sub').textContent = 'Log a climb to start your Send Score';
       $('#rh-session').textContent = '';
       $('#hero-ring').style.background = 'conic-gradient(var(--accent) 0%, #2e3038 0)';
       $('#hero-pct').textContent = '—';
@@ -1222,7 +1248,7 @@
       return { label: g.label, color: g.color, points };
     }).filter((s) => s.points.length);
     if (!series.length) {
-      wrap.innerHTML = '<div class="chart-empty">Log climbs to build your rating.</div>';
+      wrap.innerHTML = '<div class="chart-empty">Log climbs to build your Send Score.</div>';
       return;
     }
     drawChart(wrap, series, (v) => fmtNum(Math.round(v)));
@@ -1762,25 +1788,12 @@
   }
 
   function renderDashboard() {
-    const unit = dominantUnit();
     const R = parseInt($('#dash-range').value, 10) || 30;
     const cutCur = daysAgoISO(R);
     const cutPrev = daysAgoISO(R * 2);
     const inCurrent = (x) => x.date >= cutCur;
     const inPrevious = (x) => x.date >= cutPrev && x.date < cutCur;
     $$('.stat-label .rng').forEach((el) => { el.textContent = `${R}d`; });
-
-    // Lifting: sessions + volume, last R days vs the R before
-    const liftVol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
-    const liftSess = (rows) => new Set(rows.map((l) => l.date)).size;
-    const liftsCur = state.lifts.filter(inCurrent);
-    const liftsPrev = state.lifts.filter(inPrevious);
-
-    $('#dash-lift-sessions').textContent = liftSess(liftsCur);
-    setDelta('#dash-lift-sessions-delta', liftSess(liftsCur), liftSess(liftsPrev), R);
-    $('#dash-lift-volume').textContent = fmtCompact(liftVol(liftsCur));
-    $('#dash-lift-volume-unit').textContent = unit + ' moved';
-    setDelta('#dash-lift-volume-delta', Math.round(liftVol(liftsCur)), Math.round(liftVol(liftsPrev)), R);
 
     // Climbing: sessions + sends
     const climbSess = (rows) => new Set(rows.map((c) => c.date)).size;
@@ -1821,7 +1834,6 @@
   // Weekly trend charts spanning the selected range (empty weeks shown as zero).
   // Separate from renderDashboard so chart redraws skip stats + leaderboard RPC.
   function renderDashCharts() {
-    const unit = dominantUnit();
     const R = parseInt($('#dash-range').value, 10) || 30;
     const nWeeks = Math.ceil(R / 7) + 1;
     const weeks = [];
@@ -1832,15 +1844,6 @@
       weeks.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     }
     const wIndex = new Set(weeks);
-
-    const volByWeek = {};
-    state.lifts.forEach((l) => {
-      const w = weekStart(l.date);
-      if (wIndex.has(w)) volByWeek[w] = (volByWeek[w] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
-    });
-    drawBars($('#dash-lift-chart'),
-      weeks.map((w) => ({ date: w, value: volByWeek[w] || 0 })),
-      (v) => `${fmtCompact(v)} ${unit}`);
 
     // Bouldering vs everything on a rope, one line each (navy / orange)
     const sendSeries = [
@@ -1869,7 +1872,7 @@
   // (Profile has no charts — nothing to do there.)
   function redrawActiveCharts() {
     if ($('#view-dashboard').classList.contains('is-active')) renderDashCharts();
-    else if ($('#view-lifting').classList.contains('is-active')) renderLiftChart();
+    else if ($('#view-lifting').classList.contains('is-active')) { renderLiftChart(); renderLiftWeekChart(); }
     else if ($('#view-climbing').classList.contains('is-active')) renderClimbChart();
   }
 
@@ -2041,19 +2044,16 @@
   }
 
   function renderHome() {
-    const unit = dominantUnit();
-    const display = exerciseDisplayMap();
+    // Home is a climbing dashboard for everyone — sessions, rings, streak,
+    // and the feed all come from climbs. Lifting lives on its own page.
     const todayIso = todayISO();
     // Fold any future-dated entries into today — logs stamped with tomorrow's
     // UTC date (before dates went local) still count for rings and the streak.
     const clampDate = (d) => (d > todayIso ? todayIso : d);
-    const liftDates = new Set(state.lifts.map((l) => clampDate(l.date)));
-    const climbDates = new Set(state.climbs.map((c) => clampDate(c.date)));
-    const activeDates = new Set([...liftDates, ...climbDates]);
+    const activeDates = new Set(state.climbs.map((c) => clampDate(c.date)));
 
     // ----- Week strip: last 7 days ending today -----
-    // Ring color says what kind of session the day held: orange = lifting,
-    // navy = climbing, half-and-half = both, plain border = rest day.
+    // Ringed days are climbing days; a plain border is a rest day.
     const strip = $('#week-strip');
     const days = [];
     for (let i = 6; i >= 0; i--) {
@@ -2066,10 +2066,7 @@
         num: d.getDate()
       });
     }
-    const ringClass = (iso) => {
-      const l = liftDates.has(iso), c = climbDates.has(iso);
-      return l && c ? ' ring-both' : l ? ' ring-lift' : c ? ' ring-climb' : '';
-    };
+    const ringClass = (iso) => (activeDates.has(iso) ? ' ring-climb' : '');
     strip.innerHTML = days.map((d) => `
       <div class="day${d.iso === todayIso ? ' today' : ''}" title="${d.iso}">
         <span class="dow">${d.dow}</span>
@@ -2082,11 +2079,9 @@
     prevD.setDate(prevD.getDate() - 7);
     const prevStart = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}-${String(prevD.getDate()).padStart(2, '0')}`;
 
-    const liftsWk = state.lifts.filter((l) => l.date >= wkStart);
     const climbsWk = state.climbs.filter((c) => c.date >= wkStart);
-    const liftsPrev = state.lifts.filter((l) => l.date >= prevStart && l.date < wkStart);
     const climbsPrev = state.climbs.filter((c) => c.date >= prevStart && c.date < wkStart);
-    const sessionDates = new Set([...liftsWk, ...climbsWk].map((x) => x.date));
+    const sessionDates = new Set(climbsWk.map((x) => x.date));
 
     // Greeting
     const hour = new Date().getHours();
@@ -2100,37 +2095,21 @@
       ? `${remaining} session${remaining === 1 ? '' : 's'} to hit your weekly goal`
       : 'weekly goal hit — nice work'}`;
 
-    // Hero: the climber rating (the dashboard's centerpiece)
+    // Hero: the Send Score (the dashboard's centerpiece)
     renderRatingHero();
 
-    // Sessions-this-week mini (moved off the hero, which now shows the rating)
+    // Sessions-this-week mini (moved off the hero, which now shows the score)
     $('#mini-sessions').textContent = sessionDates.size;
     $('#mini-sessions-sub').textContent = remaining
       ? `${remaining} to goal of ${goal}`
       : `goal of ${goal} hit`;
 
     // Minis
-    const vol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
-    const volWk = vol(liftsWk);
-    $('#mini-volume').innerHTML = volWk ? `${fmtCompact(volWk)} <span class="unit">${unit}</span>` : '0';
-    setMiniDelta('#mini-volume-sub', Math.round(volWk), Math.round(vol(liftsPrev)), 'pct');
-
     const sendsWk = climbsWk.filter((c) => isSend(c.result)).length;
     $('#mini-sends').textContent = sendsWk;
     setMiniDelta('#mini-sends-sub', sendsWk, climbsPrev.filter((c) => isSend(c.result)).length, 'abs');
 
-    let top = null;
-    liftsWk.forEach((l) => {
-      if (!(l.weight > 0)) return; // bodyweight sets don't set a top weight
-      const w = toUnit(l.weight, l.unit, unit);
-      if (!top || w > top.w) top = { w, exercise: display[exKey(l.exercise)] || l.exercise, date: l.date };
-    });
-    $('#mini-top').innerHTML = top ? `${fmtNum(top.w)} <span class="unit">${unit}</span>` : '—';
-    $('#mini-top-sub').textContent = top
-      ? `${top.exercise} · ${new Date(top.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' })}`
-      : '';
-
-    // Climbing-only replacement mini: hardest grade sent this week
+    // Hardest grade sent this week
     const wkSends = climbsWk.filter((c) => isSend(c.result));
     const wkBoulder = wkSends.filter((c) => c.discipline === 'Bouldering');
     const wkRope = wkSends.filter((c) => ROPE_DISCIPLINES.includes(c.discipline));
@@ -2158,26 +2137,16 @@
     $('#streak-count').textContent = streak;
     $('#streak-pill').hidden = false;
 
-    // ----- Recent activity: climbs (+ lifts when weightlifting is on) -----
-    const items = [
-      ...(liftingEnabled() ? state.lifts.map((l) => ({
-        kind: 'lift',
-        icon: 'barbell',
-        main: `${display[exKey(l.exercise)] || l.exercise} · ${l.weight > 0 ? `${fmtNum(l.weight)} ${l.unit}` : 'BW'} · ${l.sets}×${l.reps}`,
-        sub: l.notes || '',
-        date: l.date
-      })) : []),
-      ...state.climbs.map((c) => ({
-        kind: 'climb',
-        icon: 'mountain',
-        dot: c.color,
-        main: `${c.grade} · ${c.result}${c.attempts > 1 ? ` · ${c.attempts} attempts` : ''}`,
-        sub: [c.discipline !== 'Bouldering' ? c.discipline : '', c.location, c.notes].filter(Boolean).join(' · '),
-        date: c.date
-      }))
-    ];
-    renderFeed('#recent-feed', items, (m) => m,
-      liftingEnabled() ? 'Tap ＋ to log your first set or climb.' : 'Tap ＋ to log your first climb.');
+    // ----- Recent activity: climbs only (Home is the climbing dashboard) -----
+    const items = state.climbs.map((c) => ({
+      kind: 'climb',
+      icon: 'mountain',
+      dot: c.color,
+      main: `${c.grade} · ${c.result}${c.attempts > 1 ? ` · ${c.attempts} attempts` : ''}`,
+      sub: [c.discipline !== 'Bouldering' ? c.discipline : '', c.location, c.notes].filter(Boolean).join(' · '),
+      date: c.date
+    }));
+    renderFeed('#recent-feed', items, (m) => m, 'Tap ＋ to log your first climb.');
   }
 
   // Recent dates read as weekdays ("Thu"); older ones as short dates ("Jul 5").

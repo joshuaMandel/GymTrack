@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; bump it when styles.css/app.js change -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15p" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15q" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -302,10 +302,10 @@
       <div class="week-strip" id="week-strip"></div>
 
       <!-- This week: hero + minis -->
-      <!-- Climber rating hero -->
+      <!-- Send Score hero -->
       <div class="hero-card rating-hero">
         <div class="rh-main">
-          <span class="rh-label" id="rh-label">Climber rating</span>
+          <span class="rh-label" id="rh-label">Send Score</span>
           <span class="hero-value"><span id="rh-value">—</span><span class="rating-delta" id="rh-delta"></span></span>
           <span class="hero-label" id="rh-sub"></span>
           <span class="rh-session" id="rh-session"></span>
@@ -324,39 +324,20 @@
           <span class="mini-value" id="mini-sends">0</span>
           <span class="mini-sub" id="mini-sends-sub"></span>
         </div>
-        <div class="mini-card climb-only">
+        <div class="mini-card">
           <span class="mini-label">Hardest this week</span>
           <span class="mini-value" id="mini-hardest">—</span>
           <span class="mini-sub" id="mini-hardest-sub"></span>
         </div>
-        <div class="mini-card lift-only">
-          <span class="mini-label">Volume this week</span>
-          <span class="mini-value" id="mini-volume">0</span>
-          <span class="mini-sub" id="mini-volume-sub"></span>
-        </div>
-        <div class="mini-card lift-only">
-          <span class="mini-label">Top lift this week</span>
-          <span class="mini-value" id="mini-top">—</span>
-          <span class="mini-sub" id="mini-top-sub"></span>
-        </div>
       </div>
 
-      <!-- Rating over time — the centerpiece chart -->
+      <!-- Send Score over time — the centerpiece chart -->
       <div class="panel" id="rating-panel">
         <div class="panel-head">
-          <h3>Climber rating over time</h3>
+          <h3>Send Score over time</h3>
         </div>
         <p class="muted small">Every session nudges it up or down — by how hard, and how much, you climbed.</p>
         <div class="chart-wrap" id="dash-rating-chart"></div>
-      </div>
-
-      <!-- Program / routines -->
-      <div class="panel lift-only" id="program-panel">
-        <div class="panel-head">
-          <h3>Your program</h3>
-          <button class="btn ghost routine-new-btn">＋ New routine</button>
-        </div>
-        <div class="routine-list" id="routine-list"></div>
       </div>
 
       <!-- Trends -->
@@ -376,20 +357,9 @@
 
       <div class="stat-grid">
         <div class="stat-card">
-          <span class="stat-label">Rating change · <span class="rng">30d</span></span>
+          <span class="stat-label">Send Score change · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-rating-change">—</span>
           <span class="stat-sub" id="dash-rating-change-sub"></span>
-        </div>
-        <div class="stat-card lift-only">
-          <span class="stat-label">Lifting sessions · <span class="rng">30d</span></span>
-          <span class="stat-value" id="dash-lift-sessions">0</span>
-          <span class="stat-sub" id="dash-lift-sessions-delta"></span>
-        </div>
-        <div class="stat-card lift-only">
-          <span class="stat-label">Volume lifted · <span class="rng">30d</span></span>
-          <span class="stat-value" id="dash-lift-volume">0</span>
-          <span class="stat-sub" id="dash-lift-volume-unit"></span>
-          <span class="stat-sub" id="dash-lift-volume-delta"></span>
         </div>
         <div class="stat-card">
           <span class="stat-label">Climbing sessions · <span class="rng">30d</span></span>
@@ -403,17 +373,10 @@
         </div>
       </div>
 
-      <div class="two-col charts-row">
-        <div class="panel lift-only">
-          <h3>Lifting volume by week</h3>
-          <p class="muted small">Total weight moved per week.</p>
-          <div class="chart-wrap" id="dash-lift-chart"></div>
-        </div>
-        <div class="panel">
-          <h3>Climbing sends by week</h3>
-          <p class="muted small">Sends per week by discipline.</p>
-          <div class="chart-wrap" id="dash-climb-chart"></div>
-        </div>
+      <div class="panel">
+        <h3>Climbing sends by week</h3>
+        <p class="muted small">Sends per week by discipline.</p>
+        <div class="chart-wrap" id="dash-climb-chart"></div>
       </div>
 
       <!-- Activity + leaderboard -->
@@ -454,7 +417,7 @@
 
       <div class="pr-strip" id="lift-prs"></div>
 
-      <!-- Same program panel as Home — start a session from here too -->
+      <!-- Program panel — start a session from here -->
       <div class="panel" id="program-panel-lift">
         <div class="panel-head">
           <h3>Your program</h3>
@@ -486,6 +449,12 @@
         </div>
         <p class="muted small">Per-session progress for every exercise, over time.</p>
         <div class="chart-wrap" id="lift-chart"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Volume by week</h3>
+        <p class="muted small">Total weight moved per week, last 12 weeks.</p>
+        <div class="chart-wrap" id="lift-week-chart"></div>
       </div>
 
       <div class="panel">
@@ -525,7 +494,7 @@
           <div class="panel-controls">
             <label class="inline-select">Metric
               <select id="climb-chart-metric">
-                <option value="rating">Climber rating</option>
+                <option value="rating">Send Score</option>
                 <option value="hardest">Hardest send</option>
                 <option value="sends">Sends per session</option>
               </select>
@@ -590,7 +559,7 @@
           </div>
         </div>
 
-        <!-- Climber rating -->
+        <!-- Send Score -->
         <div class="rating-strip" id="profile-rating" hidden></div>
 
         <!-- Lifetime stats -->
@@ -624,8 +593,8 @@
           </div>
           <div class="pref-row">
             <div>
-              <div class="pref-name">Climber rating</div>
-              <div class="feed-sub">Show your ELO-style skill rating on the climbing page.</div>
+              <div class="pref-name">Send Score</div>
+              <div class="feed-sub">Show your ELO-style Send Score on your dashboard and climbing page.</div>
             </div>
             <label class="check"><input type="checkbox" id="pref-rating" /></label>
           </div>
@@ -668,6 +637,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15p"></script>
+  <script src="app.js?v=2026-07-15q"></script>
 </body>
 </html>
