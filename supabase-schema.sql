@@ -84,11 +84,11 @@ create policy "own routines" on public.routines
   with check (auth.uid() = user_id);
 
 -- ---------- Send Score leaderboard ----------
--- Signed-in users normally see only their own rows (RLS above). This
--- SECURITY DEFINER function is a deliberate exception: it exposes
--- cross-user AGGREGATES ONLY — display name, Send Score, session count,
--- hardest send. Locations, notes, dates, and individual climbs are never
--- revealed.
+-- Signed-in users normally see only their own rows (RLS above). The
+-- SECURITY DEFINER functions in this section are the deliberate social
+-- surface: standings, per-climber grade summaries, and (via
+-- climb_user_history below) each climber's dates, grades, results, and
+-- attempts. Locations, notes, and hold colors are NEVER shared.
 --
 -- It replays every climber's history with the SAME per-climb algorithm the
 -- app runs client-side (climberRating in app.js) so your own hero number
@@ -292,3 +292,39 @@ $$;
 
 revoke all on function public.climb_user_summary(uuid, integer, text) from public, anon;
 grant execute on function public.climb_user_summary(uuid, integer, text) to authenticated;
+
+-- ---------- Per-climber session history (summary drill-down) ----------
+-- The replayable fields for one climber's discipline group, in the app's
+-- exact replay order (date, then id) — the client runs its own scoring
+-- engine over these to show per-session and per-climb Send Score changes.
+-- Deliberately shared: dates, grades, results, attempts. Deliberately
+-- withheld: locations, notes, hold colors.
+drop function if exists public.climb_user_history(uuid, text);
+create function public.climb_user_history(target uuid, grp text default 'boulder')
+returns table (
+  id uuid,
+  date date,
+  discipline text,
+  grade text,
+  attempts integer,
+  result text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.id, c.date, c.discipline, c.grade, c.attempts, c.result
+  from public.climbs c
+  where c.user_id = target
+    and (case when grp = 'boulder' then c.discipline = 'Bouldering' else c.discipline <> 'Bouldering' end)
+    and array_position(
+      case when grp = 'boulder'
+        then array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17']::text[]
+        else array['5.5','5.6','5.7','5.8','5.9','5.10a','5.10b','5.10c','5.10d','5.11a','5.11b','5.11c','5.11d','5.12a','5.12b','5.12c','5.12d','5.13a','5.13b','5.13c','5.13d','5.14a','5.14b','5.14c','5.14d','5.15a','5.15b','5.15c','5.15d']::text[]
+      end, c.grade) is not null
+  order by c.date, c.id
+$$;
+
+revoke all on function public.climb_user_history(uuid, text) from public, anon;
+grant execute on function public.climb_user_history(uuid, text) to authenticated;

@@ -1030,42 +1030,14 @@
     renderClimbChart();
   }
 
+  // History as sessions: filtered list for display, full history for scoring.
   function renderClimbTable() {
-    const tbody = $('#climb-table tbody');
     const filter = $('#climb-filter').value;
-    const rows = state.climbs
-      .filter((c) => !filter || c.discipline === filter)
-      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-
-    tbody.innerHTML = '';
-    if (!rows.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No climbs logged yet.</td></tr>';
-      return;
-    }
-    rows.forEach((c) => {
-      const discClass = c.discipline === 'Bouldering' ? 'boulder' : 'rope';
-      const resClass = isSend(c.result) ? 'send' : 'project';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="date">${fmtDate(c.date)}</td>
-        <td><span class="badge ${discClass}">${escapeHTML(c.discipline)}</span></td>
-        <td class="wt">${routeDot(c.color)}${escapeHTML(c.grade)}</td>
-        <td><span class="badge ${resClass}">${escapeHTML(c.result)}</span></td>
-        <td>${c.attempts}</td>
-        <td class="muted">${escapeHTML(c.location)}</td>
-        <td class="muted">${escapeHTML(c.notes)}</td>
-        <td class="row-actions">
-          <button class="edit-btn" title="Edit" aria-label="Edit"><svg class="ico"><use href="#i-pencil"/></svg></button>
-          <button class="del-btn" title="Delete" aria-label="Delete"><svg class="ico"><use href="#i-x"/></svg></button>
-        </td>`;
-      tr.querySelector('.edit-btn').addEventListener('click', () => openEditClimb(c));
-      tr.querySelector('.del-btn').addEventListener('click', () => {
-        withSync(async () => {
-          await Store.delClimb(c.id);
-          renderClimbing(); renderDashboard();
-        });
-      });
-      tbody.appendChild(tr);
+    const climbs = state.climbs.filter((c) => !filter || c.discipline === filter);
+    renderSessions($('#climb-sessions'), climbs, {
+      editable: true,
+      allClimbs: state.climbs,
+      emptyMsg: 'No climbs logged yet.'
     });
   }
 
@@ -1128,31 +1100,32 @@
     return RATING_START + (gradeRank(discipline, grade) - YDS_GRADES.indexOf('5.6')) * RATING_STEP_YDS;
   }
 
-  // Per-CLIMB performance rating, replayed in order. Every climb is a match
-  // against the route: the score moves by K × (result − expected) right then,
-  // so more climbing moves you more, each flash carries its own
-  // bonus, and a failed project barely costs (you weren't expected to send).
-  // Diminishing returns are built in — as the number rises mid-session, each
-  // further send surprises it less. Splitting the same climbs across days
-  // gains nothing. Sessions (dates) remain the unit for K and reporting.
-  // Ties within a date replay in id order so every device — and the SQL
-  // leaderboard replay — agrees on the exact same sequence.
-  function climberRating(group) {
-    const climbs = state.climbs
+  // THE scoring replay — per-climb ELO over an explicit climb list. Every
+  // climb is a match against the route: the score moves by K × (result −
+  // expected) right then, so more climbing moves you more, each flash
+  // carries its own bonus, and a failed project barely costs (you weren't
+  // expected to send). Diminishing returns are built in — as the number
+  // rises mid-session, each further send surprises it less. Splitting the
+  // same climbs across days gains nothing. Sessions (dates) are the unit
+  // for K and reporting. Ties within a date replay in id order so every
+  // device — and the SQL leaderboard replay — agrees on the same sequence.
+  // Returns per-session detail including each climb's exact ± contribution.
+  function scoreBreakdown(allClimbs, group) {
+    const climbs = allClimbs
       .filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0)
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1
         : String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
 
     let R = RATING_START, s = 0;
-    const history = [];
-    let last = null;
+    const sessions = [];
     let i = 0;
     while (i < climbs.length) {
       const date = climbs[i].date;
       const K = s < RATING_PROVISIONAL_SESSIONS ? RATING_K_PROV : RATING_K_EST;
       const before = R;
-      let n = 0, sends = 0, hardestRank = -1, hardestDisc = null;
+      const detail = [];
+      let sends = 0, hardestRank = -1, hardestDisc = null;
       while (i < climbs.length && climbs[i].date === date) {
         const c = climbs[i];
         const sent = isSend(c.result);
@@ -1165,23 +1138,32 @@
           if (rk > hardestRank) { hardestRank = rk; hardestDisc = c.discipline; }
         }
         const E = 1 / (1 + Math.pow(10, (eff - R) / 400));             // expected send chance at your rating
-        R += K * ((sent ? 1 : 0) - E);                                 // this climb moves the number now
-        n++; i++;
+        const move = K * ((sent ? 1 : 0) - E);                         // this climb moves the number now
+        R += move;
+        detail.push({ id: c.id, group, delta: move, climb: c });
+        i++;
       }
       s++;
-      history.push({ date, value: Math.round(R) });
-      last = {
-        date, count: n, sends, delta: Math.round(R - before),
+      sessions.push({
+        date, delta: Math.round(R - before), end: Math.round(R),
+        count: detail.length, sends, climbs: detail,
         hardest: hardestRank >= 0 ? (hardestDisc === 'Bouldering' ? V_GRADES[hardestRank] : YDS_GRADES[hardestRank]) : null
-      };
+      });
     }
+    return { group, sessions, rating: Math.round(R), hasData: s > 0 };
+  }
+
+  // The headline view of the replay (hero, cards, charts).
+  function climberRating(group) {
+    const b = scoreBreakdown(state.climbs, group);
+    const last = b.sessions.length ? b.sessions[b.sessions.length - 1] : null;
     return {
       group,
-      rating: Math.round(R),
-      sessions: s,
-      hasData: s > 0,
-      provisional: s > 0 && s < RATING_PROVISIONAL_SESSIONS,
-      history,
+      rating: b.rating,
+      sessions: b.sessions.length,
+      hasData: b.hasData,
+      provisional: b.hasData && b.sessions.length < RATING_PROVISIONAL_SESSIONS,
+      history: b.sessions.map((x) => ({ date: x.date, value: x.end })),
       lastSession: last,
       lastSessionDelta: last ? last.delta : 0
     };
@@ -2013,28 +1995,51 @@
   scoreModal.addEventListener('click', (e) => { if (e.target === scoreModal) scoreModal.hidden = true; });
 
   async function openLbSummary(row) {
-    const days = parseInt($('#dash-range').value, 10) || 30;
     const grp = $('#lb-discipline').value;
     const g = RATING_GROUPS.find((x) => x.key === grp);
     $('#lb-name').textContent = row.display_name;
-    $('#lb-sub').textContent = `${g.label} · Send Score ${row.score} · last ${days} days`;
+    $('#lb-sub').textContent = `${g.label} · Send Score ${row.score} · all time`;
     const box = $('#lb-summary');
     box.innerHTML = '<div class="chart-empty" style="height:90px">Loading…</div>';
     lbModal.hidden = false;
     try {
-      const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days, grp });
+      // Whole-history view — the pyramid and sessions never clip to a range.
+      const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days: 36500, grp });
       if (error) throw error;
       // Any rope discipline reads grades off the shared YDS scale
       renderLbSummary(box, data, grp === 'boulder' ? 'Bouldering' : 'Sport');
     } catch (e) {
       console.warn('Climber summary unavailable:', e);
       box.innerHTML = `<p class="auth-status err">Couldn't load the summary (${escapeHTML(errMsg(e))}). If this persists, re-run supabase-schema.sql — the summary needs its updated functions.</p>`;
+      return;
+    }
+    // Session-by-session breakdown: my own comes from local state (works
+    // offline); anyone else's replayable history comes from the RPC.
+    try {
+      const isMe = session && row.user_id === session.user.id;
+      let hist;
+      if (isMe) {
+        hist = state.climbs.filter((c) => ratingGroup(c.discipline) === grp);
+      } else {
+        const { data: rows, error } = await sb.rpc('climb_user_history', { target: row.user_id, grp });
+        if (error) throw error;
+        hist = rows || [];
+      }
+      if (hist.length) {
+        box.insertAdjacentHTML('beforeend',
+          '<h3 class="score-sub">Sessions</h3><div class="sess-list" id="lbs-sessions"></div>');
+        renderSessions($('#lbs-sessions'), hist, { pageSize: 8 });
+      }
+    } catch (e) {
+      // History RPC missing (schema not applied yet) or offline — the
+      // pyramid above still stands on its own.
+      console.warn('Session history unavailable:', e);
     }
   }
 
   function renderLbSummary(box, data, disc) {
     if (!data) {
-      box.innerHTML = '<p class="muted small">Nothing logged in this range.</p>';
+      box.innerHTML = '<p class="muted small">Nothing logged yet.</p>';
       return;
     }
     // Collapse per-result rows into per-grade buckets
@@ -2050,7 +2055,7 @@
     });
     const grades = Object.keys(byGrade).sort((a, b) => gradeRank(disc, b) - gradeRank(disc, a));
     if (!grades.length) {
-      box.innerHTML = '<p class="muted small">Nothing logged in this range.</p>';
+      box.innerHTML = '<p class="muted small">Nothing logged yet.</p>';
       return;
     }
     const totalSends = grades.reduce((s, g) => s + byGrade[g].sends, 0);
@@ -2199,45 +2204,142 @@
     $('#streak-count').textContent = streak;
     $('#streak-pill').hidden = streak === 0; // no sad "🔥 0" for new climbers
 
-    // ----- Recent activity: climbs only (Home is the climbing dashboard) -----
-    const items = state.climbs.map((c) => ({
-      kind: 'climb',
-      icon: 'mountain',
-      dot: c.color,
-      main: `${c.grade} · ${c.result}${c.attempts > 1 ? ` · ${c.attempts} attempts` : ''}`,
-      sub: [c.discipline !== 'Bouldering' ? c.discipline : '', c.location, c.notes].filter(Boolean).join(' · '),
-      date: c.date
-    }));
-    renderFeed('#recent-feed', items, (m) => m, 'Tap ＋ to log your first climb.');
+    // ----- Sessions: the full climb history, grouped by day -----
+    renderSessions($('#recent-feed'), state.climbs);
   }
 
-  // Recent dates read as weekdays ("Thu"); older ones as short dates ("Jul 5").
-  function feedDate(iso) {
-    return iso >= daysAgoISO(6)
-      ? new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' })
-      : fmtDateShort(iso);
+  /* ======================================================================
+     Session lists — climbs grouped by day, expandable to the individual
+     climbs with each one's exact Send Score contribution. One component,
+     used on Home, the climbing History panel, and the climber summary.
+     ====================================================================== */
+  // Display points per climb via cumulative rounding, so the visible climb
+  // values in a session always sum exactly to the session's shown change.
+  function climbPoints(allClimbs) {
+    const pts = {};
+    ['boulder', 'rope'].forEach((g) => {
+      scoreBreakdown(allClimbs, g).sessions.forEach((sess) => {
+        let cum = 0, shown = 0;
+        sess.climbs.forEach((d) => {
+          cum += d.delta;
+          const c2 = Math.round(cum);
+          pts[d.id] = { group: g, pts: c2 - shown };
+          shown = c2;
+        });
+      });
+    });
+    return pts;
   }
 
-  function renderFeed(sel, items, mapFn, emptyMsg) {
-    const el = $(sel);
-    const rows = items.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 6);
-    if (!rows.length) {
-      el.innerHTML = `<li class="empty">${emptyMsg}</li>`;
+  // Group climbs into sessions (newest first). Scoring always replays
+  // allClimbs (the full history), even when the displayed list is filtered.
+  function sessionizeClimbs(climbs, allClimbs) {
+    const pts = climbPoints(allClimbs || climbs);
+    const byDate = {};
+    climbs.forEach((c) => { (byDate[c.date] = byDate[c.date] || []).push(c); });
+    return Object.keys(byDate).sort().reverse().map((date) => {
+      const list = byDate[date].slice().sort((a, b) =>
+        (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+      const deltas = {};
+      let hb = -1, hr = -1; // hardest send rank per scale
+      list.forEach((c) => {
+        const p = pts[c.id];
+        if (p) deltas[p.group] = (deltas[p.group] || 0) + p.pts;
+        if (isSend(c.result)) {
+          const rk = gradeRank(c.discipline, c.grade);
+          if (c.discipline === 'Bouldering') { if (rk > hb) hb = rk; }
+          else if (rk > hr) hr = rk;
+        }
+      });
+      const hardest = [hb >= 0 ? V_GRADES[hb] : null, hr >= 0 ? YDS_GRADES[hr] : null]
+        .filter(Boolean).join(' · ');
+      return { date, climbs: list, deltas, hardest, pts };
+    });
+  }
+
+  const deltaChip = (v, label) => {
+    const cls = v > 0 ? 'up' : v < 0 ? 'down' : '';
+    const arrow = v > 0 ? '▲' : v < 0 ? '▼' : '·';
+    return `<span class="rating-delta ${cls}">${label ? label + ' ' : ''}${arrow} ${Math.abs(v)}</span>`;
+  };
+
+  // The shared session-list component.
+  // opts: { editable, pageSize, allClimbs, emptyMsg }
+  function renderSessions(el, climbs, opts = {}) {
+    if (!el) return;
+    const pageSize = opts.pageSize || 10;
+    // Expansion + pagination state live on the element, surviving re-renders.
+    const st = (el.__sess = el.__sess || { shown: pageSize, open: new Set() });
+    const sessions = sessionizeClimbs(climbs, opts.allClimbs);
+    if (!sessions.length) {
+      el.innerHTML = `<div class="empty">${opts.emptyMsg || 'Tap ＋ to log your first climb.'}</div>`;
       return;
     }
-    el.innerHTML = rows.map((it) => {
-      const m = mapFn(it);
-      return `<li>
-        <div class="feed-left">
-          ${m.icon ? `<span class="feed-ico${m.kind ? ' ' + m.kind : ''}"><svg class="ico"><use href="#i-${m.icon}"/></svg></span>` : ''}
-          <div>
-            <div class="feed-main">${m.dot ? routeDot(m.dot) : ''}${escapeHTML(m.main)}</div>
-            ${m.sub ? `<div class="feed-sub">${escapeHTML(m.sub)}</div>` : ''}
+    const visible = sessions.slice(0, st.shown);
+    el.innerHTML = visible.map((s) => {
+      const both = Object.keys(s.deltas).length > 1;
+      const chips = ['boulder', 'rope']
+        .filter((g) => s.deltas[g] !== undefined)
+        .map((g) => deltaChip(s.deltas[g], both ? (g === 'boulder' ? 'B' : 'R') : ''))
+        .join(' ');
+      const open = st.open.has(s.date);
+      const rows = s.climbs.map((c) => {
+        const p = s.pts[c.id];
+        const resClass = isSend(c.result) ? 'send' : 'project';
+        const extra = opts.editable ? [c.location, c.notes].filter(Boolean).join(' · ') : '';
+        return `
+        <div class="sess-climb" data-id="${escapeHTML(String(c.id))}">
+          <div class="sc-main">
+            <div class="feed-main">${opts.editable ? routeDot(c.color) : ''}${escapeHTML(c.grade)} <span class="badge ${resClass}">${escapeHTML(c.result)}</span>${(Number(c.attempts) || 1) > 1 ? ` <span class="muted">· ${Number(c.attempts)} attempts</span>` : ''}</div>
+            ${extra ? `<div class="feed-sub">${escapeHTML(extra)}</div>` : ''}
           </div>
-        </div>
-        <div class="feed-date">${feedDate(m.date)}</div>
-      </li>`;
-    }).join('');
+          <span class="sc-pts ${p && p.pts > 0 ? 'up' : p && p.pts < 0 ? 'down' : ''}">${p ? (p.pts >= 0 ? '+' : '') + p.pts : ''}</span>
+          ${opts.editable ? `
+          <span class="row-actions">
+            <button class="edit-btn" title="Edit" aria-label="Edit"><svg class="ico"><use href="#i-pencil"/></svg></button>
+            <button class="del-btn" title="Delete" aria-label="Delete"><svg class="ico"><use href="#i-x"/></svg></button>
+          </span>` : ''}
+        </div>`;
+      }).join('');
+      return `
+      <div class="sess" data-date="${s.date}">
+        <button type="button" class="sess-row" aria-expanded="${open}">
+          <span class="sess-chev">${open ? '▾' : '▸'}</span>
+          <span class="sess-main">
+            <span class="feed-main">${fmtDate(s.date)}</span>
+            <span class="feed-sub">${s.climbs.length} climb${s.climbs.length === 1 ? '' : 's'}${s.hardest ? ' · hardest ' + escapeHTML(s.hardest) : ''}</span>
+          </span>
+          <span class="sess-delta">${chips}</span>
+        </button>
+        <div class="sess-climbs" ${open ? '' : 'hidden'}>${rows}</div>
+      </div>`;
+    }).join('') + (sessions.length > st.shown
+      ? `<button type="button" class="btn ghost sm sess-more">Show ${Math.min(pageSize, sessions.length - st.shown)} more session${sessions.length - st.shown === 1 ? '' : 's'}</button>`
+      : '');
+
+    el.querySelectorAll('.sess-row').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const d = btn.closest('.sess').dataset.date;
+        if (st.open.has(d)) st.open.delete(d); else st.open.add(d);
+        renderSessions(el, climbs, opts);
+      });
+    });
+    const more = el.querySelector('.sess-more');
+    if (more) more.addEventListener('click', () => { st.shown += pageSize; renderSessions(el, climbs, opts); });
+
+    if (opts.editable) {
+      el.querySelectorAll('.sess-climb').forEach((row) => {
+        const c = climbs.find((x) => String(x.id) === row.dataset.id);
+        if (!c) return;
+        row.querySelector('.edit-btn').addEventListener('click', () => openEditClimb(c));
+        row.querySelector('.del-btn').addEventListener('click', () => {
+          withSync(async () => {
+            await Store.delClimb(c.id);
+            renderClimbing(); renderDashboard();
+          });
+        });
+      });
+    }
   }
 
   /* ======================================================================
