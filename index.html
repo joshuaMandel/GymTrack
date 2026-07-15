@@ -216,6 +216,25 @@
         <ul class="feed" id="recent-feed"><li class="empty">Tap ＋ to log your first set or climb.</li></ul>
       </div>
 
+      <!-- Climbing leaderboard (shown when signed in and the function is installed) -->
+      <div class="panel" id="leaderboard-panel" hidden>
+        <div class="panel-head">
+          <h3>Leaderboard</h3>
+          <div class="panel-controls">
+            <label class="inline-select">Discipline
+              <select id="lb-discipline">
+                <option value="Bouldering">Bouldering</option>
+                <option value="Sport">Sport (lead)</option>
+                <option value="Top Rope">Top Rope</option>
+                <option value="Trad">Trad</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <p class="muted small">Hardest send over the selected range · ties broken by sends at that grade.</p>
+        <ul class="feed" id="leaderboard-list"></ul>
+      </div>
+
       <!-- Trends -->
       <div class="view-head has-action" style="margin-top: 26px;">
         <div>

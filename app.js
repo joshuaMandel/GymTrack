@@ -941,9 +941,46 @@
 
     // Home top section: week strip, hero, mini cards, streak, recent feed
     renderHome();
+    renderLeaderboard(); // async; manages its own visibility
   }
 
   $('#dash-range').addEventListener('change', renderDashboard);
+
+  /* ----- Climbing leaderboard (cross-user, via the climb_leaderboard RPC) ----- */
+  async function renderLeaderboard() {
+    const panel = $('#leaderboard-panel');
+    if (!cloudOn()) { panel.hidden = true; return; }
+    const days = parseInt($('#dash-range').value, 10) || 30;
+    const disc = $('#lb-discipline').value;
+    try {
+      const { data, error } = await sb.rpc('climb_leaderboard', { days, disc });
+      if (error) throw error;
+      panel.hidden = false;
+      const list = $('#leaderboard-list');
+      if (!data || !data.length) {
+        list.innerHTML = '<li class="empty">No sends in this range yet — get after it! 🧗</li>';
+        return;
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      list.innerHTML = data.map((r, i) => `
+        <li class="${r.is_me ? 'me' : ''}">
+          <div class="feed-left">
+            <span class="lb-rank">${medals[i] || (i + 1)}</span>
+            <div>
+              <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
+              <div class="feed-sub">${r.sends_at_hardest}× at ${escapeHTML(r.hardest)} · ${r.total_sends} send${r.total_sends === 1 ? '' : 's'} total</div>
+            </div>
+          </div>
+          <div class="lb-grade">${escapeHTML(r.hardest)}</div>
+        </li>`).join('');
+    } catch (e) {
+      // Function not installed yet, or transient failure — hide quietly.
+      console.warn('Leaderboard unavailable:', e);
+      panel.hidden = true;
+    }
+  }
+
+  $('#lb-discipline').addEventListener('change', renderLeaderboard);
 
   function renderHome() {
     const unit = dominantUnit();

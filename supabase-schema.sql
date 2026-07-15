@@ -54,3 +54,66 @@ create policy "own climbs" on public.climbs
   to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- ---------- Climbing leaderboard ----------
+-- Signed-in users normally see only their own rows (RLS above). This
+-- SECURITY DEFINER function is the one deliberate exception: it exposes
+-- cross-user AGGREGATES ONLY — display name, hardest grade, send counts.
+-- Locations, notes, dates, and individual climbs are never revealed.
+--
+-- Ranking: hardest grade sent in the window, ties broken by how many sends
+-- at that grade, then by total sends. One discipline at a time, so grades
+-- are always compared within a single scale.
+create or replace function public.climb_leaderboard(days integer default 30, disc text default 'Bouldering')
+returns table (
+  display_name text,
+  is_me boolean,
+  hardest text,
+  sends_at_hardest bigint,
+  total_sends bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with scale as (
+    select case when disc = 'Bouldering'
+      then array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17']::text[]
+      else array['5.5','5.6','5.7','5.8','5.9','5.10a','5.10b','5.10c','5.10d','5.11a','5.11b','5.11c','5.11d','5.12a','5.12b','5.12c','5.12d','5.13a','5.13b','5.13c','5.13d','5.14a','5.14b','5.14c','5.14d','5.15a','5.15b','5.15c','5.15d']::text[]
+    end as g
+  ),
+  ranked as (
+    select c.user_id, array_position(s.g, c.grade) as r
+    from public.climbs c, scale s
+    where c.discipline = disc
+      and c.result <> 'Project'
+      and c.date >= current_date - days
+      and array_position(s.g, c.grade) is not null
+  ),
+  agg as (
+    select user_id, max(r) as hardest_rank, count(*) as total_sends
+    from ranked
+    group by user_id
+  ),
+  at_hardest as (
+    select r.user_id, count(*) as n
+    from ranked r
+    join agg a on a.user_id = r.user_id and r.r = a.hardest_rank
+    group by r.user_id
+  )
+  select
+    coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Anonymous climber') as display_name,
+    a.user_id = auth.uid() as is_me,
+    (select g from scale)[a.hardest_rank] as hardest,
+    h.n as sends_at_hardest,
+    a.total_sends
+  from agg a
+  join at_hardest h on h.user_id = a.user_id
+  join auth.users u on u.id = a.user_id
+  order by a.hardest_rank desc, h.n desc, a.total_sends desc
+  limit 20
+$$;
+
+revoke all on function public.climb_leaderboard(integer, text) from public, anon;
+grant execute on function public.climb_leaderboard(integer, text) to authenticated;

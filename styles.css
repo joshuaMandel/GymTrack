@@ -347,6 +347,24 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .feed .feed-sub { color: var(--muted); font-size: 12px; }
 .feed .feed-date { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
+/* ---------- Leaderboard ---------- */
+.lb-rank { font-size: 17px; min-width: 30px; text-align: center; font-weight: 800; color: var(--muted); flex: none; }
+.lb-grade { font-size: 17px; font-weight: 800; white-space: nowrap; }
+.you-chip {
+  display: inline-block;
+  background: rgba(245, 165, 36, 0.18);
+  color: #b97a0e;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  vertical-align: 2px;
+  margin-left: 4px;
+}
+#leaderboard-list li.me { background: rgba(245, 165, 36, 0.10); }
+
 /* ---------- Tables ---------- */
 .table-wrap { overflow-x: auto; }
 .log-table { width: 100%; border-collapse: collapse; font-size: 14px; }
