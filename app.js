@@ -504,7 +504,7 @@
       tr.innerHTML = `
         <td class="date">${sameGroup ? '' : fmtDate(l.date)}</td>
         <td class="ex">${sameGroup ? '<span class="set-cont">＋ set</span>' : escapeHTML(display[exKey(l.exercise)] || l.exercise)}</td>
-        <td class="wt">${fmtNum(l.weight)} ${l.unit}</td>
+        <td class="wt">${l.weight > 0 ? `${fmtNum(l.weight)} ${l.unit}` : 'BW'}</td>
         <td>${l.sets} × ${l.reps}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td class="row-actions">
@@ -572,6 +572,7 @@
     const display = exerciseDisplayMap();
     let heaviest = null;
     lifts.forEach((l) => {
+      if (!(l.weight > 0)) return; // bodyweight sets can't be the heaviest lift
       const w = toUnit(l.weight, l.unit, unit);
       if (!heaviest || w > heaviest.w) heaviest = { w, exercise: display[exKey(l.exercise)] || l.exercise };
     });
@@ -582,7 +583,7 @@
     const bestSession = Math.max(...Object.values(volByDate));
     const totalVol = Object.values(volByDate).reduce((s, v) => s + v, 0);
     prStrip.innerHTML = `
-      <span class="pr-chip">Heaviest lift <b>${escapeHTML(heaviest.exercise)} ${fmtNum(heaviest.w)} ${unit}</b></span>
+      ${heaviest ? `<span class="pr-chip">Heaviest lift <b>${escapeHTML(heaviest.exercise)} ${fmtNum(heaviest.w)} ${unit}</b></span>` : ''}
       <span class="pr-chip">Best session volume <b>${fmtCompact(bestSession)} ${unit}</b></span>
       <span class="pr-chip">${volLabel} <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
   }
@@ -769,9 +770,21 @@
   editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEditModal(); });
 
   /* ----- Lifts ----- */
+  // Bodyweight sets are stored with weight 0; the checkbox just relaxes the
+  // form so no weight has to be typed. Anything with weight 0 displays as "BW".
+  function applyBodyweight() {
+    const bw = editLiftForm.elements.bodyweight.checked;
+    const w = editLiftForm.elements.weight;
+    w.disabled = bw;
+    w.required = !bw;
+    if (bw) w.value = '';
+  }
+  editLiftForm.elements.bodyweight.addEventListener('change', applyBodyweight);
+
   function openAddLift() {
     editingLiftId = null;
     editLiftForm.reset();
+    applyBodyweight(); // reset unchecks the box — re-enable the weight field
     editLiftForm.elements.date.value = todayISO();
     editLiftForm.elements.sets.value = 1;
     editLiftForm.elements.unit.value = dominantUnit();
@@ -784,7 +797,9 @@
     editingLiftId = l.id;
     editLiftForm.elements.date.value = l.date;
     editLiftForm.elements.exercise.value = l.exercise;
-    editLiftForm.elements.weight.value = l.weight;
+    editLiftForm.elements.bodyweight.checked = !(l.weight > 0);
+    applyBodyweight();
+    if (l.weight > 0) editLiftForm.elements.weight.value = l.weight;
     editLiftForm.elements.sets.value = l.sets;
     editLiftForm.elements.reps.value = l.reps;
     editLiftForm.elements.unit.value = l.unit;
@@ -798,11 +813,12 @@
   // so an ascending pyramid (135 → 185 → 225…) is just "bump weight, tap again".
   function saveLift(keepOpen) {
     if (!editLiftForm.reportValidity()) return;
+    const bw = editLiftForm.elements.bodyweight.checked;
     const f = new FormData(editLiftForm);
     const entry = {
       date: f.get('date'),
       exercise: canonicalExercise(f.get('exercise')),
-      weight: parseFloat(f.get('weight')),
+      weight: bw ? 0 : parseFloat(f.get('weight')),
       sets: parseInt(f.get('sets'), 10),
       reps: parseInt(f.get('reps'), 10),
       unit: f.get('unit'),
@@ -817,9 +833,9 @@
       renderDashboard();
       if (keepOpen && !id) {
         editStatus.className = 'auth-status ok';
-        editStatus.textContent = `Added ${entry.exercise} — ${fmtNum(entry.weight)} ${entry.unit} × ${entry.reps}. Log the next set:`;
+        editStatus.textContent = `Added ${entry.exercise} — ${bw ? 'BW' : `${fmtNum(entry.weight)} ${entry.unit}`} × ${entry.reps}. Log the next set:`;
         editLiftForm.elements.notes.value = '';
-        editLiftForm.elements.weight.select();
+        if (!bw) editLiftForm.elements.weight.select();
       } else {
         closeEditModal();
       }
@@ -1152,6 +1168,7 @@
 
     let top = null;
     liftsWk.forEach((l) => {
+      if (!(l.weight > 0)) return; // bodyweight sets don't set a top weight
       const w = toUnit(l.weight, l.unit, unit);
       if (!top || w > top.w) top = { w, exercise: display[exKey(l.exercise)] || l.exercise, date: l.date };
     });
@@ -1182,7 +1199,7 @@
       ...state.lifts.map((l) => ({
         kind: 'lift',
         icon: 'barbell',
-        main: `${display[exKey(l.exercise)] || l.exercise} · ${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
+        main: `${display[exKey(l.exercise)] || l.exercise} · ${l.weight > 0 ? `${fmtNum(l.weight)} ${l.unit}` : 'BW'} · ${l.sets}×${l.reps}`,
         sub: l.notes || '',
         date: l.date
       })),

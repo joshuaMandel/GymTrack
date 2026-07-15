@@ -367,6 +367,7 @@ input, select {
   min-width: 0; /* allow shrinking inside flex/grid so inputs never overflow */
 }
 input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(245, 158, 44, 0.18); }
+input:disabled { background: var(--panel-2); color: var(--muted); opacity: 0.6; cursor: not-allowed; }
 
 /* Date inputs: iOS Safari sizes these to their intrinsic content and adds
    inner margins on the value element, so width:100% is ignored and the field
@@ -381,6 +382,9 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 
 label.inline-select { flex-direction: row; align-items: center; gap: 8px; margin: 0; white-space: nowrap; }
 .inline-select select { width: auto; }
+
+label.check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); flex: none; }
 
 /* Compact selects on desktop only — phones keep 16px so iOS doesn't zoom */
 @media (min-width: 781px) {
