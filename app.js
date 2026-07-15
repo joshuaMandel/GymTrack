@@ -2218,16 +2218,28 @@
     } catch (x) { /* not a URL — treat as a code */ }
     const isDigits = /^\d{6}$/.test(raw);
     if (isDigits && !pendingAuthEmail) return;
-    const payload = isDigits
-      ? { email: pendingAuthEmail, token: raw, type: 'email' }
-      : { token_hash: raw, type: 'email' };
+    // A pasted token hash could have been minted as any of these kinds
+    // depending on the email template / whether the account is new.
+    const attempts = isDigits
+      ? [{ email: pendingAuthEmail, token: raw, type: 'email' }]
+      : [
+          { token_hash: raw, type: 'email' },
+          { token_hash: raw, type: 'magiclink' },
+          { token_hash: raw, type: 'signup' }
+        ];
     const submit = $('#otp-submit');
     submit.disabled = true;
     authStatus.className = 'auth-status';
     authStatus.textContent = 'Checking…';
+    let lastErr = null;
     try {
-      const { error } = await sb.auth.verifyOtp(payload);
-      if (error) throw error;
+      for (const payload of attempts) {
+        const { error } = await sb.auth.verifyOtp(payload);
+        if (!error) { lastErr = null; break; }
+        lastErr = error;
+        console.warn('verifyOtp attempt failed:', payload.type, errMsg(error));
+      }
+      if (lastErr) throw lastErr;
       // Success fires onAuthStateChange(SIGNED_IN), which un-gates the app.
       $('#otp-form').hidden = true;
       $('#otp-token').value = '';
@@ -2235,7 +2247,7 @@
     } catch (err) {
       console.error('Code verify error:', err);
       authStatus.className = 'auth-status err';
-      authStatus.textContent = 'That code didn\'t work — check for typos, or request a fresh one (codes expire and only the newest email counts).';
+      authStatus.textContent = `That code didn't work (${errMsg(err)}). Codes are single-use and only the newest email counts — request a fresh code, don't tap the email's link, and paste the new code here.`;
     } finally {
       submit.disabled = false;
     }
