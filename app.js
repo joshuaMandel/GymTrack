@@ -1354,34 +1354,38 @@
     return rs[(i + 1) % rs.length].id;
   }
 
+  // The program panel appears on both Home and the Weightlifting page —
+  // render the same content into every routine-list container.
   function renderProgram() {
-    const el = $('#routine-list');
+    const containers = [$('#routine-list'), $('#routine-list-lift')].filter(Boolean);
     const rs = state.routines.slice().sort((a, b) => (a.position | 0) - (b.position | 0));
-    if (!rs.length) {
-      el.innerHTML = `
-        <div class="routine-empty">
-          <p class="muted">Save your training days once, then run them with one tap — each exercise pre-filled from the last time you did it.</p>
-          <button class="btn pill" id="routine-seed">＋ Add the 5-day program</button>
-        </div>`;
-      $('#routine-seed').addEventListener('click', seedProgram);
-      return;
-    }
-    const nextId = upNextId(rs);
-    el.innerHTML = rs.map((r) => `
-      <div class="routine-row" data-id="${escapeHTML(String(r.id))}">
-        <div>
-          <div class="feed-main">${escapeHTML(r.name)}${r.id === nextId ? ' <span class="you-chip">Up next</span>' : ''}</div>
-          <div class="feed-sub">${r.exercises.length} exercise${r.exercises.length === 1 ? '' : 's'}${r.last_run ? ' · last run ' + fmtDateShort(r.last_run) : ''}</div>
-        </div>
-        <div class="routine-actions">
-          <button class="edit-btn" title="Edit routine" aria-label="Edit routine"><svg class="ico"><use href="#i-pencil"/></svg></button>
-          <button class="btn pill sm run-btn">Start</button>
-        </div>
-      </div>`).join('');
-    el.querySelectorAll('.routine-row').forEach((row) => {
-      const r = rs.find((x) => String(x.id) === row.dataset.id);
-      row.querySelector('.edit-btn').addEventListener('click', () => openRoutineEditor(r));
-      row.querySelector('.run-btn').addEventListener('click', () => startRoutine(r));
+    containers.forEach((el) => {
+      if (!rs.length) {
+        el.innerHTML = `
+          <div class="routine-empty">
+            <p class="muted">Save your training days once, then run them with one tap — each exercise pre-filled from the last time you did it.</p>
+            <button class="btn pill routine-seed">＋ Add the 5-day program</button>
+          </div>`;
+        el.querySelector('.routine-seed').addEventListener('click', seedProgram);
+        return;
+      }
+      const nextId = upNextId(rs);
+      el.innerHTML = rs.map((r) => `
+        <div class="routine-row" data-id="${escapeHTML(String(r.id))}">
+          <div>
+            <div class="feed-main">${escapeHTML(r.name)}${r.id === nextId ? ' <span class="you-chip">Up next</span>' : ''}</div>
+            <div class="feed-sub">${r.exercises.length} exercise${r.exercises.length === 1 ? '' : 's'}${r.last_run ? ' · last run ' + fmtDateShort(r.last_run) : ''}</div>
+          </div>
+          <div class="routine-actions">
+            <button class="edit-btn" title="Edit routine" aria-label="Edit routine"><svg class="ico"><use href="#i-pencil"/></svg></button>
+            <button class="btn pill sm run-btn">Start</button>
+          </div>
+        </div>`).join('');
+      el.querySelectorAll('.routine-row').forEach((row) => {
+        const r = rs.find((x) => String(x.id) === row.dataset.id);
+        row.querySelector('.edit-btn').addEventListener('click', () => openRoutineEditor(r));
+        row.querySelector('.run-btn').addEventListener('click', () => startRoutine(r));
+      });
     });
   }
 
@@ -1421,7 +1425,7 @@
   }
   function closeRoutineModal() { routineModal.hidden = true; editingRoutineId = null; }
 
-  $('#routine-new').addEventListener('click', () => openRoutineEditor(null));
+  $$('.routine-new-btn').forEach((btn) => btn.addEventListener('click', () => openRoutineEditor(null)));
   $('#routine-close').addEventListener('click', closeRoutineModal);
   routineModal.addEventListener('click', (e) => { if (e.target === routineModal) closeRoutineModal(); });
   $('#routine-add-row').addEventListener('click', () => $('#routine-rows').appendChild(routineRowEl(null)));
