@@ -1740,14 +1740,21 @@
     }
   }
 
+  // Drop the boot splash and reveal whatever is underneath (gate or app).
+  // Called synchronously right before a render, so the reveal and the first
+  // painted frame of real data happen together — no flash of empty defaults.
+  function revealApp() {
+    document.body.classList.remove('booting');
+  }
+
   // Show only the gate when Supabase is configured and nobody is signed in.
-  // Also lifts the boot splash — by the time this runs, auth state is known,
-  // so we can reveal the right screen without the app flashing first.
+  // Signed-out visitors reveal immediately (the gate needs no data); signed-in
+  // visitors keep the splash until refresh() has loaded and rendered.
   function applyGate() {
     const gated = CONFIGURED && !session;
     document.body.classList.toggle('auth-gated', gated);
     gate.hidden = !gated;
-    document.body.classList.remove('booting');
+    if (gated) revealApp();
     // A failed magic link (expired / already used) redirects here with the
     // error in the hash — explain it instead of showing a blank gate.
     if (gated && authHashError) {
@@ -1875,6 +1882,9 @@
     } finally {
       setSync(false);
     }
+    // Reveal and render in the same task: the browser paints the app for the
+    // first time already filled with data (and charts measure real widths).
+    revealApp();
     renderAll();
   }
 

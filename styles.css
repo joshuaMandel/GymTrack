@@ -173,9 +173,13 @@ body.auth-gated .footer { display: none !important; }
 
 /* ---------- Layout ---------- */
 .container { max-width: 1120px; margin: 0 auto; padding: 32px 28px 110px; }
-.view { display: none; animation: fade 0.2s ease; }
-.view.is-active { display: block; }
-@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.view { display: none; }
+.view.is-active { display: block; animation: view-in 0.3s cubic-bezier(0.22, 0.9, 0.3, 1); }
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .view.is-active { animation: none; } }
 
 .view-head { margin-bottom: 20px; }
 .view-head h2 {
@@ -706,6 +710,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   cursor: pointer;
 }
 .bnav-btn .ico { width: 21px; height: 21px; }
+.bnav-btn { transition: background 0.15s ease, color 0.15s ease; }
 .bnav-btn.is-active { background: var(--panel-2); color: var(--text); }
 
 .fab-wrap { position: relative; pointer-events: auto; }
