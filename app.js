@@ -1884,49 +1884,51 @@
 
   $('#dash-range').addEventListener('change', renderDashboard);
 
-  /* ----- Climbing leaderboard (cross-user, via the climb_leaderboard RPC) ----- */
-  let lbDefaultApplied = false; // auto-pick the user's main discipline once per load
+  /* ----- Send Score leaderboard (cross-user, via the climb_send_scores RPC) ----- */
+  let lbDefaultApplied = false; // auto-pick the user's main discipline group once per load
 
   async function renderLeaderboard() {
     const panel = $('#leaderboard-panel');
     if (!cloudOn()) { panel.hidden = true; return; }
-    // Default the filter to the discipline this user climbs most (e.g. Sport
-    // for a lead climber). Recent climbs (90d) decide, so a stack of old
-    // entries in another discipline doesn't win; manual selection sticks.
+    // Default the filter to whichever scale this user climbs most.
     if (!lbDefaultApplied && state.climbs.length) {
-      const recentCut = daysAgoISO(90);
-      const recent = state.climbs.filter((c) => c.date >= recentCut);
-      const main = mostCommon((recent.length ? recent : state.climbs).map((c) => c.discipline));
-      const sel = $('#lb-discipline');
-      if (main && [...sel.options].some((o) => o.value === main)) sel.value = main;
+      $('#lb-discipline').value = primaryRatingGroup();
       lbDefaultApplied = true;
     }
-    const days = parseInt($('#dash-range').value, 10) || 30;
-    const disc = $('#lb-discipline').value;
+    const grp = $('#lb-discipline').value;
     try {
-      const { data, error } = await sb.rpc('climb_leaderboard', { days, disc });
+      const { data, error } = await sb.rpc('climb_send_scores', { grp });
       if (error) throw error;
       panel.hidden = false;
       const list = $('#leaderboard-list');
-      if (!data || !data.length) {
-        list.innerHTML = '<li class="empty">No sends in this range yet — get after it.</li>';
+      const rows = (data || []).slice().sort((a, b) => b.score - a.score).slice(0, 20);
+      if (!rows.length) {
+        list.innerHTML = '<li class="empty">No Send Scores yet — log a session to start yours.</li>';
         return;
       }
 
-      list.innerHTML = data.map((r, i) => `
+      list.innerHTML = rows.map((r, i) => {
+        const d = r.last_delta || 0;
+        const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
+        const sub = [
+          r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${r.sessions} session${r.sessions === 1 ? '' : 's'}`,
+          r.hardest ? `hardest ${escapeHTML(r.hardest)}` : ''
+        ].filter(Boolean).join(' · ');
+        return `
         <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
           <div class="feed-left">
             <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
             <div>
               <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
-              <div class="feed-sub">${r.sends_at_hardest}× at ${escapeHTML(r.hardest)} · ${r.total_sends} send${r.total_sends === 1 ? '' : 's'} total</div>
+              <div class="feed-sub">${sub}</div>
             </div>
           </div>
-          <div class="lb-grade">${escapeHTML(r.hardest)}</div>
-        </li>`).join('');
+          <div class="lb-grade">${r.score}${delta}</div>
+        </li>`;
+      }).join('');
       // Row click → per-climber summary (aggregates via climb_user_summary)
       list.querySelectorAll('li').forEach((li, i) => {
-        li.addEventListener('click', () => openLbSummary(data[i]));
+        li.addEventListener('click', () => openLbSummary(rows[i]));
       });
     } catch (e) {
       // Function not installed yet, or transient failure — hide quietly.
@@ -1949,16 +1951,18 @@
 
   async function openLbSummary(row) {
     const days = parseInt($('#dash-range').value, 10) || 30;
-    const disc = $('#lb-discipline').value;
+    const grp = $('#lb-discipline').value;
+    const g = RATING_GROUPS.find((x) => x.key === grp);
     $('#lb-name').textContent = row.display_name;
-    $('#lb-sub').textContent = `${disc} · last ${days} days`;
+    $('#lb-sub').textContent = `${g.label} · Send Score ${row.score} · last ${days} days`;
     const box = $('#lb-summary');
     box.innerHTML = '<div class="chart-empty" style="height:90px">Loading…</div>';
     lbModal.hidden = false;
     try {
-      const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days, disc });
+      const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days, grp });
       if (error) throw error;
-      renderLbSummary(box, data, disc);
+      // Any rope discipline reads grades off the shared YDS scale
+      renderLbSummary(box, data, grp === 'boulder' ? 'Bouldering' : 'Sport');
     } catch (e) {
       console.warn('Climber summary unavailable:', e);
       box.innerHTML = `<p class="auth-status err">Couldn't load the summary (${escapeHTML(errMsg(e))}). If this persists, re-run supabase-schema.sql — the summary needs its updated functions.</p>`;
