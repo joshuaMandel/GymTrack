@@ -2002,6 +2002,14 @@
   $('#lb-close').addEventListener('click', () => { lbModal.hidden = true; });
   lbModal.addEventListener('click', (e) => { if (e.target === lbModal) lbModal.hidden = true; });
 
+  /* ----- "How the Send Score works" explainer (static content) ----- */
+  const scoreModal = $('#score-modal');
+  $$('.score-info-btn').forEach((btn) => {
+    btn.addEventListener('click', () => { scoreModal.hidden = false; });
+  });
+  $('#score-close').addEventListener('click', () => { scoreModal.hidden = true; });
+  scoreModal.addEventListener('click', (e) => { if (e.target === scoreModal) scoreModal.hidden = true; });
+
   async function openLbSummary(row) {
     const days = parseInt($('#dash-range').value, 10) || 30;
     const grp = $('#lb-discipline').value;

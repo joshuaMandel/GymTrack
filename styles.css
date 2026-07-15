@@ -493,6 +493,8 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .btn.primary { background: var(--ink); color: var(--cream); border-color: transparent; width: 100%; margin-top: 4px; }
 .btn.primary:hover { filter: brightness(1.35); }
 .btn.ghost { background: transparent; font-size: 13px; padding: 9px 16px; white-space: nowrap; }
+.btn.ghost.sm { padding: 6px 12px; font-size: 12px; color: var(--muted); }
+.btn.ghost.sm:hover { color: var(--text); }
 .btn.danger { color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); }
 .btn.add-another { width: 100%; margin-top: 8px; background: transparent; }
