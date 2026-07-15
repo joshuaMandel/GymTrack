@@ -2216,7 +2216,7 @@
         raw = u.searchParams.get('token') || raw; // ConfirmationURL carries the token hash
       }
     } catch (x) { /* not a URL — treat as a code */ }
-    const isDigits = /^\d{6}$/.test(raw);
+    const isDigits = /^\d{6,10}$/.test(raw); // OTP length is configurable (6–10 digits)
     if (isDigits && !pendingAuthEmail) return;
     // A pasted token hash could have been minted as any of these kinds
     // depending on the email template / whether the account is new.
