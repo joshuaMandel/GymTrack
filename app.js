@@ -28,7 +28,7 @@
   const gradeRank = (d, g) => gradesFor(d).indexOf(g); // higher = harder
 
   /* ----- In-memory state (single source the UI renders from) ----- */
-  let state = { lifts: [], climbs: [] };
+  let state = { lifts: [], climbs: [], routines: [] };
 
   /* ======================================================================
      Supabase setup
@@ -74,13 +74,15 @@
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const d = JSON.parse(raw);
-        if (Array.isArray(d.lifts) && Array.isArray(d.climbs)) return d;
+        if (Array.isArray(d.lifts) && Array.isArray(d.climbs)) {
+          return { lifts: d.lifts, climbs: d.climbs, routines: Array.isArray(d.routines) ? d.routines : [] };
+        }
       }
     } catch (e) { /* ignore */ }
-    return { lifts: [], climbs: [] };
+    return { lifts: [], climbs: [], routines: [] };
   }
   function saveLocal() {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ lifts: state.lifts, climbs: state.climbs }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ lifts: state.lifts, climbs: state.climbs, routines: state.routines }));
   }
   function clearLocal() { localStorage.removeItem(STORE_KEY); }
 
@@ -95,6 +97,11 @@
   });
   const fromLift = (r) => ({ id: r.id, ...liftRow(r) });
   const fromClimb = (r) => ({ id: r.id, ...climbRow(r) });
+  const routineRow = (r) => ({
+    name: r.name, position: r.position | 0,
+    exercises: r.exercises || [], last_run: r.last_run || null
+  });
+  const fromRoutine = (r) => ({ id: r.id, ...routineRow(r) });
 
   const cloudOn = () => !!(sb && session);
 
@@ -110,10 +117,21 @@
         if (climbs.error) throw climbs.error;
         state.lifts = lifts.data.map(fromLift);
         state.climbs = climbs.data.map(fromClimb);
+        // Routines fail soft: if the table hasn't been created yet (schema not
+        // re-run), the rest of the app keeps working.
+        try {
+          const r = await sb.from('routines').select('*').order('position', { ascending: true });
+          if (r.error) throw r.error;
+          state.routines = r.data.map(fromRoutine);
+        } catch (e) {
+          console.warn('Routines unavailable — run the routines section of supabase-schema.sql:', e);
+          state.routines = [];
+        }
       } else {
         const local = loadLocal();
         state.lifts = local.lifts;
         state.climbs = local.climbs;
+        state.routines = local.routines;
       }
     },
     async addLift(entry) {
@@ -160,6 +178,37 @@
         saveLocal();
       }
     },
+    async addRoutine(entry) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('routines').insert(routineRow(entry)).select().single();
+        if (error) throw error;
+        state.routines.push(fromRoutine(data));
+      } else {
+        state.routines.push({ id: uid(), ...routineRow(entry) });
+        saveLocal();
+      }
+    },
+    // patch: any subset of { name, position, exercises, last_run }
+    async updateRoutine(id, patch) {
+      if (cloudOn()) {
+        const { data, error } = await sb.from('routines').update(patch).eq('id', id).select().single();
+        if (error) throw error;
+        const i = state.routines.findIndex((x) => x.id === id);
+        if (i !== -1) state.routines[i] = fromRoutine(data);
+      } else {
+        const i = state.routines.findIndex((x) => x.id === id);
+        if (i !== -1) state.routines[i] = { ...state.routines[i], ...patch };
+        saveLocal();
+      }
+    },
+    async delRoutine(id) {
+      if (cloudOn()) {
+        const { error } = await sb.from('routines').delete().eq('id', id);
+        if (error) throw error;
+      }
+      state.routines = state.routines.filter((x) => x.id !== id);
+      if (!cloudOn()) saveLocal();
+    },
     async delLift(id) {
       if (cloudOn()) {
         const { error } = await sb.from('lifts').delete().eq('id', id);
@@ -190,6 +239,7 @@
       }
     },
     async importData(data) {
+      const routines = Array.isArray(data.routines) ? data.routines : [];
       if (cloudOn()) {
         if (data.lifts.length) {
           const { error } = await sb.from('lifts').insert(data.lifts.map(liftRow));
@@ -199,9 +249,17 @@
           const { error } = await sb.from('climbs').insert(data.climbs.map(climbRow));
           if (error) throw error;
         }
+        if (routines.length) {
+          const { error } = await sb.from('routines').insert(routines.map(routineRow));
+          if (error) throw error;
+        }
         await this.load();
       } else {
-        state = { lifts: data.lifts, climbs: data.climbs };
+        state = {
+          lifts: data.lifts,
+          climbs: data.climbs,
+          routines: routines.map((r) => ({ id: r.id || uid(), ...routineRow(r) }))
+        };
         saveLocal();
       }
     }
@@ -765,6 +823,12 @@
     editModal.hidden = true;
     editingLiftId = null;
     editingClimbId = null;
+    // Leaving the modal ends any routine session and removes its chrome.
+    run = null;
+    $('#run-strip').hidden = true;
+    $('#run-hint').hidden = true;
+    $('#run-next').hidden = true;
+    $('#lift-another').textContent = 'Save & add another set';
   }
   $('#edit-close').addEventListener('click', closeEditModal);
   editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEditModal(); });
@@ -836,6 +900,8 @@
         editStatus.textContent = `Added ${entry.exercise} — ${bw ? 'BW' : `${fmtNum(entry.weight)} ${entry.unit}`} × ${entry.reps}. Log the next set:`;
         editLiftForm.elements.notes.value = '';
         if (!bw) editLiftForm.elements.weight.select();
+      } else if (run) {
+        advanceRun(); // routine session: logged this exercise, move to the next
       } else {
         closeEditModal();
       }
@@ -910,6 +976,233 @@
   $('#climb-another').addEventListener('click', () => saveClimb(true));
 
   /* ======================================================================
+     Routines — saved training days, runnable as a guided session.
+     ====================================================================== */
+  const rx = (exercise, sets, reps) => ({ exercise, sets, reps });
+
+  // The 5-day Upper/Lower/Push/Pull/Legs program, importable with one tap.
+  const PROGRAM_ROUTINES = [
+    { name: 'Upper', exercises: [
+      rx('Weighted Pull-up', 4, '5–8'), rx('Incline Bench Press', 4, '6–10'),
+      rx('Chest-Supported Row', 3, '8–12'), rx('Overhead Press', 3, '6–10'),
+      rx('Lat Pulldown', 3, '10–12'), rx('Lateral Raise', 4, '12–20'),
+      rx('Face Pull', 3, '15–20'), rx('EZ Bar Curl', 3, '10–12'),
+      rx('Overhead Tricep Extension', 3, '10–12'), rx('Dead Hang', 3, 'max')
+    ] },
+    { name: 'Lower', exercises: [
+      rx('Back Squat', 4, '5–8'), rx('Romanian Deadlift', 3, '8–10'),
+      rx('Bulgarian Split Squat', 3, '8–12'), rx('Leg Extension', 3, '12–15'),
+      rx('Standing Calf Raise', 4, '10–15'), rx('Hanging Leg Raise', 3, '10–15')
+    ] },
+    { name: 'Push', exercises: [
+      rx('Bench Press', 4, '6–10'), rx('Seated Dumbbell Shoulder Press', 3, '8–12'),
+      rx('Weighted Dip', 3, '8–12'), rx('Cable Fly', 3, '12–15'),
+      rx('Lateral Raise', 4, '12–20'), rx('Tricep Pushdown', 3, '10–15'),
+      rx('Ab Wheel Rollout', 3, '10–15')
+    ] },
+    { name: 'Pull', exercises: [
+      rx('Chin-up', 4, '6–10'), rx('Pendlay Row', 4, '6–10'),
+      rx('Single-Arm Dumbbell Row', 3, '8–12'), rx('EZ Bar Curl', 3, '10–12'),
+      rx('Hammer Curl', 3, '10–12'), rx('Rear-Delt Flye', 3, '15–20'),
+      rx('Hangboard Repeaters', 3, 'max'), rx('Wrist Curl', 2, '15–20')
+    ] },
+    { name: 'Legs', exercises: [
+      rx('Deadlift', 3, '5–8'), rx('Hip Thrust', 3, '8–12'),
+      rx('Walking Lunge', 3, '10–12'), rx('Seated Leg Curl', 3, '12–15'),
+      rx('Seated Calf Raise', 4, '15–20'), rx('Cable Crunch', 3, '12–15')
+    ] }
+  ];
+
+  function seedProgram() {
+    withSync(async () => {
+      for (let i = 0; i < PROGRAM_ROUTINES.length; i++) {
+        await Store.addRoutine({ name: PROGRAM_ROUTINES[i].name, position: i, exercises: PROGRAM_ROUTINES[i].exercises, last_run: null });
+      }
+      renderProgram();
+    });
+  }
+
+  // The routine after the most recently run one (cycling), or the first.
+  function upNextId(rs) {
+    const ran = rs.filter((r) => r.last_run);
+    if (!ran.length) return rs[0].id;
+    const last = ran.slice().sort((a, b) => (a.last_run < b.last_run ? 1 : -1))[0];
+    const i = rs.findIndex((r) => r.id === last.id);
+    return rs[(i + 1) % rs.length].id;
+  }
+
+  function renderProgram() {
+    const el = $('#routine-list');
+    const rs = state.routines.slice().sort((a, b) => (a.position | 0) - (b.position | 0));
+    if (!rs.length) {
+      el.innerHTML = `
+        <div class="routine-empty">
+          <p class="muted">Save your training days once, then run them with one tap — each exercise pre-filled from the last time you did it.</p>
+          <button class="btn pill" id="routine-seed">＋ Add the 5-day program</button>
+        </div>`;
+      $('#routine-seed').addEventListener('click', seedProgram);
+      return;
+    }
+    const nextId = upNextId(rs);
+    el.innerHTML = rs.map((r) => `
+      <div class="routine-row" data-id="${escapeHTML(String(r.id))}">
+        <div>
+          <div class="feed-main">${escapeHTML(r.name)}${r.id === nextId ? ' <span class="you-chip">Up next</span>' : ''}</div>
+          <div class="feed-sub">${r.exercises.length} exercise${r.exercises.length === 1 ? '' : 's'}${r.last_run ? ' · last run ' + fmtDateShort(r.last_run) : ''}</div>
+        </div>
+        <div class="routine-actions">
+          <button class="edit-btn" title="Edit routine" aria-label="Edit routine"><svg class="ico"><use href="#i-pencil"/></svg></button>
+          <button class="btn pill sm run-btn">Start</button>
+        </div>
+      </div>`).join('');
+    el.querySelectorAll('.routine-row').forEach((row) => {
+      const r = rs.find((x) => String(x.id) === row.dataset.id);
+      row.querySelector('.edit-btn').addEventListener('click', () => openRoutineEditor(r));
+      row.querySelector('.run-btn').addEventListener('click', () => startRoutine(r));
+    });
+  }
+
+  /* ----- Routine editor modal ----- */
+  const routineModal = $('#routine-modal');
+  const routineForm = $('#routine-form');
+  let editingRoutineId = null;
+
+  function routineRowEl(item) {
+    const div = document.createElement('div');
+    div.className = 'routine-edit-row';
+    div.innerHTML = `
+      <div class="suggest-wrap">
+        <input type="text" class="r-ex" placeholder="Exercise" autocomplete="off" autocapitalize="words" value="${escapeHTML(item ? item.exercise : '')}" />
+        <div class="suggest-panel" hidden></div>
+      </div>
+      <input type="number" class="r-sets" min="1" max="12" step="1" value="${item ? item.sets : 3}" aria-label="Sets" />
+      <input type="text" class="r-reps" placeholder="8–12" value="${escapeHTML(item ? item.reps : '')}" aria-label="Reps" />
+      <button type="button" class="row-del" title="Remove exercise" aria-label="Remove exercise"><svg class="ico"><use href="#i-x"/></svg></button>`;
+    attachSuggest(div.querySelector('.r-ex'));
+    div.querySelector('.row-del').addEventListener('click', () => div.remove());
+    return div;
+  }
+
+  function openRoutineEditor(r) {
+    editingRoutineId = r ? r.id : null;
+    routineForm.reset();
+    routineForm.elements.name.value = r ? r.name : '';
+    const rows = $('#routine-rows');
+    rows.innerHTML = '';
+    (r ? r.exercises : [null, null, null]).forEach((it) => rows.appendChild(routineRowEl(it)));
+    $('#routine-title').textContent = r ? 'Edit routine' : 'New routine';
+    $('#routine-delete').hidden = !r;
+    const status = $('#routine-status');
+    status.textContent = ''; status.className = 'auth-status';
+    routineModal.hidden = false;
+  }
+  function closeRoutineModal() { routineModal.hidden = true; editingRoutineId = null; }
+
+  $('#routine-new').addEventListener('click', () => openRoutineEditor(null));
+  $('#routine-close').addEventListener('click', closeRoutineModal);
+  routineModal.addEventListener('click', (e) => { if (e.target === routineModal) closeRoutineModal(); });
+  $('#routine-add-row').addEventListener('click', () => $('#routine-rows').appendChild(routineRowEl(null)));
+
+  routineForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = routineForm.elements.name.value.trim();
+    const items = [...$('#routine-rows').children].map((row) => ({
+      exercise: canonicalExercise(row.querySelector('.r-ex').value),
+      sets: parseInt(row.querySelector('.r-sets').value, 10) || 3,
+      reps: row.querySelector('.r-reps').value.trim()
+    })).filter((it) => it.exercise);
+    if (!name || !items.length) {
+      const status = $('#routine-status');
+      status.className = 'auth-status err';
+      status.textContent = 'Give the routine a name and at least one exercise.';
+      return;
+    }
+    const id = editingRoutineId;
+    withSync(async () => {
+      if (id) await Store.updateRoutine(id, { name, exercises: items });
+      else await Store.addRoutine({ name, position: state.routines.length, exercises: items, last_run: null });
+      closeRoutineModal();
+      renderProgram();
+    });
+  });
+
+  $('#routine-delete').addEventListener('click', () => {
+    const id = editingRoutineId;
+    if (!id || !confirm('Delete this routine? Your logged sets are not affected.')) return;
+    withSync(async () => {
+      await Store.delRoutine(id);
+      closeRoutineModal();
+      renderProgram();
+    });
+  });
+
+  /* ----- Session runner: walk a routine exercise by exercise ----- */
+  let run = null; // { routine, idx } while a session is in progress
+
+  // The most recent day this exercise was logged; heaviest set from that day.
+  function lastFor(exercise) {
+    const k = exKey(exercise);
+    const mine = state.lifts.filter((l) => exKey(l.exercise) === k);
+    if (!mine.length) return null;
+    const lastDate = mine.reduce((m, l) => (l.date > m ? l.date : m), mine[0].date);
+    return mine.filter((l) => l.date === lastDate).reduce((a, b) => (b.weight > a.weight ? b : a));
+  }
+
+  function startRoutine(r) {
+    run = { routine: r, idx: 0 };
+    // Mark it run today so "Up next" advances to the following day.
+    withSync(async () => {
+      await Store.updateRoutine(r.id, { last_run: todayISO() });
+      renderProgram();
+    });
+    runExercise();
+  }
+
+  function runExercise() {
+    const { routine, idx } = run;
+    const item = routine.exercises[idx];
+    const lastEx = idx === routine.exercises.length - 1;
+    editingLiftId = null;
+    editLiftForm.reset();
+    editLiftForm.elements.date.value = todayISO();
+    editLiftForm.elements.exercise.value = item.exercise;
+    editLiftForm.elements.sets.value = item.sets || 1;
+    const last = lastFor(item.exercise);
+    if (last) {
+      editLiftForm.elements.unit.value = last.unit;
+      editLiftForm.elements.bodyweight.checked = !(last.weight > 0);
+      applyBodyweight();
+      if (last.weight > 0) editLiftForm.elements.weight.value = last.weight;
+      editLiftForm.elements.reps.value = last.reps;
+    } else {
+      applyBodyweight();
+      editLiftForm.elements.unit.value = dominantUnit();
+    }
+    const strip = $('#run-strip');
+    strip.hidden = false;
+    strip.textContent = `Exercise ${idx + 1} of ${routine.exercises.length} · target ${item.sets}×${item.reps || '?'}`;
+    const hint = $('#run-hint');
+    hint.hidden = !last;
+    if (last) {
+      hint.textContent = `Last time: ${last.weight > 0 ? `${fmtNum(last.weight)} ${last.unit}` : 'BW'} — ${last.sets}×${last.reps} on ${fmtDateShort(last.date)}`;
+    }
+    $('#edit-lift-submit').textContent = lastEx ? 'Log set & finish' : 'Log set & next';
+    $('#lift-another').hidden = false;
+    $('#lift-another').textContent = 'Log set & stay';
+    const skip = $('#run-next');
+    skip.hidden = false;
+    skip.textContent = lastEx ? 'Skip & finish' : 'Skip exercise';
+    openEntryModal('lift', routine.name);
+  }
+
+  function advanceRun() {
+    run.idx++;
+    if (run.idx >= run.routine.exercises.length) closeEditModal();
+    else runExercise();
+  }
+  $('#run-next').addEventListener('click', advanceRun);
+
+  /* ======================================================================
      Dashboard
      ====================================================================== */
   // "▲ 12% vs prior 30d" — trend annotation under a stat value
@@ -962,6 +1255,7 @@
 
     // Home top section: week strip, hero, mini cards, streak, recent feed
     renderHome();
+    renderProgram();
     renderLeaderboard(); // async; manages its own visibility
   }
 
@@ -1379,7 +1673,7 @@
      Export / Import / Reset
      ====================================================================== */
   $('#export-btn').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ lifts: state.lifts, climbs: state.climbs }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ lifts: state.lifts, climbs: state.climbs, routines: state.routines }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

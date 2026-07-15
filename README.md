@@ -18,6 +18,11 @@ backend.
   (Sport / Top Rope / Trad, YDS 5.x); result tracking (Send / Flash / Onsight /
   Project), attempts, location, notes; progress charts for hardest send over
   time (per scale) and sends per session by discipline.
+- **Workout routines** — save your training days (e.g. a 5-day
+  Upper/Lower/Push/Pull/Legs split, importable with one tap) and run them as a
+  guided session: each exercise opens pre-filled with what you lifted last
+  time, with the target sets × reps and a "last time" hint shown. "Up next"
+  suggests tomorrow's day based on what you ran last.
 - **Two storage modes:**
   - **Local (default)** — data stays in your browser via `localStorage`. No
     account needed.
@@ -42,8 +47,9 @@ Sync is **opt-in** — the app works fully without it. To enable it:
 1. **Create a free Supabase project** at [supabase.com](https://supabase.com).
 2. **Create the tables.** In your project: **SQL Editor → New query**, paste the
    contents of [`supabase-schema.sql`](./supabase-schema.sql), and **Run**. This
-   creates the `lifts` and `climbs` tables with Row-Level Security so each user
-   can only ever access their own rows.
+   creates the `lifts`, `climbs`, and `routines` tables with Row-Level Security
+   so each user can only ever access their own rows. (The schema is idempotent —
+   re-running it after an update only adds what's new.)
 3. **Allow the site to redirect back after login.** In **Authentication → URL
    Configuration**:
    - Set **Site URL** to your deployed site, e.g.

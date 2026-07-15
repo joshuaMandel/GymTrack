@@ -55,6 +55,30 @@ create policy "own climbs" on public.climbs
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+-- ---------- Workout routines ----------
+-- A routine is a saved training day: a name plus an ordered list of exercises
+-- with target sets/reps, stored as JSON. last_run drives the "Up next" hint.
+create table if not exists public.routines (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  name       text not null,
+  position   integer not null default 0,
+  exercises  jsonb not null default '[]',
+  last_run   date,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists routines_user_idx on public.routines (user_id);
+
+alter table public.routines enable row level security;
+
+drop policy if exists "own routines" on public.routines;
+create policy "own routines" on public.routines
+  for all
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
 -- ---------- Climbing leaderboard ----------
 -- Signed-in users normally see only their own rows (RLS above). This
 -- SECURITY DEFINER function is the one deliberate exception: it exposes

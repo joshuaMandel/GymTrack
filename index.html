@@ -86,6 +86,9 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
       <button class="modal-close" id="edit-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
       <h2 id="edit-title">Edit entry</h2>
+      <!-- Session-runner chrome (shown while running a routine) -->
+      <p class="run-strip" id="run-strip" hidden></p>
+      <p class="run-hint" id="run-hint" hidden></p>
 
       <form id="edit-lift-form" autocomplete="off" hidden>
         <label>Date
@@ -123,6 +126,7 @@
         </label>
         <button type="submit" class="btn primary" id="edit-lift-submit">Save changes</button>
         <button type="button" class="btn add-another" id="lift-another" hidden>Save &amp; add another set</button>
+        <button type="button" class="btn ghost run-skip" id="run-next" hidden>Skip exercise</button>
       </form>
 
       <form id="edit-climb-form" autocomplete="off" hidden>
@@ -164,6 +168,25 @@
       </form>
 
       <p class="auth-status" id="edit-status" role="status"></p>
+    </div>
+  </div>
+
+  <!-- Routine editor modal -->
+  <div class="modal-overlay" id="routine-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="routine-title">
+      <button class="modal-close" id="routine-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
+      <h2 id="routine-title">New routine</h2>
+      <form id="routine-form" autocomplete="off">
+        <label>Name
+          <input type="text" name="name" maxlength="40" placeholder="e.g. Push day" required />
+        </label>
+        <div class="routine-head-row"><span>Exercise</span><span>Sets</span><span>Reps</span><span></span></div>
+        <div id="routine-rows"></div>
+        <button type="button" class="btn add-another" id="routine-add-row">＋ Add exercise</button>
+        <button type="submit" class="btn primary" id="routine-submit">Save routine</button>
+        <button type="button" class="btn ghost danger routine-del" id="routine-delete" hidden>Delete routine</button>
+      </form>
+      <p class="auth-status" id="routine-status" role="status"></p>
     </div>
   </div>
 
@@ -246,6 +269,15 @@
           <span class="mini-value" id="mini-top">—</span>
           <span class="mini-sub" id="mini-top-sub"></span>
         </div>
+      </div>
+
+      <!-- Program / routines -->
+      <div class="panel" id="program-panel">
+        <div class="panel-head">
+          <h3>Your program</h3>
+          <button class="btn ghost" id="routine-new">＋ New routine</button>
+        </div>
+        <div class="routine-list" id="routine-list"></div>
       </div>
 
       <!-- Trends -->
