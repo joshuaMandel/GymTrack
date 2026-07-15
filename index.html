@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15v" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15w" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -239,31 +239,53 @@
     <div class="modal wn-modal" role="dialog" aria-modal="true" aria-labelledby="score-title">
       <button class="modal-close" id="score-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
       <h2 id="score-title">How the Send Score works</h2>
-      <p class="muted small">A chess-style rating for your climbing, recomputed from your full log.</p>
+      <p class="muted small">One number for how you're climbing — like a chess rating. Everyone starts at 1000, and every climb you log moves it a little.</p>
+
+      <h3 class="score-sub">First, the words climbers use</h3>
       <div class="wn-list">
         <div class="wn-row">
           <span class="wn-ico t-navy"><svg class="ico"><use href="#i-mountain"/></svg></span>
-          <div><b>Two scores, one start</b><span>Bouldering (V scale) and Roped (YDS) are scored separately. Everyone starts at 1000, and your whole history is replayed in order.</span></div>
-        </div>
-        <div class="wn-row">
-          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-medal"/></svg></span>
-          <div><b>Routes get numbers too</b><span>V0 ≈ 1000 and each V grade adds 200; 5.6 ≈ 1000 and each letter grade adds 100.</span></div>
-        </div>
-        <div class="wn-row">
-          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-trophy"/></svg></span>
-          <div><b>Every climb is a match</b><span>Your score moves by K × (result − expected). A send is a win, a project is a loss, and "expected" comes from the gap between you and the route — chess-style.</span></div>
+          <div><b>Send</b><span>You climbed it to the top clean — no falls, no resting on the rope. It still counts no matter how many tries it took to get there.</span></div>
         </div>
         <div class="wn-row">
           <span class="wn-ico t-orange"><svg class="ico"><use href="#i-star"/></svg></span>
-          <div><b>Style counts</b><span>A flash scores the route 40 points harder, an onsight 80. Each extra attempt takes 8 off, capped at 40.</span></div>
+          <div><b>Flash</b><span>A send on your very first try — maybe after watching a friend do it or getting tips on the moves.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-medal"/></svg></span>
+          <div><b>Onsight</b><span>A first-try send with no help at all — no tips, no watching anyone. The rarest and most impressive way to do a climb.</span></div>
         </div>
         <div class="wn-row">
           <span class="wn-ico t-navy"><svg class="ico"><use href="#i-flame"/></svg></span>
-          <div><b>You can't farm it</b><span>Easy laps are worth ~0 and a failed project costs almost nothing. Big days move you more, with diminishing returns as your score rises mid-session.</span></div>
+          <div><b>Project</b><span>A climb you tried but haven't finished yet. Logging projects is a good thing — working something too hard for you is how you get better.</span></div>
         </div>
         <div class="wn-row">
-          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-plus"/></svg></span>
-          <div><b>Finding your level</b><span>Your first 5 sessions are provisional and swing harder (K 24 per climb, then 12). The ▲/▼ beside a score is the last session's net change.</span></div>
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-trophy"/></svg></span>
+          <div><b>Grades</b><span>How hard a climb is. Boulders use V0–V17; roped routes use 5.5–5.15. Bigger number = harder. Your score treats each grade as a step up in difficulty.</span></div>
+        </div>
+      </div>
+
+      <h3 class="score-sub">How the number moves</h3>
+      <div class="wn-list">
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-pencil"/></svg></span>
+          <div><b>Every climb is scored against a prediction</b><span>From the gap between your score and the climb's grade, the app predicts your chance of sending. Beat the prediction and your score rises; fall short and it dips — exactly like winning or losing a chess game.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-plus"/></svg></span>
+          <div><b>Hard sends pay big, easy ones don't</b><span>Send above your level and you jump. Cruise things you're expected to send and you barely move — you can't inflate the score with easy laps.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-mountain"/></svg></span>
+          <div><b>Falling is nearly free</b><span>Fail a project and you lose almost nothing, because you weren't expected to send it. Trying hard climbs never wrecks your score.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-star"/></svg></span>
+          <div><b>Style and volume count</b><span>Flashes earn a bonus and onsights a bigger one; needing lots of attempts trims the reward slightly. More climbs in a day means more chances to move — but each send surprises the score a little less as it rises.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-flame"/></svg></span>
+          <div><b>Finding your level</b><span>Your first 5 sessions are marked "Provisional" and swing harder while the score finds where you belong. The ▲/▼ beside a score is the change from that climber's latest session.</span></div>
         </div>
       </div>
     </div>
@@ -691,6 +713,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15v"></script>
+  <script src="app.js?v=2026-07-15w"></script>
 </body>
 </html>
