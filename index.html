@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; bump it when styles.css/app.js change -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15l" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15m" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -185,6 +185,42 @@
       </form>
 
       <p class="auth-status" id="edit-status" role="status"></p>
+    </div>
+  </div>
+
+  <!-- One-time "What's new" popup (seen-flag stored per release id) -->
+  <div class="modal-overlay" id="whatsnew-modal" hidden>
+    <div class="modal wn-modal" role="dialog" aria-modal="true" aria-labelledby="wn-title">
+      <button class="modal-close" id="wn-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
+      <h2 id="wn-title">What's new</h2>
+      <p class="muted small">GymTrack got a big upgrade today:</p>
+      <div class="wn-list">
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-barbell"/></svg></span>
+          <div><b>Your program</b><span>Save your training days, then run them as guided sessions — every exercise pre-filled from last time.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-plus"/></svg></span>
+          <div><b>Install it as an app</b><span>Add to Home Screen for instant opens. Works fully offline — logs sync when you're back.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-user"/></svg></span>
+          <div><b>Profile page</b><span>Lifetime stats, 15 achievements to earn, your own weekly goal, units, and avatar color.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-mountain"/></svg></span>
+          <div><b>Climbing extras</b><span>Log the hold color of each route, and tap leaderboard names to see their grade pyramid.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-star"/></svg></span>
+          <div><b>Easier logging</b><span>A bodyweight checkbox for pull-ups and hangs, plus sign-in with an emailed code.</span></div>
+        </div>
+        <div class="wn-row">
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-flame"/></svg></span>
+          <div><b>Day streak</b><span>The flame now counts days in a row — and one rest day won't break it.</span></div>
+        </div>
+      </div>
+      <button type="button" class="btn primary" id="wn-done">Let's go</button>
     </div>
   </div>
 
@@ -592,6 +628,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15l"></script>
+  <script src="app.js?v=2026-07-15m"></script>
 </body>
 </html>

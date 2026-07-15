@@ -781,6 +781,23 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .auth-status.ok { color: var(--good); }
 .auth-status.err { color: var(--danger); }
 
+/* ---------- "What's new" popup ---------- */
+.wn-modal { max-width: 440px; }
+.wn-list { display: flex; flex-direction: column; gap: 12px; margin: 16px 0 18px; }
+.wn-row { display: flex; gap: 12px; align-items: flex-start; }
+.wn-ico {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex: none;
+  margin-top: 1px;
+}
+.wn-ico .ico { width: 18px; height: 18px; }
+.wn-ico.t-orange { background: var(--accent-tint); color: var(--accent-text); }
+.wn-ico.t-navy { background: var(--accent-2-tint); color: var(--accent-2); }
+.wn-row b { display: block; font-size: 14px; }
+.wn-row span:not(.wn-ico) { display: block; font-size: 12.5px; color: var(--muted); margin-top: 1px; line-height: 1.45; }
+
 /* ---------- Bottom dock: nav pill + FAB ---------- */
 .bottom-dock {
   position: fixed;

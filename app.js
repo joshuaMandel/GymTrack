@@ -2476,6 +2476,36 @@
     if (sb) await sb.auth.signOut();
   });
 
+  /* ----- One-time "What's new" popup -----
+     Shown once per release id, then never again: the seen flag lives in
+     localStorage (this device) and, when signed in, in user_metadata too —
+     so dismissing it on your phone also silences it on your laptop. */
+  const WHATS_NEW_VERSION = '2026-07-15';
+  const WHATS_NEW_KEY = 'gymtrack.whatsnew';
+  let whatsNewShownThisLoad = false;
+
+  function whatsNewSeen() {
+    return localStorage.getItem(WHATS_NEW_KEY) === WHATS_NEW_VERSION ||
+      getSettings().whatsnew_seen === WHATS_NEW_VERSION;
+  }
+  function dismissWhatsNew() {
+    $('#whatsnew-modal').hidden = true;
+    localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_VERSION);
+    if (cloudOn()) saveSettings({ whatsnew_seen: WHATS_NEW_VERSION }).catch(() => {});
+  }
+  function maybeShowWhatsNew() {
+    if (whatsNewShownThisLoad || whatsNewSeen()) return;
+    if (document.body.classList.contains('auth-gated')) return;
+    if (namePrompted) return; // first-sign-in onboarding wins; popup next visit
+    // Brand-new users skip it — everything is new to them anyway.
+    if (!state.lifts.length && !state.climbs.length && !state.routines.length) return;
+    whatsNewShownThisLoad = true;
+    $('#whatsnew-modal').hidden = false;
+  }
+  $('#wn-done').addEventListener('click', dismissWhatsNew);
+  $('#wn-close').addEventListener('click', dismissWhatsNew);
+  $('#whatsnew-modal').addEventListener('click', (e) => { if (e.target === $('#whatsnew-modal')) dismissWhatsNew(); });
+
   // On first sign-in with no name yet, land on Profile to set one.
   function maybePromptName() {
     if (namePrompted) return;
@@ -2517,6 +2547,7 @@
     // first time already filled with data (and charts measure real widths).
     revealApp();
     renderAll();
+    maybeShowWhatsNew();
     flushQueue(); // push anything logged while offline
   }
 
