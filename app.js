@@ -1141,22 +1141,17 @@
       ? `${top.exercise} · ${new Date(top.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' })}`
       : '';
 
-    // ----- Weekly streak: consecutive weeks (ending now) with ≥1 session -----
-    const weekSet = new Set([...activeDates].map(weekStart));
+    // ----- Day streak: consecutive days (ending now) with ≥1 session -----
+    const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     let streak = 0;
-    let cursor = weekStart(todayIso);
-    if (!weekSet.has(cursor)) { // grace: a quiet Monday doesn't break the streak
-      const prev = new Date(cursor + 'T00:00:00');
-      prev.setDate(prev.getDate() - 7);
-      cursor = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
-    }
-    while (weekSet.has(cursor)) {
+    const cursor = new Date();
+    if (!activeDates.has(todayIso)) cursor.setDate(cursor.getDate() - 1); // grace: today isn't over yet
+    while (activeDates.has(isoOf(cursor))) {
       streak++;
-      const prev = new Date(cursor + 'T00:00:00');
-      prev.setDate(prev.getDate() - 7);
-      cursor = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+      cursor.setDate(cursor.getDate() - 1);
     }
     $('#streak-count').textContent = streak;
+    $('#streak-unit').textContent = streak === 1 ? 'day' : 'days';
     $('#streak-pill').hidden = false;
 
     // ----- Recent activity: lifts + climbs merged -----
