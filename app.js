@@ -298,6 +298,7 @@
       $$('.view').forEach((v) => v.classList.remove('is-active'));
       $('#view-' + view).classList.add('is-active');
       window.scrollTo(0, 0); // each page opens from its top
+      redrawActiveCharts();  // charts drawn while hidden re-fit to real width
     });
   });
 
@@ -905,7 +906,19 @@
     $('#dash-climb-sends').textContent = sendCount(climbsCur);
     setDelta('#dash-climb-sends-delta', sendCount(climbsCur), sendCount(climbsPrev), R);
 
-    // Weekly trend charts spanning the selected range (empty weeks shown as zero)
+    // Weekly trend charts (also redrawn on view switch / resize)
+    renderDashCharts();
+
+    // Home top section: week strip, hero, mini cards, streak, recent feed
+    renderHome();
+    renderLeaderboard(); // async; manages its own visibility
+  }
+
+  // Weekly trend charts spanning the selected range (empty weeks shown as zero).
+  // Separate from renderDashboard so chart redraws skip stats + leaderboard RPC.
+  function renderDashCharts() {
+    const unit = dominantUnit();
+    const R = parseInt($('#dash-range').value, 10) || 30;
     const nWeeks = Math.ceil(R / 7) + 1;
     const weeks = [];
     const start = weekStart(daysAgoISO(7 * (nWeeks - 1)));
@@ -938,11 +951,23 @@
         : { label: disc, points: [] };
     });
     drawChart($('#dash-climb-chart'), sendSeries, (v) => fmtNum(Math.round(v)));
-
-    // Home top section: week strip, hero, mini cards, streak, recent feed
-    renderHome();
-    renderLeaderboard(); // async; manages its own visibility
   }
+
+  // Redraw the visible view's charts at their current on-screen width.
+  function redrawActiveCharts() {
+    if (!$('#view-dashboard').classList.contains('is-active')) {
+      if ($('#view-lifting').classList.contains('is-active')) renderLiftChart();
+      else renderClimbChart();
+    } else {
+      renderDashCharts();
+    }
+  }
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(redrawActiveCharts, 150);
+  });
 
   $('#dash-range').addEventListener('change', renderDashboard);
 
@@ -1119,7 +1144,13 @@
     const vpad = (max - min) * 0.1;
     min -= vpad; max += vpad;
 
-    const W = 480, H = 200, padL = 46, padR = 14, padT = 14, padB = 28;
+    // Draw at the wrap's real pixel width so nothing stretches (a fixed
+    // viewBox scaled to 100% width distorted dots and text on desktop).
+    // Hidden views measure 0 — fall back and let redrawActiveCharts() fix
+    // it when the view becomes visible.
+    const measured = Math.round(wrap.getBoundingClientRect().width);
+    const W = measured >= 200 ? measured : 640;
+    const H = 200, padL = 46, padR = 14, padT = 14, padB = 28;
     const innerW = W - padL - padR;
     const innerH = H - padT - padB;
     const n = dates.length;
@@ -1154,7 +1185,7 @@
       : '';
 
     wrap.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Progress chart">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Progress chart">
         ${yTicks}
         ${seriesSvg}
         ${xLabels}
