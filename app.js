@@ -1436,10 +1436,21 @@
       </div>`;
     const rows = grades.map((g) => {
       const b = byGrade[g];
+      // Flashes/onsights ARE sends — show them as a breakdown of the send
+      // count ("1 send (flash)"), never as a separate tally beside it.
       const parts = [];
-      if (b.sends) parts.push(`${b.sends} send${b.sends === 1 ? '' : 's'}`);
-      if (b.flash) parts.push(`${b.flash} flash`);
-      if (b.onsight) parts.push(`${b.onsight} onsight`);
+      if (b.sends) {
+        const subs = [];
+        if (b.flash) subs.push(`${b.flash} flash${b.flash === 1 ? '' : 'es'}`);
+        if (b.onsight) subs.push(`${b.onsight} onsight${b.onsight === 1 ? '' : 's'}`);
+        let label = `${b.sends} send${b.sends === 1 ? '' : 's'}`;
+        if (subs.length) {
+          label += b.sends === 1
+            ? ` (${b.flash ? 'flash' : 'onsight'})`
+            : ` (${subs.join(' · ')})`;
+        }
+        parts.push(label);
+      }
       if (b.project) parts.push(`${b.project} project${b.project === 1 ? '' : 's'}`);
       const w = Math.max(4, Math.round(((b.sends + b.project) / maxN) * 100));
       return `
