@@ -1898,7 +1898,6 @@
       cursor.setDate(cursor.getDate() - 1);
     }
     $('#streak-count').textContent = streak;
-    $('#streak-unit').textContent = streak === 1 ? 'day' : 'days';
     $('#streak-pill').hidden = false;
 
     // ----- Recent activity: lifts + climbs merged -----
