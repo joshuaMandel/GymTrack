@@ -1102,7 +1102,7 @@
   /* ======================================================================
      Climber rating — chess-ELO style, computed client-side (Phase 1).
      Each climb is a "match" against the route (rated from its grade):
-     sending is a win, projecting a loss, and flash/onsight/attempts shift
+     sending is a win, projecting a loss, and flash/attempts shift
      the effective route difficulty. Two independent ratings — Bouldering
      (V scale) and Roped (YDS) — since the scales aren't comparable.
      The key property: easy sends net ~0, so you can't farm the number —
@@ -1114,7 +1114,9 @@
   const RATING_K_PROV = 24;              // per-CLIMB swing while new…
   const RATING_K_EST = 12;               // …steadier once established
   const RATING_PROVISIONAL_SESSIONS = 5; // sessions needed to leave provisional
-  const RATING_STYLE = { Onsight: 80, Flash: 40 }; // effective-difficulty bonus on a send
+  // Effective-difficulty bonus on a send. 'Onsight' is retired from the UI;
+  // legacy rows (and stale offline queues) score as flashes on both sides.
+  const RATING_STYLE = { Flash: 40, Onsight: 40 };
 
   const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
 
@@ -1128,7 +1130,7 @@
 
   // Per-CLIMB performance rating, replayed in order. Every climb is a match
   // against the route: the score moves by K × (result − expected) right then,
-  // so more climbing moves you more, each flash/onsight carries its own
+  // so more climbing moves you more, each flash carries its own
   // bonus, and a failed project barely costs (you weren't expected to send).
   // Diminishing returns are built in — as the number rises mid-session, each
   // further send surprises it less. Splitting the same climbs across days
@@ -1156,7 +1158,7 @@
         const sent = isSend(c.result);
         let eff = routeRating(c.discipline, c.grade);
         if (sent) {
-          eff += RATING_STYLE[c.result] || 0;                          // onsight/flash beat a harder route
+          eff += RATING_STYLE[c.result] || 0;                          // a flash beat a harder route
           eff -= Math.min(Math.max(0, (Number(c.attempts) || 1) - 1) * 8, 40); // many goes = barely won
           sends++;
           const rk = gradeRank(c.discipline, c.grade);
@@ -2038,12 +2040,12 @@
     // Collapse per-result rows into per-grade buckets
     const byGrade = {};
     (data.by_grade || []).forEach((g) => {
-      const b = (byGrade[g.grade] = byGrade[g.grade] || { sends: 0, flash: 0, onsight: 0, project: 0 });
+      const b = (byGrade[g.grade] = byGrade[g.grade] || { sends: 0, flash: 0, project: 0 });
       if (g.result === 'Project') b.project += g.n;
       else {
         b.sends += g.n;
-        if (g.result === 'Flash') b.flash += g.n;
-        if (g.result === 'Onsight') b.onsight += g.n;
+        // 'Onsight' is retired — legacy rows read as flashes
+        if (g.result === 'Flash' || g.result === 'Onsight') b.flash += g.n;
       }
     });
     const grades = Object.keys(byGrade).sort((a, b) => gradeRank(disc, b) - gradeRank(disc, a));
@@ -2062,18 +2064,13 @@
       </div>`;
     const rows = grades.map((g) => {
       const b = byGrade[g];
-      // Flashes/onsights ARE sends — show them as a breakdown of the send
-      // count ("1 send (flash)"), never as a separate tally beside it.
+      // Flashes ARE sends — show them as a breakdown of the send count
+      // ("1 send (flash)"), never as a separate tally beside it.
       const parts = [];
       if (b.sends) {
-        const subs = [];
-        if (b.flash) subs.push(`${b.flash} flash${b.flash === 1 ? '' : 'es'}`);
-        if (b.onsight) subs.push(`${b.onsight} onsight${b.onsight === 1 ? '' : 's'}`);
         let label = `${b.sends} send${b.sends === 1 ? '' : 's'}`;
-        if (subs.length) {
-          label += b.sends === 1
-            ? ` (${b.flash ? 'flash' : 'onsight'})`
-            : ` (${subs.join(' · ')})`;
+        if (b.flash) {
+          label += b.sends === 1 ? ' (flash)' : ` (${b.flash} flash${b.flash === 1 ? '' : 'es'})`;
         }
         parts.push(label);
       }

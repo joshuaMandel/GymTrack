@@ -96,7 +96,11 @@ create policy "own routines" on public.routines
 -- immediately (K × (result − expected)); ties within a date replay in id
 -- order on both sides. KEEP THE CONSTANTS IN SYNC with app.js: start 1000;
 -- V-grade step 200; YDS step 100; per-climb K = 24 for the first 5 sessions
--- then 12; onsight +80 / flash +40; repeated attempts −8 each, capped −40.
+-- then 12; flash +40; repeated attempts −8 each, capped −40.
+
+-- 'Onsight' was retired from the UI (July 2026): existing rows become
+-- flashes. Idempotent — after the first apply this matches zero rows.
+update public.climbs set result = 'Flash' where result = 'Onsight';
 drop function if exists public.climb_leaderboard(integer, text); -- replaced by Send Score standings
 drop function if exists public.climb_send_scores(text);
 drop function if exists public.climb_send_scores_impl(text);
@@ -190,7 +194,8 @@ begin
     sent := rec.res <> 'Project';
     eff := 1000 + (rec.pos - anchor) * step;
     if sent then
-      eff := eff + case rec.res when 'Onsight' then 80 when 'Flash' then 40 else 0 end;
+      -- 'Onsight' is a legacy alias for Flash (stale clients may still send it)
+      eff := eff + case rec.res when 'Flash' then 40 when 'Onsight' then 40 else 0 end;
       eff := eff - least((rec.tries - 1) * 8, 40);
       if max_pos is null or rec.pos > max_pos then max_pos := rec.pos; end if;
     end if;

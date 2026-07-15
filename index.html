@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15w" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15x" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -169,7 +169,6 @@
             <select name="result">
               <option value="Send">Send</option>
               <option value="Flash">Flash</option>
-              <option value="Onsight">Onsight</option>
               <option value="Project">Project (no send)</option>
             </select>
           </label>
@@ -252,10 +251,6 @@
           <div><b>Flash</b><span>A send on your very first try — maybe after watching a friend do it or getting tips on the moves.</span></div>
         </div>
         <div class="wn-row">
-          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-medal"/></svg></span>
-          <div><b>Onsight</b><span>A first-try send with no help at all — no tips, no watching anyone. The rarest and most impressive way to do a climb.</span></div>
-        </div>
-        <div class="wn-row">
           <span class="wn-ico t-navy"><svg class="ico"><use href="#i-flame"/></svg></span>
           <div><b>Project</b><span>A climb you tried but haven't finished yet. Logging projects is a good thing — working something too hard for you is how you get better.</span></div>
         </div>
@@ -281,7 +276,7 @@
         </div>
         <div class="wn-row">
           <span class="wn-ico t-navy"><svg class="ico"><use href="#i-star"/></svg></span>
-          <div><b>Style and volume count</b><span>Flashes earn a bonus and onsights a bigger one; needing lots of attempts trims the reward slightly. More climbs in a day means more chances to move — but each send surprises the score a little less as it rises.</span></div>
+          <div><b>Style and volume count</b><span>Flashes earn a bonus; needing lots of attempts trims the reward slightly. More climbs in a day means more chances to move — but each send surprises the score a little less as it rises.</span></div>
         </div>
         <div class="wn-row">
           <span class="wn-ico t-orange"><svg class="ico"><use href="#i-flame"/></svg></span>
@@ -713,6 +708,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15w"></script>
+  <script src="app.js?v=2026-07-15x"></script>
 </body>
 </html>
