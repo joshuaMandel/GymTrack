@@ -941,6 +941,7 @@
   const isSend = (r) => r !== 'Project';
 
   function renderClimbing() {
+    renderClimberRating();
     renderClimbTable();
     renderClimbChart();
   }
@@ -1014,6 +1015,116 @@
     };
   }
 
+  /* ======================================================================
+     Climber rating — chess-ELO style, computed client-side (Phase 1).
+     Each climb is a "match" against the route (rated from its grade):
+     sending is a win, projecting a loss, and flash/onsight/attempts shift
+     the effective route difficulty. Two independent ratings — Bouldering
+     (V scale) and Roped (YDS) — since the scales aren't comparable.
+     The key property: easy sends net ~0, so you can't farm the number —
+     it only climbs when you climb harder than your rating expects.
+     ====================================================================== */
+  const RATING_START = 1000;      // everyone begins here
+  const RATING_STEP_V = 200;      // rating points per V-grade
+  const RATING_STEP_YDS = 100;    // rating points per YDS letter-grade
+  const RATING_K_PROV = 40;       // volatile while provisional…
+  const RATING_K_EST = 24;        // …steadier once established
+  const RATING_PROVISIONAL = 12;  // climbs needed to leave provisional
+  const RATING_STYLE = { Onsight: 80, Flash: 40 }; // effective-difficulty bonus on a send
+
+  const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
+
+  // A route's rating from its grade (anchored so V0 / 5.6 ≈ 1000).
+  function routeRating(discipline, grade) {
+    if (discipline === 'Bouldering') {
+      return RATING_START + (gradeRank('Bouldering', grade) - V_GRADES.indexOf('V0')) * RATING_STEP_V;
+    }
+    return RATING_START + (gradeRank(discipline, grade) - YDS_GRADES.indexOf('5.6')) * RATING_STEP_YDS;
+  }
+
+  // Replay one group's climbs in date order; returns the rating, provisional
+  // state, an over-time series, and the change over the most recent session.
+  function climberRating(group) {
+    const climbs = state.climbs
+      .filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    let R = RATING_START, n = 0;
+    const byDate = {};      // date -> end-of-day rating
+    const deltaByDate = {}; // date -> total rating change that day
+    climbs.forEach((c) => {
+      const sent = isSend(c.result);
+      let eff = routeRating(c.discipline, c.grade);
+      if (sent) {
+        eff += RATING_STYLE[c.result] || 0;                 // onsight/flash beat a harder route
+        const extra = Math.max(0, (Number(c.attempts) || 1) - 1);
+        eff -= Math.min(extra * 8, 40);                     // many goes = you barely won
+      }
+      const E = 1 / (1 + Math.pow(10, (eff - R) / 400));
+      const S = sent ? 1 : 0;
+      const K = n < RATING_PROVISIONAL ? RATING_K_PROV : RATING_K_EST;
+      const before = R;
+      R += K * (S - E);
+      n++;
+      byDate[c.date] = Math.round(R);
+      deltaByDate[c.date] = (deltaByDate[c.date] || 0) + (R - before);
+    });
+    const dates = Object.keys(byDate).sort();
+    const lastDate = dates[dates.length - 1];
+    return {
+      group, n,
+      rating: Math.round(R),
+      hasData: n > 0,
+      provisional: n > 0 && n < RATING_PROVISIONAL,
+      history: dates.map((d) => ({ date: d, value: byDate[d] })),
+      lastSessionDelta: lastDate ? Math.round(deltaByDate[lastDate]) : 0
+    };
+  }
+
+  const RATING_GROUPS = [
+    { key: 'boulder', label: 'Bouldering', scale: 'V-scale', color: '#1f3a5f' },
+    { key: 'rope', label: 'Roped', scale: 'YDS', color: '#f59e2c' }
+  ];
+
+  // The rating cards shown on the climbing page and profile.
+  function renderClimberRating() {
+    const hidden = !!getSettings().hide_rating;
+    const html = hidden ? '' : RATING_GROUPS.map((g) => {
+      const r = climberRating(g.key);
+      if (!r.hasData) return '';
+      const d = r.lastSessionDelta;
+      const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
+      const sub = r.provisional ? `Provisional · ${r.n}/${RATING_PROVISIONAL} climbs` : `${g.scale} · ${r.n} climbs`;
+      return `
+        <div class="rating-card ${g.key}" title="Skill rating from grade, style, and attempts — sending harder than expected raises it.">
+          <span class="rating-label">${g.label} rating</span>
+          <span class="rating-value">${r.rating}${delta}</span>
+          <span class="rating-sub">${sub}</span>
+        </div>`;
+    }).join('');
+    ['#climb-rating', '#profile-rating'].forEach((sel) => {
+      const el = $(sel);
+      if (!el) return;
+      el.hidden = !html;
+      el.innerHTML = html || '';
+    });
+  }
+
+  // Rating-over-time chart. History is replayed over ALL climbs (truncating
+  // would give a wrong rating); the range only limits the displayed window.
+  function drawRatingChart(wrap, cutoff) {
+    const series = RATING_GROUPS.map((g) => {
+      const r = climberRating(g.key);
+      const points = cutoff ? r.history.filter((p) => p.date >= cutoff) : r.history;
+      return { label: g.label, color: g.color, points };
+    }).filter((s) => s.points.length);
+    if (!series.length) {
+      wrap.innerHTML = '<div class="chart-empty">Log climbs to build your rating.</div>';
+      return;
+    }
+    drawChart(wrap, series, (v) => fmtNum(Math.round(v)));
+  }
+
   function renderClimbChart() {
     const metric = $('#climb-chart-metric').value;
     const cutoff = rangeCutoff('#climb-range');
@@ -1021,15 +1132,16 @@
     const prStrip = $('#climb-prs');
 
     const sends = state.climbs.filter((c) => isSend(c.result) && (!cutoff || c.date >= cutoff));
-    if (!sends.length) {
-      wrap.innerHTML = `<div class="chart-empty">${state.climbs.length ? 'No sends in this range.' : 'Log a send to see progress.'}</div>`;
-      prStrip.innerHTML = '';
-      return;
-    }
 
     // Brand mapping: bouldering is navy, roped disciplines lead with orange.
     const DISC_COLORS = { 'Bouldering': '#1f3a5f', 'Sport': '#f59e2c', 'Top Rope': '#16181d', 'Trad': '#3a7d44' };
-    if (metric === 'sends') {
+    if (metric === 'rating') {
+      drawRatingChart(wrap, cutoff);
+    } else if (!sends.length) {
+      wrap.innerHTML = `<div class="chart-empty">${state.climbs.length ? 'No sends in this range.' : 'Log a send to see progress.'}</div>`;
+      prStrip.innerHTML = '';
+      return;
+    } else if (metric === 'sends') {
       drawChart(wrap, ALL_DISCIPLINES.map((d) => ({ ...sendsSeries(d, sends), color: DISC_COLORS[d] })), (v) => fmtNum(Math.round(v)));
     } else {
       // Hardest sends: bouldering (V scale) and ropes (YDS) use different
@@ -1067,7 +1179,7 @@
       const best = Math.max(...ropeSends.map((c) => gradeRank(c.discipline, c.grade)));
       chips.push(`<span class="pr-chip">Hardest route <b>${YDS_GRADES[best]}</b></span>`);
     }
-    chips.push(`<span class="pr-chip">Total sends <b>${sends.length}</b></span>`);
+    if (sends.length) chips.push(`<span class="pr-chip">Total sends <b>${sends.length}</b></span>`);
     prStrip.innerHTML = chips.join('');
   }
 
@@ -2396,9 +2508,13 @@
       statCard('Hardest route', s.hardestRoute || '—') +
       statCard('Longest streak', s.longest, s.longest === 1 ? 'day' : 'days');
 
+    // Climber rating cards (climbing page + profile)
+    renderClimberRating();
+
     // Controls reflect current settings
     $('#pref-goal').value = String(weeklyGoal());
     $('#pref-unit').value = settings.unit === 'lbs' || settings.unit === 'kg' ? settings.unit : '';
+    $('#pref-rating').checked = !settings.hide_rating;
     $$('#pref-colors .color-swatch').forEach((b) => {
       b.setAttribute('aria-pressed', String((settings.avatar_color || 'Navy') === b.dataset.color));
     });
@@ -2446,6 +2562,7 @@
 
   $('#pref-goal').addEventListener('change', () => applySetting({ weekly_goal: parseInt($('#pref-goal').value, 10) }));
   $('#pref-unit').addEventListener('change', () => applySetting({ unit: $('#pref-unit').value }));
+  $('#pref-rating').addEventListener('change', () => applySetting({ hide_rating: !$('#pref-rating').checked }));
 
   $('#profile-form').addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -661,6 +661,26 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .subchart-title { font-size: 11px; color: var(--muted); margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
 .subchart-title:first-child { margin-top: 0; }
 
+/* Climber rating cards */
+.rating-strip { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.rating-card {
+  flex: 1; min-width: 150px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.rating-card.boulder { border-left-color: var(--accent-2); }
+.rating-card.rope { border-left-color: var(--accent); }
+.rating-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.rating-value { font-family: var(--font-disp); font-size: 30px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 8px; }
+.rating-delta { font-size: 13px; font-weight: 700; font-family: "Archivo", Helvetica, Arial, sans-serif; }
+.rating-delta.up { color: var(--good); }
+.rating-delta.down { color: var(--danger); }
+.rating-sub { font-size: 12px; color: var(--muted); font-weight: 600; }
+
 /* PR chips */
 .pr-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .pr-chip {

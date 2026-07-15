@@ -16,8 +16,14 @@ backend.
   (heaviest lift, best session volume, all-time volume).
 - **Rock climbing tracker** — bouldering (V-scale) and roped disciplines
   (Sport / Top Rope / Trad, YDS 5.x); result tracking (Send / Flash / Onsight /
-  Project), attempts, location, notes; progress charts for hardest send over
-  time (per scale) and sends per session by discipline.
+  Project), attempts, hold color, location, notes; progress charts for hardest
+  send over time (per scale) and sends per session by discipline.
+- **Climber rating** — a chess-ELO-style skill rating (one for bouldering, one
+  for roped), computed from your own logs: each climb is a "match" against the
+  route's grade, with sends as wins and flash/onsight/attempts adjusting the
+  effective difficulty. Easy sends net ~zero, so the number only rises when you
+  climb harder than it expects. Shows a per-session delta and a rating-over-time
+  chart; provisional until ~12 climbs; toggle it off in Profile.
 - **Workout routines** — save your training days (e.g. a 5-day
   Upper/Lower/Push/Pull/Legs split, importable with one tap) and run them as a
   guided session: each exercise opens pre-filled with what you lifted last
