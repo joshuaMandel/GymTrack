@@ -1141,13 +1141,17 @@
       ? `${top.exercise} · ${new Date(top.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' })}`
       : '';
 
-    // ----- Day streak: consecutive days (ending now) with ≥1 session -----
+    // ----- Day streak: session days in a row, ending now -----
+    // A single rest day between sessions keeps the chain alive; two missed
+    // days in a row break it. Today doesn't count against you until it's over.
     const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     let streak = 0;
+    let misses = 0;
     const cursor = new Date();
     if (!activeDates.has(todayIso)) cursor.setDate(cursor.getDate() - 1); // grace: today isn't over yet
-    while (activeDates.has(isoOf(cursor))) {
-      streak++;
+    while (misses < 2) {
+      if (activeDates.has(isoOf(cursor))) { streak++; misses = 0; }
+      else { misses++; }
       cursor.setDate(cursor.getDate() - 1);
     }
     $('#streak-count').textContent = streak;
