@@ -2173,7 +2173,10 @@
     }
   }
 
-  // Send the magic-link sign-in email (gate form)
+  // Send the sign-in email (gate form). The email carries both a link (fine
+  // in a normal browser) and a 6-digit code — the code is what works inside
+  // the installed app, where email links would open Safari's separate session.
+  let pendingAuthEmail = null;
   authForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = $('#auth-email').value.trim();
@@ -2186,12 +2189,40 @@
       const redirectTo = location.href.split('#')[0].split('?')[0];
       const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
       if (error) throw error;
+      pendingAuthEmail = email;
+      $('#otp-form').hidden = false;
       authStatus.className = 'auth-status ok';
-      authStatus.textContent = 'Check your email for the login link, then come back here.';
+      authStatus.textContent = 'Check your email — enter the 6-digit code here (or tap the link if you\'re in a browser).';
+      setTimeout(() => $('#otp-token').focus(), 50);
     } catch (err) {
       console.error('Sign-in error:', err);
       authStatus.className = 'auth-status err';
       authStatus.textContent = 'Error: ' + errMsg(err);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  // Verify the emailed code — signs in right here, no browser round-trip.
+  $('#otp-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const token = $('#otp-token').value.trim();
+    if (!token || !pendingAuthEmail) return;
+    const submit = $('#otp-submit');
+    submit.disabled = true;
+    authStatus.className = 'auth-status';
+    authStatus.textContent = 'Checking…';
+    try {
+      const { error } = await sb.auth.verifyOtp({ email: pendingAuthEmail, token, type: 'email' });
+      if (error) throw error;
+      // Success fires onAuthStateChange(SIGNED_IN), which un-gates the app.
+      $('#otp-form').hidden = true;
+      $('#otp-token').value = '';
+      authStatus.textContent = '';
+    } catch (err) {
+      console.error('Code verify error:', err);
+      authStatus.className = 'auth-status err';
+      authStatus.textContent = 'That code didn\'t work — check for typos, or request a fresh one (codes expire and only the newest email counts).';
     } finally {
       submit.disabled = false;
     }
