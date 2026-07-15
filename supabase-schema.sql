@@ -90,12 +90,13 @@ create policy "own routines" on public.routines
 -- hardest send. Locations, notes, dates, and individual climbs are never
 -- revealed.
 --
--- It replays every climber's session history with the SAME algorithm the
+-- It replays every climber's history with the SAME per-climb algorithm the
 -- app runs client-side (climberRating in app.js) so your own hero number
--- and your leaderboard number always agree. KEEP THE CONSTANTS IN SYNC
--- with app.js: start 1000; V-grade step 200; YDS step 100; K = 80 for the
--- first 5 sessions then 44; full volume weight at 6 climbs/session;
--- onsight +80 / flash +40; repeated attempts −8 each, capped at −40.
+-- and your leaderboard number always agree. Every climb updates the rating
+-- immediately (K × (result − expected)); ties within a date replay in id
+-- order on both sides. KEEP THE CONSTANTS IN SYNC with app.js: start 1000;
+-- V-grade step 200; YDS step 100; per-climb K = 24 for the first 5 sessions
+-- then 12; onsight +80 / flash +40; repeated attempts −8 each, capped −40.
 drop function if exists public.climb_leaderboard(integer, text); -- replaced by Send Score standings
 drop function if exists public.climb_send_scores(text);
 drop function if exists public.climb_send_scores_impl(text);
@@ -126,15 +127,14 @@ declare
   cur_date date := null;
   rating numeric := 1000;
   n_sessions int := 0;
+  sess_start numeric := 1000;
   sess_delta numeric := 0;
   max_pos int := null;
-  sum_surprise numeric := 0;
   n_climbs int := 0;
   eff numeric;
   expected numeric;
   sent boolean;
-  k numeric;
-  vol numeric;
+  k numeric := 24;
 begin
   if grp = 'boulder' then
     scale := array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17'];
@@ -155,15 +155,12 @@ begin
     where (case when grp = 'boulder' then c.discipline = 'Bouldering'
                 else c.discipline <> 'Bouldering' end)
       and array_position(scale, c.grade) is not null
-    order by c.user_id, c.date
+    order by c.user_id, c.date, c.id -- id breaks same-day ties, matching the app
   loop
     if cur_uid is distinct from rec.uid or cur_date is distinct from rec.cdate then
       -- close the session that just ended (a session = one user + one date)
       if cur_uid is not null and n_climbs > 0 then
-        k := case when n_sessions < 5 then 80 else 44 end;
-        vol := 0.5 + 0.5 * least(1.0, n_climbs / 6.0);
-        sess_delta := k * (sum_surprise / n_climbs) * vol;
-        rating := rating + sess_delta;
+        sess_delta := rating - sess_start;
         n_sessions := n_sessions + 1;
       end if;
       if cur_uid is distinct from rec.uid then
@@ -184,10 +181,12 @@ begin
         rating := 1000; n_sessions := 0; sess_delta := 0; max_pos := null;
       end if;
       cur_date := rec.cdate;
-      sum_surprise := 0; n_climbs := 0;
+      n_climbs := 0;
+      sess_start := rating;
+      k := case when n_sessions < 5 then 24 else 12 end; -- per-climb K for this session
     end if;
 
-    -- score this climb against the rating as it stood entering the session
+    -- every climb updates the rating immediately
     sent := rec.res <> 'Project';
     eff := 1000 + (rec.pos - anchor) * step;
     if sent then
@@ -196,16 +195,13 @@ begin
       if max_pos is null or rec.pos > max_pos then max_pos := rec.pos; end if;
     end if;
     expected := 1 / (1 + power(10, (eff - rating) / 400.0));
-    sum_surprise := sum_surprise + (case when sent then 1 else 0 end) - expected;
+    rating := rating + k * ((case when sent then 1 else 0 end) - expected);
     n_climbs := n_climbs + 1;
   end loop;
 
   -- close the final session and emit the final user
   if cur_uid is not null and n_climbs > 0 then
-    k := case when n_sessions < 5 then 80 else 44 end;
-    vol := 0.5 + 0.5 * least(1.0, n_climbs / 6.0);
-    sess_delta := k * (sum_surprise / n_climbs) * vol;
-    rating := rating + sess_delta;
+    sess_delta := rating - sess_start;
     n_sessions := n_sessions + 1;
   end if;
   if cur_uid is not null and n_sessions > 0 then

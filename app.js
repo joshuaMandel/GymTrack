@@ -1111,10 +1111,9 @@
   const RATING_START = 1000;             // everyone begins here
   const RATING_STEP_V = 200;             // rating points per V-grade
   const RATING_STEP_YDS = 100;           // rating points per YDS letter-grade
-  const RATING_K_PROV = 80;              // a session can swing you a lot while new…
-  const RATING_K_EST = 44;               // …steadier once established
+  const RATING_K_PROV = 24;              // per-CLIMB swing while new…
+  const RATING_K_EST = 12;               // …steadier once established
   const RATING_PROVISIONAL_SESSIONS = 5; // sessions needed to leave provisional
-  const RATING_VOLUME_TARGET = 6;        // climbs in a session for full weight
   const RATING_STYLE = { Onsight: 80, Flash: 40 }; // effective-difficulty bonus on a send
 
   const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
@@ -1127,25 +1126,33 @@
     return RATING_START + (gradeRank(discipline, grade) - YDS_GRADES.indexOf('5.6')) * RATING_STEP_YDS;
   }
 
-  // Per-SESSION performance rating. Each session (a date) is scored as a
-  // whole: how hard you climbed relative to your rating (average per-climb
-  // "surprise" vs the ELO expectation) times how much you climbed (a volume
-  // weight). So a big, hard session moves you up a lot; a short or easy one
-  // barely; a session of failures moves you down. Difficulty sets the
-  // direction, volume scales the confidence.
+  // Per-CLIMB performance rating, replayed in order. Every climb is a match
+  // against the route: the score moves by K × (result − expected) right then,
+  // so more climbing moves you more, each flash/onsight carries its own
+  // bonus, and a failed project barely costs (you weren't expected to send).
+  // Diminishing returns are built in — as the number rises mid-session, each
+  // further send surprises it less. Splitting the same climbs across days
+  // gains nothing. Sessions (dates) remain the unit for K and reporting.
+  // Ties within a date replay in id order so every device — and the SQL
+  // leaderboard replay — agrees on the exact same sequence.
   function climberRating(group) {
-    const climbs = state.climbs.filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0);
-    const byDate = {};
-    climbs.forEach((c) => { (byDate[c.date] = byDate[c.date] || []).push(c); });
-    const dates = Object.keys(byDate).sort();
+    const climbs = state.climbs
+      .filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1
+        : String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
 
     let R = RATING_START, s = 0;
     const history = [];
     let last = null;
-    dates.forEach((date) => {
-      const sesh = byDate[date];
-      let sumSurprise = 0, sends = 0, hardestRank = -1, hardestDisc = null;
-      sesh.forEach((c) => {
+    let i = 0;
+    while (i < climbs.length) {
+      const date = climbs[i].date;
+      const K = s < RATING_PROVISIONAL_SESSIONS ? RATING_K_PROV : RATING_K_EST;
+      const before = R;
+      let n = 0, sends = 0, hardestRank = -1, hardestDisc = null;
+      while (i < climbs.length && climbs[i].date === date) {
+        const c = climbs[i];
         const sent = isSend(c.result);
         let eff = routeRating(c.discipline, c.grade);
         if (sent) {
@@ -1156,21 +1163,16 @@
           if (rk > hardestRank) { hardestRank = rk; hardestDisc = c.discipline; }
         }
         const E = 1 / (1 + Math.pow(10, (eff - R) / 400));             // expected send chance at your rating
-        sumSurprise += (sent ? 1 : 0) - E;                             // + if you beat expectation, − if not
-      });
-      const n = sesh.length;
-      const avg = sumSurprise / n;                                     // difficulty-vs-expectation, per climb
-      const vol = 0.5 + 0.5 * Math.min(1, n / RATING_VOLUME_TARGET);   // 1 climb = half weight, 6+ = full
-      const K = s < RATING_PROVISIONAL_SESSIONS ? RATING_K_PROV : RATING_K_EST;
-      const before = R;
-      R += K * avg * vol;
+        R += K * ((sent ? 1 : 0) - E);                                 // this climb moves the number now
+        n++; i++;
+      }
       s++;
       history.push({ date, value: Math.round(R) });
       last = {
         date, count: n, sends, delta: Math.round(R - before),
         hardest: hardestRank >= 0 ? (hardestDisc === 'Bouldering' ? V_GRADES[hardestRank] : YDS_GRADES[hardestRank]) : null
       };
-    });
+    }
     return {
       group,
       rating: Math.round(R),
