@@ -947,9 +947,19 @@
   $('#dash-range').addEventListener('change', renderDashboard);
 
   /* ----- Climbing leaderboard (cross-user, via the climb_leaderboard RPC) ----- */
+  let lbDefaultApplied = false; // auto-pick the user's main discipline once per load
+
   async function renderLeaderboard() {
     const panel = $('#leaderboard-panel');
     if (!cloudOn()) { panel.hidden = true; return; }
+    // Default the filter to the discipline this user climbs most (e.g. Sport
+    // for a lead climber); a manual selection always wins afterwards.
+    if (!lbDefaultApplied && state.climbs.length) {
+      const main = mostCommon(state.climbs.map((c) => c.discipline));
+      const sel = $('#lb-discipline');
+      if (main && [...sel.options].some((o) => o.value === main)) sel.value = main;
+      lbDefaultApplied = true;
+    }
     const days = parseInt($('#dash-range').value, 10) || 30;
     const disc = $('#lb-discipline').value;
     try {
@@ -980,7 +990,10 @@
     }
   }
 
-  $('#lb-discipline').addEventListener('change', renderLeaderboard);
+  $('#lb-discipline').addEventListener('change', () => {
+    lbDefaultApplied = true; // the user's manual choice sticks
+    renderLeaderboard();
+  });
 
   function renderHome() {
     const unit = dominantUnit();
