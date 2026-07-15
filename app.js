@@ -363,7 +363,26 @@
     return existing || (/^[a-z]/.test(clean) ? titleCase(clean) : clean);
   }
 
-  const DEFAULT_EXERCISES = ['Back Squat', 'Front Squat', 'Bench Press', 'Overhead Press', 'Deadlift', 'Barbell Row', 'Pull-up'];
+  const DEFAULT_EXERCISES = [
+    // Pulls & back
+    'Pull-up', 'Weighted Pull-up', 'Chin-up', 'Lat Pulldown',
+    'Barbell Row', 'Pendlay Row', 'Chest-Supported Row', 'Single-Arm Dumbbell Row',
+    // Presses & chest
+    'Bench Press', 'Incline Bench Press', 'Dumbbell Bench Press', 'Incline Dumbbell Press',
+    'Overhead Press', 'Seated Dumbbell Shoulder Press', 'Weighted Dip', 'Cable Fly', 'Pec Deck',
+    // Shoulders & arms
+    'Lateral Raise', 'Face Pull', 'Rear-Delt Flye',
+    'EZ Bar Curl', 'Hammer Curl', 'Overhead Tricep Extension', 'Tricep Pushdown',
+    // Legs
+    'Back Squat', 'Front Squat', 'Bulgarian Split Squat', 'Walking Lunge',
+    'Deadlift', 'Trap Bar Deadlift', 'Romanian Deadlift', 'Hip Thrust',
+    'Leg Extension', 'Seated Leg Curl', 'Standing Calf Raise', 'Seated Calf Raise',
+    // Core
+    'Hanging Leg Raise', 'Ab Wheel Rollout', 'Weighted Plank', 'Cable Crunch',
+    // Grip & climbing-specific
+    'Dead Hang', 'Hangboard Hang', 'Hangboard Repeaters', 'Plate Pinch',
+    'Wrist Curl', 'Reverse Wrist Curl'
+  ];
 
   // User's own exercises first, then remaining defaults, deduped by key.
   function exerciseSuggestions() {
