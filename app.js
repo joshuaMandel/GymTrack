@@ -474,8 +474,8 @@
         <td>${l.sets} × ${l.reps}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td class="row-actions">
-          <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
-          <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
+          <button class="edit-btn" title="Edit" aria-label="Edit"><svg class="ico"><use href="#i-pencil"/></svg></button>
+          <button class="del-btn" title="Delete" aria-label="Delete"><svg class="ico"><use href="#i-x"/></svg></button>
         </td>`;
       tr.querySelector('.edit-btn').addEventListener('click', () => openEditLift(l));
       tr.querySelector('.del-btn').addEventListener('click', () => {
@@ -592,8 +592,8 @@
         <td class="muted">${escapeHTML(c.location)}</td>
         <td class="muted">${escapeHTML(c.notes)}</td>
         <td class="row-actions">
-          <button class="edit-btn" title="Edit" aria-label="Edit">✎</button>
-          <button class="del-btn" title="Delete" aria-label="Delete">✕</button>
+          <button class="edit-btn" title="Edit" aria-label="Edit"><svg class="ico"><use href="#i-pencil"/></svg></button>
+          <button class="del-btn" title="Delete" aria-label="Delete"><svg class="ico"><use href="#i-x"/></svg></button>
         </td>`;
       tr.querySelector('.edit-btn').addEventListener('click', () => openEditClimb(c));
       tr.querySelector('.del-btn').addEventListener('click', () => {
@@ -971,14 +971,14 @@
       panel.hidden = false;
       const list = $('#leaderboard-list');
       if (!data || !data.length) {
-        list.innerHTML = '<li class="empty">No sends in this range yet — get after it! 🧗</li>';
+        list.innerHTML = '<li class="empty">No sends in this range yet — get after it.</li>';
         return;
       }
-      const medals = ['🥇', '🥈', '🥉'];
+
       list.innerHTML = data.map((r, i) => `
         <li class="${r.is_me ? 'me' : ''}">
           <div class="feed-left">
-            <span class="lb-rank">${medals[i] || (i + 1)}</span>
+            <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
             <div>
               <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
               <div class="feed-sub">${r.sends_at_hardest}× at ${escapeHTML(r.hardest)} · ${r.total_sends} send${r.total_sends === 1 ? '' : 's'} total</div>
@@ -1060,13 +1060,13 @@
     // ----- Recent activity: lifts + climbs merged -----
     const items = [
       ...state.lifts.map((l) => ({
-        icon: '🏋️',
+        icon: 'barbell',
         main: display[exKey(l.exercise)] || l.exercise,
         sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
         date: l.date
       })),
       ...state.climbs.map((c) => ({
-        icon: '🧗',
+        icon: 'mountain',
         main: `${c.grade} · ${c.discipline}`,
         sub: `${c.result}${c.location ? ' · ' + c.location : ''}`,
         date: c.date
@@ -1086,7 +1086,7 @@
       const m = mapFn(it);
       return `<li>
         <div class="feed-left">
-          ${m.icon ? `<span class="feed-ico">${m.icon}</span>` : ''}
+          ${m.icon ? `<span class="feed-ico"><svg class="ico"><use href="#i-${m.icon}"/></svg></span>` : ''}
           <div>
             <div class="feed-main">${escapeHTML(m.main)}</div>
             <div class="feed-sub">${escapeHTML(m.sub)}</div>
@@ -1302,7 +1302,7 @@
     // Compact chip: name opens the profile modal (edit name / sign out).
     accountEl.innerHTML = `
       <span class="sync-dot" id="sync-dot" title="Synced"></span>
-      <button class="acct-name" id="profile-btn" title="Account">${escapeHTML(label)} <span class="edit-ico">✎</span></button>`;
+      <button class="acct-name" id="profile-btn" title="Account">${escapeHTML(label)} <span class="edit-ico"><svg class="ico"><use href="#i-pencil"/></svg></span></button>`;
     $('#profile-btn').addEventListener('click', () => openProfile(false));
   }
 
