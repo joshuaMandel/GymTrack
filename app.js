@@ -298,7 +298,10 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  const todayISO = () => new Date().toISOString().slice(0, 10);
+  // Always the LOCAL calendar date. (toISOString() is UTC — in the US evening
+  // that's already tomorrow, which mis-stamped logs and zeroed the streak.)
+  const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const todayISO = () => isoOf(new Date());
   const fmtNum = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
 
   function fmtDate(iso) {
@@ -1390,15 +1393,18 @@
   function renderHome() {
     const unit = dominantUnit();
     const display = exerciseDisplayMap();
-    const liftDates = new Set(state.lifts.map((l) => l.date));
-    const climbDates = new Set(state.climbs.map((c) => c.date));
+    const todayIso = todayISO();
+    // Fold any future-dated entries into today — logs stamped with tomorrow's
+    // UTC date (before dates went local) still count for rings and the streak.
+    const clampDate = (d) => (d > todayIso ? todayIso : d);
+    const liftDates = new Set(state.lifts.map((l) => clampDate(l.date)));
+    const climbDates = new Set(state.climbs.map((c) => clampDate(c.date)));
     const activeDates = new Set([...liftDates, ...climbDates]);
 
     // ----- Week strip: last 7 days ending today -----
     // Ring color says what kind of session the day held: orange = lifting,
     // navy = climbing, half-and-half = both, plain border = rest day.
     const strip = $('#week-strip');
-    const todayIso = todayISO();
     const days = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -1474,7 +1480,6 @@
     // ----- Day streak: session days in a row, ending now -----
     // A single rest day between sessions keeps the chain alive; two missed
     // days in a row break it. Today doesn't count against you until it's over.
-    const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     let streak = 0;
     let misses = 0;
     const cursor = new Date();
@@ -1665,7 +1670,7 @@
   function daysAgoISO(days) {
     const d = new Date();
     d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
+    return isoOf(d); // local calendar date, not UTC
   }
   const fmtCompact = (n) => Number(n).toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 
