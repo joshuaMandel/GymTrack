@@ -2204,16 +2204,29 @@
   });
 
   // Verify the emailed code — signs in right here, no browser round-trip.
+  // Accepts whatever the email template renders: the 6-digit {{ .Token }},
+  // the long {{ .TokenHash }}, or the entire pasted sign-in link.
   $('#otp-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const token = $('#otp-token').value.trim();
-    if (!token || !pendingAuthEmail) return;
+    let raw = $('#otp-token').value.trim().replace(/\s+/g, '');
+    if (!raw) return;
+    try {
+      if (/^https?:\/\//i.test(raw)) {
+        const u = new URL(raw);
+        raw = u.searchParams.get('token') || raw; // ConfirmationURL carries the token hash
+      }
+    } catch (x) { /* not a URL — treat as a code */ }
+    const isDigits = /^\d{6}$/.test(raw);
+    if (isDigits && !pendingAuthEmail) return;
+    const payload = isDigits
+      ? { email: pendingAuthEmail, token: raw, type: 'email' }
+      : { token_hash: raw, type: 'email' };
     const submit = $('#otp-submit');
     submit.disabled = true;
     authStatus.className = 'auth-status';
     authStatus.textContent = 'Checking…';
     try {
-      const { error } = await sb.auth.verifyOtp({ email: pendingAuthEmail, token, type: 'email' });
+      const { error } = await sb.auth.verifyOtp(payload);
       if (error) throw error;
       // Success fires onAuthStateChange(SIGNED_IN), which un-gates the app.
       $('#otp-form').hidden = true;
