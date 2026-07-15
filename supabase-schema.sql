@@ -88,8 +88,10 @@ create policy "own routines" on public.routines
 -- Ranking: hardest grade sent in the window, ties broken by how many sends
 -- at that grade, then by total sends. One discipline at a time, so grades
 -- are always compared within a single scale.
-create or replace function public.climb_leaderboard(days integer default 30, disc text default 'Bouldering')
+drop function if exists public.climb_leaderboard(integer, text); -- return type changed (added user_id)
+create function public.climb_leaderboard(days integer default 30, disc text default 'Bouldering')
 returns table (
+  user_id uuid,
   display_name text,
   is_me boolean,
   hardest text,
@@ -127,6 +129,7 @@ as $$
     group by r.user_id
   )
   select
+    a.user_id,
     coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Anonymous climber') as display_name,
     a.user_id = auth.uid() as is_me,
     (select g from scale)[a.hardest_rank] as hardest,
@@ -141,3 +144,38 @@ $$;
 
 revoke all on function public.climb_leaderboard(integer, text) from public, anon;
 grant execute on function public.climb_leaderboard(integer, text) to authenticated;
+
+-- ---------- Per-climber summary (leaderboard drill-down) ----------
+-- Aggregates only, same privacy stance as the leaderboard: grade-by-grade
+-- counts per result plus a session count. Locations, notes, dates, and
+-- individual climbs are never revealed.
+create or replace function public.climb_user_summary(target uuid, days integer default 30, disc text default 'Bouldering')
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'display_name', coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Anonymous climber'),
+    'sessions', (
+      select count(distinct c.date)
+      from public.climbs c
+      where c.user_id = target and c.discipline = disc and c.date >= current_date - days
+    ),
+    'by_grade', coalesce((
+      select jsonb_agg(jsonb_build_object('grade', t.grade, 'result', t.result, 'n', t.n))
+      from (
+        select c.grade, c.result, count(*) as n
+        from public.climbs c
+        where c.user_id = target and c.discipline = disc and c.date >= current_date - days
+        group by c.grade, c.result
+      ) t
+    ), '[]'::jsonb)
+  )
+  from auth.users u
+  where u.id = target
+$$;
+
+revoke all on function public.climb_user_summary(uuid, integer, text) from public, anon;
+grant execute on function public.climb_user_summary(uuid, integer, text) to authenticated;

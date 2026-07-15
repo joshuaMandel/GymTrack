@@ -1353,7 +1353,7 @@
       }
 
       list.innerHTML = data.map((r, i) => `
-        <li class="${r.is_me ? 'me' : ''}">
+        <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
           <div class="feed-left">
             <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
             <div>
@@ -1363,6 +1363,10 @@
           </div>
           <div class="lb-grade">${escapeHTML(r.hardest)}</div>
         </li>`).join('');
+      // Row click → per-climber summary (aggregates via climb_user_summary)
+      list.querySelectorAll('li').forEach((li, i) => {
+        li.addEventListener('click', () => openLbSummary(data[i]));
+      });
     } catch (e) {
       // Function not installed yet, or transient failure — hide quietly.
       console.warn('Leaderboard unavailable:', e);
@@ -1374,6 +1378,79 @@
     lbDefaultApplied = true; // the user's manual choice sticks
     renderLeaderboard();
   });
+
+  /* ----- Climber summary modal: what a leaderboard entry actually did.
+     Same privacy stance as the leaderboard itself — grade-by-grade counts
+     only, never locations, notes, dates, or individual climbs. ----- */
+  const lbModal = $('#lb-modal');
+  $('#lb-close').addEventListener('click', () => { lbModal.hidden = true; });
+  lbModal.addEventListener('click', (e) => { if (e.target === lbModal) lbModal.hidden = true; });
+
+  async function openLbSummary(row) {
+    const days = parseInt($('#dash-range').value, 10) || 30;
+    const disc = $('#lb-discipline').value;
+    $('#lb-name').textContent = row.display_name;
+    $('#lb-sub').textContent = `${disc} · last ${days} days`;
+    const box = $('#lb-summary');
+    box.innerHTML = '<div class="chart-empty" style="height:90px">Loading…</div>';
+    lbModal.hidden = false;
+    try {
+      const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days, disc });
+      if (error) throw error;
+      renderLbSummary(box, data, disc);
+    } catch (e) {
+      console.warn('Climber summary unavailable:', e);
+      box.innerHTML = `<p class="auth-status err">Couldn't load the summary (${escapeHTML(errMsg(e))}). If this persists, re-run supabase-schema.sql — the summary needs its updated functions.</p>`;
+    }
+  }
+
+  function renderLbSummary(box, data, disc) {
+    if (!data) {
+      box.innerHTML = '<p class="muted small">Nothing logged in this range.</p>';
+      return;
+    }
+    // Collapse per-result rows into per-grade buckets
+    const byGrade = {};
+    (data.by_grade || []).forEach((g) => {
+      const b = (byGrade[g.grade] = byGrade[g.grade] || { sends: 0, flash: 0, onsight: 0, project: 0 });
+      if (g.result === 'Project') b.project += g.n;
+      else {
+        b.sends += g.n;
+        if (g.result === 'Flash') b.flash += g.n;
+        if (g.result === 'Onsight') b.onsight += g.n;
+      }
+    });
+    const grades = Object.keys(byGrade).sort((a, b) => gradeRank(disc, b) - gradeRank(disc, a));
+    if (!grades.length) {
+      box.innerHTML = '<p class="muted small">Nothing logged in this range.</p>';
+      return;
+    }
+    const totalSends = grades.reduce((s, g) => s + byGrade[g].sends, 0);
+    const hardest = grades.find((g) => byGrade[g].sends > 0);
+    const maxN = Math.max(...grades.map((g) => byGrade[g].sends + byGrade[g].project));
+    const chips = `
+      <div class="pr-strip">
+        <span class="pr-chip">Hardest <b>${hardest ? escapeHTML(hardest) : '—'}</b></span>
+        <span class="pr-chip">Sends <b>${totalSends}</b></span>
+        <span class="pr-chip">Sessions <b>${data.sessions || 0}</b></span>
+      </div>`;
+    const rows = grades.map((g) => {
+      const b = byGrade[g];
+      const parts = [];
+      if (b.sends) parts.push(`${b.sends} send${b.sends === 1 ? '' : 's'}`);
+      if (b.flash) parts.push(`${b.flash} flash`);
+      if (b.onsight) parts.push(`${b.onsight} onsight`);
+      if (b.project) parts.push(`${b.project} project${b.project === 1 ? '' : 's'}`);
+      const w = Math.max(4, Math.round(((b.sends + b.project) / maxN) * 100));
+      return `
+        <div class="lbs-row">
+          <span class="lbs-grade">${escapeHTML(g)}</span>
+          <div class="lbs-bar"><span style="width:${w}%"></span></div>
+          <span class="lbs-count">${parts.join(' · ')}</span>
+        </div>`;
+    }).join('');
+    box.innerHTML = chips + rows;
+  }
 
   const WEEKLY_GOAL = 6; // sessions per week the hero ring fills toward
 
