@@ -1924,62 +1924,73 @@
 
   $('#dash-range').addEventListener('change', renderDashboard);
 
-  /* ----- Send Score leaderboard (cross-user, via the climb_send_scores RPC) ----- */
+  /* ----- Send Score leaderboard (cross-user, via the climb_send_scores RPC) -----
+     The same standings render in two places: the Home panel and the one on
+     the climbing page right under the user's own Send Score cards. The two
+     discipline selects stay in sync. ----- */
+  const LB_PANELS = [
+    { panel: '#leaderboard-panel', list: '#leaderboard-list' },
+    { panel: '#leaderboard-panel-climb', list: '#leaderboard-list-climb' }
+  ];
+  const lbSelects = () => ['#lb-discipline', '#lb-discipline-climb'].map((s) => $(s)).filter(Boolean);
   let lbDefaultApplied = false; // auto-pick the user's main discipline group once per load
 
   async function renderLeaderboard() {
-    const panel = $('#leaderboard-panel');
-    if (!cloudOn()) { panel.hidden = true; return; }
+    const panels = LB_PANELS.map((p) => ({ panel: $(p.panel), list: $(p.list) })).filter((p) => p.panel);
+    const setHidden = (h) => panels.forEach((p) => { p.panel.hidden = h; });
+    if (!cloudOn()) { setHidden(true); return; }
     // Default the filter to whichever scale this user climbs most.
     if (!lbDefaultApplied && state.climbs.length) {
-      $('#lb-discipline').value = primaryRatingGroup();
+      lbSelects().forEach((sel) => { sel.value = primaryRatingGroup(); });
       lbDefaultApplied = true;
     }
     const grp = $('#lb-discipline').value;
     try {
       const { data, error } = await sb.rpc('climb_send_scores', { grp });
       if (error) throw error;
-      panel.hidden = false;
-      const list = $('#leaderboard-list');
+      setHidden(false);
       const rows = (data || []).slice().sort((a, b) => b.score - a.score).slice(0, 20);
-      if (!rows.length) {
-        list.innerHTML = '<li class="empty">No Send Scores yet — log a session to start yours.</li>';
-        return;
-      }
-
-      list.innerHTML = rows.map((r, i) => {
-        const d = r.last_delta || 0;
-        const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
-        const sub = [
-          r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${r.sessions} session${r.sessions === 1 ? '' : 's'}`,
-          r.hardest ? `hardest ${escapeHTML(r.hardest)}` : ''
-        ].filter(Boolean).join(' · ');
-        return `
-        <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
-          <div class="feed-left">
-            <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
-            <div>
-              <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
-              <div class="feed-sub">${sub}</div>
-            </div>
-          </div>
-          <div class="lb-grade">${r.score}${delta}</div>
-        </li>`;
-      }).join('');
-      // Row click → per-climber summary (aggregates via climb_user_summary)
-      list.querySelectorAll('li').forEach((li, i) => {
-        li.addEventListener('click', () => openLbSummary(rows[i]));
+      const html = !rows.length
+        ? '<li class="empty">No Send Scores yet — log a session to start yours.</li>'
+        : rows.map((r, i) => {
+            const d = r.last_delta || 0;
+            const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
+            const sub = [
+              r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${r.sessions} session${r.sessions === 1 ? '' : 's'}`,
+              r.hardest ? `hardest ${escapeHTML(r.hardest)}` : ''
+            ].filter(Boolean).join(' · ');
+            return `
+            <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
+              <div class="feed-left">
+                <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
+                <div>
+                  <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
+                  <div class="feed-sub">${sub}</div>
+                </div>
+              </div>
+              <div class="lb-grade">${r.score}${delta}</div>
+            </li>`;
+          }).join('');
+      panels.forEach((p) => {
+        p.list.innerHTML = html;
+        // Row click → per-climber summary (aggregates via climb_user_summary)
+        p.list.querySelectorAll('li:not(.empty)').forEach((li, i) => {
+          li.addEventListener('click', () => openLbSummary(rows[i]));
+        });
       });
     } catch (e) {
       // Function not installed yet, or transient failure — hide quietly.
       console.warn('Leaderboard unavailable:', e);
-      panel.hidden = true;
+      setHidden(true);
     }
   }
 
-  $('#lb-discipline').addEventListener('change', () => {
-    lbDefaultApplied = true; // the user's manual choice sticks
-    renderLeaderboard();
+  lbSelects().forEach((sel) => {
+    sel.addEventListener('change', () => {
+      lbDefaultApplied = true; // the user's manual choice sticks
+      lbSelects().forEach((s) => { s.value = sel.value; }); // both pickers agree
+      renderLeaderboard();
+    });
   });
 
   /* ----- Climber summary modal: what a leaderboard entry actually did.
