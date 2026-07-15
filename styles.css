@@ -200,12 +200,12 @@ body:not(.lifting-on) .tab[data-view="lifting"],
 body:not(.lifting-on) .bnav-btn[data-view="lifting"],
 body:not(.lifting-on) #fab-lift,
 body:not(.lifting-on) #log-lift { display: none !important; }
-/* Reflow the Home grids once the two lifting cards / chart are gone */
-body:not(.lifting-on) .hero-grid { grid-template-columns: 2fr 1fr 1fr; }
-body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(2, 1fr); }
+/* Reflow the Home grids once the lifting cards / chart are gone
+   (the mini-grid is auto-fit, so it flows on its own). */
+body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(3, 1fr); }
 body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
 @media (max-width: 780px) {
-  body:not(.lifting-on) .hero-grid { grid-template-columns: 1fr 1fr; }
+  body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ---------- Layout ---------- */
@@ -301,12 +301,6 @@ body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
 .day.today .dow { color: var(--text); font-weight: 700; }
 
 /* ---------- Hero + minis ---------- */
-.hero-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 34px;
-}
 .hero-card {
   background: var(--ink);
   color: var(--cream);
@@ -316,6 +310,21 @@ body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  margin-bottom: 14px;
+}
+/* Rating hero */
+.rating-hero .rh-main { display: flex; flex-direction: column; min-width: 0; }
+.rh-label { font-size: 12px; font-weight: 700; color: #b7b2a4; text-transform: uppercase; letter-spacing: 0.06em; }
+.rating-hero .hero-value { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
+.rating-hero .rating-delta { font-size: 16px; font-family: "Archivo", Helvetica, Arial, sans-serif; }
+.rating-hero .rating-delta.up { color: #6fd08c; }
+.rating-hero .rating-delta.down { color: #f08a7e; }
+.rh-session { font-size: 12.5px; color: #b7b2a4; font-weight: 600; margin-top: 10px; }
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+  margin-bottom: 34px;
 }
 .hero-value {
   font-family: var(--font-disp);
@@ -390,6 +399,8 @@ body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
 .stat-sub { font-size: 12.5px; color: var(--muted); font-weight: 700; }
 .stat-sub.up { color: var(--good); }
 .stat-sub.down { color: var(--danger); }
+.stat-value.up { color: var(--good); }
+.stat-value.down { color: var(--danger); }
 
 /* ---------- Forms ---------- */
 .form label, .panel label, .modal label, .gate-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
@@ -947,9 +958,6 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   .view-head.has-action > div:first-child { flex-basis: 100%; }
   .home-head .btn.pill { display: none; } /* the FAB covers logging on phones */
 
-  .hero-grid { grid-template-columns: 1fr 1fr; }
-  .hero-card { grid-column: 1 / -1; }
-  .mini-card:last-child { grid-column: 1 / -1; }
   .hero-value { font-size: 44px; }
 
   .week-strip { gap: 4px; }

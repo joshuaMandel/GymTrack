@@ -1041,12 +1041,13 @@
      The key property: easy sends net ~0, so you can't farm the number —
      it only climbs when you climb harder than your rating expects.
      ====================================================================== */
-  const RATING_START = 1000;      // everyone begins here
-  const RATING_STEP_V = 200;      // rating points per V-grade
-  const RATING_STEP_YDS = 100;    // rating points per YDS letter-grade
-  const RATING_K_PROV = 40;       // volatile while provisional…
-  const RATING_K_EST = 24;        // …steadier once established
-  const RATING_PROVISIONAL = 12;  // climbs needed to leave provisional
+  const RATING_START = 1000;             // everyone begins here
+  const RATING_STEP_V = 200;             // rating points per V-grade
+  const RATING_STEP_YDS = 100;           // rating points per YDS letter-grade
+  const RATING_K_PROV = 80;              // a session can swing you a lot while new…
+  const RATING_K_EST = 44;               // …steadier once established
+  const RATING_PROVISIONAL_SESSIONS = 5; // sessions needed to leave provisional
+  const RATING_VOLUME_TARGET = 6;        // climbs in a session for full weight
   const RATING_STYLE = { Onsight: 80, Flash: 40 }; // effective-difficulty bonus on a send
 
   const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
@@ -1059,42 +1060,59 @@
     return RATING_START + (gradeRank(discipline, grade) - YDS_GRADES.indexOf('5.6')) * RATING_STEP_YDS;
   }
 
-  // Replay one group's climbs in date order; returns the rating, provisional
-  // state, an over-time series, and the change over the most recent session.
+  // Per-SESSION performance rating. Each session (a date) is scored as a
+  // whole: how hard you climbed relative to your rating (average per-climb
+  // "surprise" vs the ELO expectation) times how much you climbed (a volume
+  // weight). So a big, hard session moves you up a lot; a short or easy one
+  // barely; a session of failures moves you down. Difficulty sets the
+  // direction, volume scales the confidence.
   function climberRating(group) {
-    const climbs = state.climbs
-      .filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0)
-      .slice()
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    let R = RATING_START, n = 0;
-    const byDate = {};      // date -> end-of-day rating
-    const deltaByDate = {}; // date -> total rating change that day
-    climbs.forEach((c) => {
-      const sent = isSend(c.result);
-      let eff = routeRating(c.discipline, c.grade);
-      if (sent) {
-        eff += RATING_STYLE[c.result] || 0;                 // onsight/flash beat a harder route
-        const extra = Math.max(0, (Number(c.attempts) || 1) - 1);
-        eff -= Math.min(extra * 8, 40);                     // many goes = you barely won
-      }
-      const E = 1 / (1 + Math.pow(10, (eff - R) / 400));
-      const S = sent ? 1 : 0;
-      const K = n < RATING_PROVISIONAL ? RATING_K_PROV : RATING_K_EST;
-      const before = R;
-      R += K * (S - E);
-      n++;
-      byDate[c.date] = Math.round(R);
-      deltaByDate[c.date] = (deltaByDate[c.date] || 0) + (R - before);
-    });
+    const climbs = state.climbs.filter((c) => ratingGroup(c.discipline) === group && gradeRank(c.discipline, c.grade) >= 0);
+    const byDate = {};
+    climbs.forEach((c) => { (byDate[c.date] = byDate[c.date] || []).push(c); });
     const dates = Object.keys(byDate).sort();
-    const lastDate = dates[dates.length - 1];
+
+    let R = RATING_START, s = 0;
+    const history = [];
+    let last = null;
+    dates.forEach((date) => {
+      const sesh = byDate[date];
+      let sumSurprise = 0, sends = 0, hardestRank = -1, hardestDisc = null;
+      sesh.forEach((c) => {
+        const sent = isSend(c.result);
+        let eff = routeRating(c.discipline, c.grade);
+        if (sent) {
+          eff += RATING_STYLE[c.result] || 0;                          // onsight/flash beat a harder route
+          eff -= Math.min(Math.max(0, (Number(c.attempts) || 1) - 1) * 8, 40); // many goes = barely won
+          sends++;
+          const rk = gradeRank(c.discipline, c.grade);
+          if (rk > hardestRank) { hardestRank = rk; hardestDisc = c.discipline; }
+        }
+        const E = 1 / (1 + Math.pow(10, (eff - R) / 400));             // expected send chance at your rating
+        sumSurprise += (sent ? 1 : 0) - E;                             // + if you beat expectation, − if not
+      });
+      const n = sesh.length;
+      const avg = sumSurprise / n;                                     // difficulty-vs-expectation, per climb
+      const vol = 0.5 + 0.5 * Math.min(1, n / RATING_VOLUME_TARGET);   // 1 climb = half weight, 6+ = full
+      const K = s < RATING_PROVISIONAL_SESSIONS ? RATING_K_PROV : RATING_K_EST;
+      const before = R;
+      R += K * avg * vol;
+      s++;
+      history.push({ date, value: Math.round(R) });
+      last = {
+        date, count: n, sends, delta: Math.round(R - before),
+        hardest: hardestRank >= 0 ? (hardestDisc === 'Bouldering' ? V_GRADES[hardestRank] : YDS_GRADES[hardestRank]) : null
+      };
+    });
     return {
-      group, n,
+      group,
       rating: Math.round(R),
-      hasData: n > 0,
-      provisional: n > 0 && n < RATING_PROVISIONAL,
-      history: dates.map((d) => ({ date: d, value: byDate[d] })),
-      lastSessionDelta: lastDate ? Math.round(deltaByDate[lastDate]) : 0
+      sessions: s,
+      hasData: s > 0,
+      provisional: s > 0 && s < RATING_PROVISIONAL_SESSIONS,
+      history,
+      lastSession: last,
+      lastSessionDelta: last ? last.delta : 0
     };
   }
 
@@ -1111,7 +1129,7 @@
       if (!r.hasData) return '';
       const d = r.lastSessionDelta;
       const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
-      const sub = r.provisional ? `Provisional · ${r.n}/${RATING_PROVISIONAL} climbs` : `${g.scale} · ${r.n} climbs`;
+      const sub = r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${g.scale} · ${r.sessions} sessions`;
       return `
         <div class="rating-card ${g.key}" title="Skill rating from grade, style, and attempts — sending harder than expected raises it.">
           <span class="rating-label">${g.label} rating</span>
@@ -1125,6 +1143,74 @@
       el.hidden = !html;
       el.innerHTML = html || '';
     });
+  }
+
+  // The discipline the hero features — whichever the user climbs most.
+  function primaryRatingGroup() {
+    const disc = mostCommon(state.climbs.map((c) => c.discipline));
+    return disc ? ratingGroup(disc) : 'boulder';
+  }
+
+  // Rating change over the last `days`: current minus the rating as of the
+  // most recent session on/before the cutoff (START if there wasn't one).
+  function ratingChange(group, days) {
+    const r = climberRating(group);
+    if (!r.hasData) return null;
+    const cut = daysAgoISO(days);
+    let baseline = RATING_START;
+    for (const p of r.history) { if (p.date < cut) baseline = p.value; else break; }
+    return { now: r.rating, change: Math.round(r.rating - baseline) };
+  }
+
+  // The rating hero at the top of Home — the dashboard's centerpiece.
+  function renderRatingHero() {
+    const de = $('#rh-delta');
+    // Rating hidden by preference → fall back to the weekly-sessions hero.
+    $('#rating-panel').hidden = !!getSettings().hide_rating;
+    if (getSettings().hide_rating) {
+      const wk = weekStart(todayISO());
+      const dates = new Set([...state.lifts, ...state.climbs].filter((x) => x.date >= wk).map((x) => x.date));
+      const goal = weeklyGoal();
+      const pct = Math.min(100, Math.round(dates.size / goal * 100));
+      $('#rh-label').textContent = 'This week';
+      $('#rh-value').textContent = dates.size;
+      de.textContent = ''; de.className = 'rating-delta';
+      $('#rh-sub').textContent = `sessions · goal ${goal}`;
+      $('#rh-session').textContent = '';
+      $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #2e3038 0)`;
+      $('#hero-pct').textContent = pct + '%';
+      return;
+    }
+    const pg = primaryRatingGroup();
+    const g = RATING_GROUPS.find((x) => x.key === pg);
+    const other = RATING_GROUPS.find((x) => x.key !== pg);
+    const r = climberRating(pg);
+    const ro = climberRating(other.key);
+    $('#rh-label').textContent = `${g.label} rating`;
+    if (!r.hasData) {
+      $('#rh-value').textContent = '—';
+      de.textContent = ''; de.className = 'rating-delta';
+      $('#rh-sub').textContent = 'Log a climb to start your rating';
+      $('#rh-session').textContent = '';
+      $('#hero-ring').style.background = 'conic-gradient(var(--accent) 0%, #2e3038 0)';
+      $('#hero-pct').textContent = '—';
+      return;
+    }
+    $('#rh-value').textContent = r.rating;
+    const d = r.lastSessionDelta;
+    de.className = 'rating-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
+    de.textContent = d ? `${d > 0 ? '▲' : '▼'} ${Math.abs(d)}` : '';
+    const parts = [r.provisional ? `Provisional · ${r.sessions}/${RATING_PROVISIONAL_SESSIONS} sessions` : `${g.scale} · ${r.sessions} sessions`];
+    if (ro.hasData) parts.push(`${other.label} ${ro.rating}`);
+    $('#rh-sub').textContent = parts.join(' · ');
+    const ls = r.lastSession;
+    $('#rh-session').textContent = ls
+      ? `Last session: ${ls.count} climb${ls.count === 1 ? '' : 's'}${ls.hardest ? ` · hardest ${ls.hardest}` : ''} · ${ls.delta >= 0 ? '+' : ''}${ls.delta}`
+      : '';
+    // Ring fills toward the next 100-point milestone.
+    const band = ((r.rating % 100) + 100) % 100;
+    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${band}%, #2e3038 0)`;
+    $('#hero-pct').textContent = Math.ceil((r.rating + 1) / 100) * 100;
   }
 
   // Rating-over-time chart. History is replayed over ALL climbs (truncating
@@ -1707,6 +1793,22 @@
     $('#dash-climb-sends').textContent = sendCount(climbsCur);
     setDelta('#dash-climb-sends-delta', sendCount(climbsCur), sendCount(climbsPrev), R);
 
+    // Rating change over the range (primary discipline)
+    const pg = primaryRatingGroup();
+    const rc = ratingChange(pg, R);
+    const rcEl = $('#dash-rating-change');
+    const rcSub = $('#dash-rating-change-sub');
+    rcEl.classList.remove('up', 'down');
+    if (rc) {
+      rcEl.textContent = `${rc.change >= 0 ? '+' : ''}${rc.change}`;
+      rcEl.classList.add(rc.change > 0 ? 'up' : rc.change < 0 ? 'down' : '');
+      const label = RATING_GROUPS.find((x) => x.key === pg).label;
+      rcSub.textContent = `${label} · now ${rc.now}`;
+    } else {
+      rcEl.textContent = '—';
+      rcSub.textContent = 'Log climbs to start';
+    }
+
     // Weekly trend charts (also redrawn on view switch / resize)
     renderDashCharts();
 
@@ -1757,6 +1859,10 @@
         : { label, color, points: [] };
     });
     drawChart($('#dash-climb-chart'), sendSeries, (v) => fmtNum(Math.round(v)));
+
+    // Rating over time — the centerpiece chart (shown all-time, not clipped
+    // to the range, since the whole journey is the story).
+    drawRatingChart($('#dash-rating-chart'), null);
   }
 
   // Redraw the visible view's charts at their current on-screen width.
@@ -1994,12 +2100,14 @@
       ? `${remaining} session${remaining === 1 ? '' : 's'} to hit your weekly goal`
       : 'weekly goal hit — nice work'}`;
 
-    // Hero: sessions + progress ring toward the weekly goal
-    $('#hero-sessions').textContent = sessionDates.size;
-    $('#hero-label').textContent = `sessions this week · goal ${goal}`;
-    const pct = Math.min(100, Math.round(sessionDates.size / goal * 100));
-    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #2e3038 0)`;
-    $('#hero-pct').textContent = pct + '%';
+    // Hero: the climber rating (the dashboard's centerpiece)
+    renderRatingHero();
+
+    // Sessions-this-week mini (moved off the hero, which now shows the rating)
+    $('#mini-sessions').textContent = sessionDates.size;
+    $('#mini-sessions-sub').textContent = remaining
+      ? `${remaining} to goal of ${goal}`
+      : `goal of ${goal} hit`;
 
     // Minis
     const vol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
