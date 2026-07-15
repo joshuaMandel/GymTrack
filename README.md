@@ -29,6 +29,11 @@ backend.
   - **Cloud sync (optional)** — sign in with a magic-link email and your data
     lives in Supabase, private to you and synced across every device. Your
     existing local data is offered up for migration on first sign-in.
+- **Installable app (PWA)** — add it to your home screen for an app icon,
+  instant opens, and full offline use: the app shell is cached by a service
+  worker, reads fall back to your last synced data, and anything you log
+  without signal queues locally ("N to sync" pill) and uploads automatically
+  when you're back online.
 - **Export / import** your data as JSON, or reset it, anytime.
 
 ## Running it
@@ -84,6 +89,8 @@ with your email on any device to see the same data.
 | `app.js` | State, storage layer (local + cloud), auth, charts |
 | `supabase-config.js` | Your Supabase project URL + anon key |
 | `supabase-schema.sql` | Database tables + Row-Level Security policies |
+| `manifest.webmanifest` + `icons/` | PWA install metadata + app icons |
+| `sw.js` | Service worker (offline app shell, instant loads) |
 | `.github/workflows/deploy-pages.yml` | GitHub Pages deploy workflow |
 
 ## Data model

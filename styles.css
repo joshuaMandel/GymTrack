@@ -146,6 +146,21 @@ body.auth-gated .footer { display: none !important; }
 }
 .streak-pill .ico { width: 15px; height: 15px; color: #e8590c; }
 
+/* Offline changes waiting to sync */
+.pending-pill {
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  border: 1px solid rgba(245, 158, 44, 0.35);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Pill tab nav (in the header on desktop; bottom dock replaces it on mobile) */
 .tabs {
   display: flex;

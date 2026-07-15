@@ -111,27 +111,178 @@
 
   const cloudOn = () => !!(sb && session);
 
+  /* ======================================================================
+     Offline support (cloud mode)
+     Reads:  every successful load/mutation snapshots state to localStorage,
+             so with no signal the app opens on the last synced data.
+     Writes: mutations that fail on a network error apply to the UI
+             immediately and queue locally; the queue replays automatically
+             when connectivity returns.
+     ====================================================================== */
+  const CACHE_KEY = 'gymtrack.cloudcache.v1';
+  const QUEUE_KEY = 'gymtrack.queue.v1';
+
+  // Network failure (offline / gym basement), as opposed to a real API error.
+  function isNetErr(e) {
+    return (typeof navigator !== 'undefined' && navigator.onLine === false) ||
+      e instanceof TypeError ||
+      /failed to fetch|networkerror|network request failed|load failed|fetch failed/i.test(errMsg(e));
+  }
+
+  function saveCloudCache() {
+    if (!cloudOn()) return;
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        userId: session.user.id,
+        lifts: state.lifts, climbs: state.climbs, routines: state.routines
+      }));
+    } catch (e) { /* storage full — cache is best-effort */ }
+  }
+  function loadCloudCache() {
+    try {
+      const c = JSON.parse(localStorage.getItem(CACHE_KEY));
+      if (c && session && c.userId === session.user.id) return c;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function loadQueue() {
+    try {
+      const q = JSON.parse(localStorage.getItem(QUEUE_KEY));
+      if (q && q.userId && Array.isArray(q.ops)) return q;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function saveQueue(q) {
+    if (!q || !q.ops.length) localStorage.removeItem(QUEUE_KEY);
+    else localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+    updatePendingUI();
+  }
+  // The queue for the signed-in user (a different account's leftovers don't apply)
+  function myQueue() {
+    const q = loadQueue();
+    if (q && session && q.userId === session.user.id) return q;
+    return { userId: session ? session.user.id : null, ops: [] };
+  }
+  function enqueue(op) {
+    const q = myQueue();
+    q.ops.push(op);
+    saveQueue(q);
+  }
+  function pendingCount() {
+    const q = loadQueue();
+    return q && session && q.userId === session.user.id ? q.ops.length : 0;
+  }
+  function updatePendingUI() {
+    const pill = $('#pending-pill');
+    if (!pill) return;
+    const n = cloudOn() ? pendingCount() : 0;
+    pill.hidden = !n;
+    if (n) pill.querySelector('b').textContent = n;
+  }
+  const isTemp = (id) => String(id).startsWith('tmp_');
+
+  // Replay one queued op against Supabase (throws on failure).
+  async function applyOp(op) {
+    const table = op.table;
+    const rowMap = { lifts: liftRow, climbs: climbRow, routines: routineRow }[table];
+    const fromMap = { lifts: fromLift, climbs: fromClimb, routines: fromRoutine }[table];
+    if (op.kind === 'add') {
+      const { data, error } = await sb.from(table).insert(rowMap(op.entry)).select().single();
+      if (error) throw error;
+      // Swap the optimistic temp row for the real one
+      const arr = state[table];
+      const i = arr.findIndex((x) => x.id === op.tempId);
+      if (i !== -1) arr[i] = fromMap(data); else arr.push(fromMap(data));
+    } else if (op.kind === 'upd') {
+      const payload = op.patch || rowMap(op.entry);
+      const { error } = await sb.from(table).update(payload).eq('id', op.id);
+      if (error) throw error;
+    } else if (op.kind === 'del') {
+      const { error } = await sb.from(table).delete().eq('id', op.id);
+      if (error) throw error;
+    }
+  }
+
+  let flushing = false;
+  async function flushQueue() {
+    if (flushing || !cloudOn()) return;
+    const q = loadQueue();
+    if (!q || q.userId !== session.user.id || !q.ops.length) return;
+    flushing = true;
+    let applied = false;
+    try {
+      while (q.ops.length) {
+        try {
+          await applyOp(q.ops[0]);
+          applied = true;
+        } catch (e) {
+          if (isNetErr(e)) break; // still offline — leave the rest queued
+          console.warn('Dropping change that no longer applies:', q.ops[0], e);
+        }
+        q.ops.shift();
+        saveQueue(q);
+      }
+    } finally {
+      flushing = false;
+    }
+    updatePendingUI();
+    if (applied) {
+      saveCloudCache();
+      renderAll();
+    }
+  }
+  window.addEventListener('online', () => { flushQueue(); });
+
+  // Shared shape for the cloud branch of every mutation: try the network;
+  // on a network failure apply the change locally and queue it instead.
+  async function cloudWrite(networkFn, offlineFn, op) {
+    try {
+      await networkFn();
+    } catch (e) {
+      if (!isNetErr(e)) throw e;
+      offlineFn();
+      if (op) enqueue(op);
+    }
+    saveCloudCache();
+  }
+
   /* ----- Unified data layer ----- */
   const Store = {
     async load() {
       if (cloudOn()) {
-        const [lifts, climbs] = await Promise.all([
-          sb.from('lifts').select('*').order('date', { ascending: true }),
-          sb.from('climbs').select('*').order('date', { ascending: true })
-        ]);
-        if (lifts.error) throw lifts.error;
-        if (climbs.error) throw climbs.error;
-        state.lifts = lifts.data.map(fromLift);
-        state.climbs = climbs.data.map(fromClimb);
-        // Routines fail soft: if the table hasn't been created yet (schema not
-        // re-run), the rest of the app keeps working.
         try {
-          const r = await sb.from('routines').select('*').order('position', { ascending: true });
-          if (r.error) throw r.error;
-          state.routines = r.data.map(fromRoutine);
+          const [lifts, climbs] = await Promise.all([
+            sb.from('lifts').select('*').order('date', { ascending: true }),
+            sb.from('climbs').select('*').order('date', { ascending: true })
+          ]);
+          if (lifts.error) throw lifts.error;
+          if (climbs.error) throw climbs.error;
+          state.lifts = lifts.data.map(fromLift);
+          state.climbs = climbs.data.map(fromClimb);
+          // Routines fail soft: if the table hasn't been created yet (schema
+          // not re-run), the rest of the app keeps working.
+          try {
+            const r = await sb.from('routines').select('*').order('position', { ascending: true });
+            if (r.error) throw r.error;
+            state.routines = r.data.map(fromRoutine);
+          } catch (e) {
+            const cached = isNetErr(e) ? loadCloudCache() : null;
+            if (cached) state.routines = cached.routines || [];
+            else {
+              console.warn('Routines unavailable — run the routines section of supabase-schema.sql:', e);
+              state.routines = [];
+            }
+          }
+          saveCloudCache();
         } catch (e) {
-          console.warn('Routines unavailable — run the routines section of supabase-schema.sql:', e);
-          state.routines = [];
+          // Offline: open on the last synced snapshot instead of failing.
+          const cached = isNetErr(e) ? loadCloudCache() : null;
+          if (!cached) throw e;
+          console.warn('Offline — showing the last synced data.');
+          state.lifts = cached.lifts || [];
+          state.climbs = cached.climbs || [];
+          state.routines = cached.routines || [];
         }
       } else {
         const local = loadLocal();
@@ -139,12 +290,20 @@
         state.climbs = local.climbs;
         state.routines = local.routines;
       }
+      updatePendingUI();
     },
     async addLift(entry) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('lifts').insert(liftRow(entry)).select().single();
-        if (error) throw error;
-        state.lifts.push(fromLift(data));
+        const tempId = 'tmp_' + uid();
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('lifts').insert(liftRow(entry)).select().single();
+            if (error) throw error;
+            state.lifts.push(fromLift(data));
+          },
+          () => state.lifts.push({ id: tempId, ...entry }),
+          { kind: 'add', table: 'lifts', tempId, entry }
+        );
       } else {
         state.lifts.push({ id: uid(), ...entry });
         saveLocal();
@@ -152,9 +311,16 @@
     },
     async addClimb(entry) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('climbs').insert(climbRow(entry)).select().single();
-        if (error) throw error;
-        state.climbs.push(fromClimb(data));
+        const tempId = 'tmp_' + uid();
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('climbs').insert(climbRow(entry)).select().single();
+            if (error) throw error;
+            state.climbs.push(fromClimb(data));
+          },
+          () => state.climbs.push({ id: tempId, ...entry }),
+          { kind: 'add', table: 'climbs', tempId, entry }
+        );
       } else {
         state.climbs.push({ id: uid(), ...entry });
         saveLocal();
@@ -162,10 +328,29 @@
     },
     async updateLift(id, entry) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('lifts').update(liftRow(entry)).eq('id', id).select().single();
-        if (error) throw error;
-        const i = state.lifts.findIndex((x) => x.id === id);
-        if (i !== -1) state.lifts[i] = fromLift(data);
+        const apply = () => {
+          const i = state.lifts.findIndex((x) => x.id === id);
+          if (i !== -1) state.lifts[i] = { id, ...entry };
+        };
+        if (isTemp(id)) {
+          // Not on the server yet — rewrite the queued insert instead.
+          const q = myQueue();
+          const op = q.ops.find((o) => o.tempId === id);
+          if (op) { op.entry = entry; saveQueue(q); }
+          apply();
+          saveCloudCache();
+          return;
+        }
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('lifts').update(liftRow(entry)).eq('id', id).select().single();
+            if (error) throw error;
+            const i = state.lifts.findIndex((x) => x.id === id);
+            if (i !== -1) state.lifts[i] = fromLift(data);
+          },
+          apply,
+          { kind: 'upd', table: 'lifts', id, entry }
+        );
       } else {
         const i = state.lifts.findIndex((x) => x.id === id);
         if (i !== -1) state.lifts[i] = { id, ...entry };
@@ -174,10 +359,28 @@
     },
     async updateClimb(id, entry) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('climbs').update(climbRow(entry)).eq('id', id).select().single();
-        if (error) throw error;
-        const i = state.climbs.findIndex((x) => x.id === id);
-        if (i !== -1) state.climbs[i] = fromClimb(data);
+        const apply = () => {
+          const i = state.climbs.findIndex((x) => x.id === id);
+          if (i !== -1) state.climbs[i] = { id, ...entry };
+        };
+        if (isTemp(id)) {
+          const q = myQueue();
+          const op = q.ops.find((o) => o.tempId === id);
+          if (op) { op.entry = entry; saveQueue(q); }
+          apply();
+          saveCloudCache();
+          return;
+        }
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('climbs').update(climbRow(entry)).eq('id', id).select().single();
+            if (error) throw error;
+            const i = state.climbs.findIndex((x) => x.id === id);
+            if (i !== -1) state.climbs[i] = fromClimb(data);
+          },
+          apply,
+          { kind: 'upd', table: 'climbs', id, entry }
+        );
       } else {
         const i = state.climbs.findIndex((x) => x.id === id);
         if (i !== -1) state.climbs[i] = { id, ...entry };
@@ -186,9 +389,16 @@
     },
     async addRoutine(entry) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('routines').insert(routineRow(entry)).select().single();
-        if (error) throw error;
-        state.routines.push(fromRoutine(data));
+        const tempId = 'tmp_' + uid();
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('routines').insert(routineRow(entry)).select().single();
+            if (error) throw error;
+            state.routines.push(fromRoutine(data));
+          },
+          () => state.routines.push({ id: tempId, ...routineRow(entry) }),
+          { kind: 'add', table: 'routines', tempId, entry }
+        );
       } else {
         state.routines.push({ id: uid(), ...routineRow(entry) });
         saveLocal();
@@ -197,10 +407,28 @@
     // patch: any subset of { name, position, exercises, last_run }
     async updateRoutine(id, patch) {
       if (cloudOn()) {
-        const { data, error } = await sb.from('routines').update(patch).eq('id', id).select().single();
-        if (error) throw error;
-        const i = state.routines.findIndex((x) => x.id === id);
-        if (i !== -1) state.routines[i] = fromRoutine(data);
+        const apply = () => {
+          const i = state.routines.findIndex((x) => x.id === id);
+          if (i !== -1) state.routines[i] = { ...state.routines[i], ...patch };
+        };
+        if (isTemp(id)) {
+          const q = myQueue();
+          const op = q.ops.find((o) => o.tempId === id);
+          if (op) { op.entry = { ...op.entry, ...patch }; saveQueue(q); }
+          apply();
+          saveCloudCache();
+          return;
+        }
+        await cloudWrite(
+          async () => {
+            const { data, error } = await sb.from('routines').update(patch).eq('id', id).select().single();
+            if (error) throw error;
+            const i = state.routines.findIndex((x) => x.id === id);
+            if (i !== -1) state.routines[i] = fromRoutine(data);
+          },
+          apply,
+          { kind: 'upd', table: 'routines', id, patch }
+        );
       } else {
         const i = state.routines.findIndex((x) => x.id === id);
         if (i !== -1) state.routines[i] = { ...state.routines[i], ...patch };
@@ -209,27 +437,72 @@
     },
     async delRoutine(id) {
       if (cloudOn()) {
-        const { error } = await sb.from('routines').delete().eq('id', id);
-        if (error) throw error;
+        if (isTemp(id)) {
+          const q = myQueue();
+          q.ops = q.ops.filter((o) => o.tempId !== id);
+          saveQueue(q);
+        } else {
+          await cloudWrite(
+            async () => {
+              const { error } = await sb.from('routines').delete().eq('id', id);
+              if (error) throw error;
+            },
+            () => {},
+            { kind: 'del', table: 'routines', id }
+          );
+        }
+        state.routines = state.routines.filter((x) => x.id !== id);
+        saveCloudCache();
+      } else {
+        state.routines = state.routines.filter((x) => x.id !== id);
+        saveLocal();
       }
-      state.routines = state.routines.filter((x) => x.id !== id);
-      if (!cloudOn()) saveLocal();
     },
     async delLift(id) {
       if (cloudOn()) {
-        const { error } = await sb.from('lifts').delete().eq('id', id);
-        if (error) throw error;
+        if (isTemp(id)) {
+          const q = myQueue();
+          q.ops = q.ops.filter((o) => o.tempId !== id);
+          saveQueue(q);
+        } else {
+          await cloudWrite(
+            async () => {
+              const { error } = await sb.from('lifts').delete().eq('id', id);
+              if (error) throw error;
+            },
+            () => {},
+            { kind: 'del', table: 'lifts', id }
+          );
+        }
+        state.lifts = state.lifts.filter((x) => x.id !== id);
+        saveCloudCache();
+      } else {
+        state.lifts = state.lifts.filter((x) => x.id !== id);
+        saveLocal();
       }
-      state.lifts = state.lifts.filter((x) => x.id !== id);
-      if (!cloudOn()) saveLocal();
     },
     async delClimb(id) {
       if (cloudOn()) {
-        const { error } = await sb.from('climbs').delete().eq('id', id);
-        if (error) throw error;
+        if (isTemp(id)) {
+          const q = myQueue();
+          q.ops = q.ops.filter((o) => o.tempId !== id);
+          saveQueue(q);
+        } else {
+          await cloudWrite(
+            async () => {
+              const { error } = await sb.from('climbs').delete().eq('id', id);
+              if (error) throw error;
+            },
+            () => {},
+            { kind: 'del', table: 'climbs', id }
+          );
+        }
+        state.climbs = state.climbs.filter((x) => x.id !== id);
+        saveCloudCache();
+      } else {
+        state.climbs = state.climbs.filter((x) => x.id !== id);
+        saveLocal();
       }
-      state.climbs = state.climbs.filter((x) => x.id !== id);
-      if (!cloudOn()) saveLocal();
     },
     async resetAll() {
       if (cloudOn()) {
@@ -239,6 +512,7 @@
         if (a.error) throw a.error;
         if (b.error) throw b.error;
         state.lifts = []; state.climbs = [];
+        saveCloudCache();
       } else {
         state = { lifts: [], climbs: [] };
         saveLocal();
@@ -350,6 +624,7 @@
       alert('Sync error: ' + errMsg(e));
     } finally {
       setSync(false);
+      flushQueue(); // being able to mutate implies we may be back online
     }
   }
 
@@ -2012,7 +2287,9 @@
       await Store.load();
     } catch (e) {
       console.error('Load error:', e);
-      alert('Could not load data: ' + errMsg(e));
+      alert(isNetErr(e)
+        ? "You're offline and this device has no synced copy of your data yet — connect once to download it."
+        : 'Could not load data: ' + errMsg(e));
     } finally {
       setSync(false);
     }
@@ -2020,9 +2297,14 @@
     // first time already filled with data (and charts measure real widths).
     revealApp();
     renderAll();
+    flushQueue(); // push anything logged while offline
   }
 
   async function boot() {
+    // PWA: cache the app shell so it opens instantly (and fully offline).
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker unavailable:', e));
+    }
     if (sb) {
       // React to sign-in / sign-out / profile updates
       sb.auth.onAuthStateChange(async (event, newSession) => {
