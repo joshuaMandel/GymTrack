@@ -308,11 +308,25 @@
     e.stopPropagation();
     fabMenu.hidden = !fabMenu.hidden;
   });
-  document.addEventListener('click', (e) => {
-    if (!fabMenu.hidden && !e.target.closest('.fab-wrap')) fabMenu.hidden = true;
-  });
   $('#fab-lift').addEventListener('click', () => { fabMenu.hidden = true; openAddLift(); });
   $('#fab-climb').addEventListener('click', () => { fabMenu.hidden = true; openAddClimb(); });
+
+  /* ----- "Log entry" pill on the dashboard: same chooser, under the button ----- */
+  const logMenu = $('#log-menu');
+  $('#dash-log-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    logMenu.hidden = !logMenu.hidden;
+  });
+  $('#log-lift').addEventListener('click', () => { logMenu.hidden = true; openAddLift(); });
+  $('#log-climb').addEventListener('click', () => { logMenu.hidden = true; openAddClimb(); });
+  document.addEventListener('click', (e) => {
+    if (!fabMenu.hidden && !e.target.closest('.fab-wrap')) fabMenu.hidden = true;
+    if (!logMenu.hidden && !e.target.closest('.log-wrap')) logMenu.hidden = true;
+  });
+
+  /* ----- Per-view "log" buttons in the page headers ----- */
+  $('#lift-add-btn').addEventListener('click', openAddLift);
+  $('#climb-add-btn').addEventListener('click', openAddClimb);
 
   /* ======================================================================
      Weightlifting
@@ -469,9 +483,9 @@
       const tr = document.createElement('tr');
       if (sameGroup) tr.className = 'grouped';
       tr.innerHTML = `
-        <td>${sameGroup ? '' : fmtDate(l.date)}</td>
-        <td>${sameGroup ? '<span class="set-cont">＋ set</span>' : escapeHTML(display[exKey(l.exercise)] || l.exercise)}</td>
-        <td>${fmtNum(l.weight)} ${l.unit}</td>
+        <td class="date">${sameGroup ? '' : fmtDate(l.date)}</td>
+        <td class="ex">${sameGroup ? '<span class="set-cont">＋ set</span>' : escapeHTML(display[exKey(l.exercise)] || l.exercise)}</td>
+        <td class="wt">${fmtNum(l.weight)} ${l.unit}</td>
         <td>${l.sets} × ${l.reps}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td class="row-actions">
@@ -535,7 +549,7 @@
     drawChart(wrap, liftSeries(metric, lifts), fmt);
 
     // PR chips for the selected range
-    const suffix = cutoff ? '' : ' (all-time)';
+    const volLabel = cutoff ? 'Total volume' : 'All-time volume';
     const display = exerciseDisplayMap();
     let heaviest = null;
     lifts.forEach((l) => {
@@ -549,9 +563,9 @@
     const bestSession = Math.max(...Object.values(volByDate));
     const totalVol = Object.values(volByDate).reduce((s, v) => s + v, 0);
     prStrip.innerHTML = `
-      <span class="pr-chip">Heaviest lift <b>${fmtNum(heaviest.w)} ${unit}</b> (${escapeHTML(heaviest.exercise)})</span>
+      <span class="pr-chip">Heaviest lift <b>${escapeHTML(heaviest.exercise)} ${fmtNum(heaviest.w)} ${unit}</b></span>
       <span class="pr-chip">Best session volume <b>${fmtCompact(bestSession)} ${unit}</b></span>
-      <span class="pr-chip">Total volume${suffix} <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
+      <span class="pr-chip">${volLabel} <b>${fmtCompact(totalVol)} ${unit}</b></span>`;
   }
 
   $('#lift-filter').addEventListener('change', renderLiftTable);
@@ -585,9 +599,9 @@
       const resClass = isSend(c.result) ? 'send' : 'project';
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${fmtDate(c.date)}</td>
+        <td class="date">${fmtDate(c.date)}</td>
         <td><span class="badge ${discClass}">${c.discipline}</span></td>
-        <td><b>${c.grade}</b></td>
+        <td class="wt">${c.grade}</td>
         <td><span class="badge ${resClass}">${c.result}</span></td>
         <td>${c.attempts}</td>
         <td class="muted">${escapeHTML(c.location)}</td>
@@ -650,14 +664,16 @@
       return;
     }
 
+    // Brand mapping: bouldering is navy, roped disciplines lead with orange.
+    const DISC_COLORS = { 'Bouldering': '#1f3a5f', 'Sport': '#f59e2c', 'Top Rope': '#16181d', 'Trad': '#3a7d44' };
     if (metric === 'sends') {
-      drawChart(wrap, ALL_DISCIPLINES.map((d) => sendsSeries(d, sends)), (v) => fmtNum(Math.round(v)));
+      drawChart(wrap, ALL_DISCIPLINES.map((d) => ({ ...sendsSeries(d, sends), color: DISC_COLORS[d] })), (v) => fmtNum(Math.round(v)));
     } else {
       // Hardest sends: bouldering (V scale) and ropes (YDS) use different
       // scales, so each gets its own chart and axis.
       wrap.innerHTML = '';
-      const boulder = hardestSeries('Bouldering', sends);
-      const ropes = ROPE_DISCIPLINES.map((d) => hardestSeries(d, sends)).filter((s) => s.points.length);
+      const boulder = { ...hardestSeries('Bouldering', sends), color: DISC_COLORS['Bouldering'] };
+      const ropes = ROPE_DISCIPLINES.map((d) => ({ ...hardestSeries(d, sends), color: DISC_COLORS[d] })).filter((s) => s.points.length);
       if (boulder.points.length) {
         const t = document.createElement('p');
         t.className = 'subchart-title';
@@ -934,21 +950,25 @@
       const w = weekStart(l.date);
       if (wIndex.has(w)) volByWeek[w] = (volByWeek[w] || 0) + toUnit(l.weight, l.unit, unit) * l.sets * l.reps;
     });
-    drawChart($('#dash-lift-chart'),
-      [{ label: 'Volume', points: weeks.map((w) => ({ date: w, value: volByWeek[w] || 0 })) }],
+    drawBars($('#dash-lift-chart'),
+      weeks.map((w) => ({ date: w, value: volByWeek[w] || 0 })),
       (v) => `${fmtCompact(v)} ${unit}`);
 
-    const sendSeries = ALL_DISCIPLINES.map((disc) => {
+    // Bouldering vs everything on a rope, one line each (navy / orange)
+    const sendSeries = [
+      { label: 'Bouldering', match: (d) => d === 'Bouldering', color: '#1f3a5f' },
+      { label: 'Roped', match: (d) => ROPE_DISCIPLINES.includes(d), color: '#f59e2c' }
+    ].map(({ label, match, color }) => {
       const byWeek = {};
       state.climbs
-        .filter((c) => c.discipline === disc && isSend(c.result))
+        .filter((c) => match(c.discipline) && isSend(c.result))
         .forEach((c) => {
           const w = weekStart(c.date);
           if (wIndex.has(w)) byWeek[w] = (byWeek[w] || 0) + 1;
         });
       return Object.keys(byWeek).length
-        ? { label: disc, points: weeks.map((w) => ({ date: w, value: byWeek[w] || 0 })) }
-        : { label: disc, points: [] };
+        ? { label, color, points: weeks.map((w) => ({ date: w, value: byWeek[w] || 0 })) }
+        : { label, color, points: [] };
     });
     drawChart($('#dash-climb-chart'), sendSeries, (v) => fmtNum(Math.round(v)));
   }
@@ -1023,12 +1043,31 @@
     renderLeaderboard();
   });
 
+  const WEEKLY_GOAL = 6; // sessions per week the hero ring fills toward
+
+  // "▲ 8% vs last week" / "▲ 2 vs last week" — mini-card bottom line
+  function setMiniDelta(sel, cur, prev, mode) {
+    const el = $(sel);
+    el.classList.remove('up', 'down');
+    if (!cur && !prev) { el.textContent = ''; return; }
+    if (!prev) { el.textContent = 'new this week'; el.classList.add('up'); return; }
+    const diff = cur - prev;
+    if (diff === 0) { el.textContent = '— same as last week'; return; }
+    const amount = mode === 'pct' ? `${Math.round(Math.abs(diff) / prev * 100)}%` : fmtNum(Math.abs(diff));
+    el.textContent = `${diff > 0 ? '▲' : '▼'} ${amount} vs last week`;
+    el.classList.add(diff > 0 ? 'up' : 'down');
+  }
+
   function renderHome() {
     const unit = dominantUnit();
     const display = exerciseDisplayMap();
-    const activeDates = new Set([...state.lifts, ...state.climbs].map((x) => x.date));
+    const liftDates = new Set(state.lifts.map((l) => l.date));
+    const climbDates = new Set(state.climbs.map((c) => c.date));
+    const activeDates = new Set([...liftDates, ...climbDates]);
 
     // ----- Week strip: last 7 days ending today -----
+    // Ring color says what kind of session the day held: orange = lifting,
+    // navy = climbing, half-and-half = both, plain border = rest day.
     const strip = $('#week-strip');
     const todayIso = todayISO();
     const days = [];
@@ -1042,27 +1081,65 @@
         num: d.getDate()
       });
     }
+    const ringClass = (iso) => {
+      const l = liftDates.has(iso), c = climbDates.has(iso);
+      return l && c ? ' ring-both' : l ? ' ring-lift' : c ? ' ring-climb' : '';
+    };
     strip.innerHTML = days.map((d) => `
-      <div class="day${activeDates.has(d.iso) ? ' active' : ''}${d.iso === todayIso ? ' today' : ''}" title="${d.iso}">
+      <div class="day${d.iso === todayIso ? ' today' : ''}" title="${d.iso}">
         <span class="dow">${d.dow}</span>
-        <span class="dnum">${d.num}</span>
+        <span class="dnum${ringClass(d.iso)}">${d.num}</span>
       </div>`).join('');
 
-    // ----- This week (since Monday) -----
+    // ----- This week (since Monday) vs last week -----
     const wkStart = weekStart(todayIso);
+    const prevD = new Date(wkStart + 'T00:00:00');
+    prevD.setDate(prevD.getDate() - 7);
+    const prevStart = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}-${String(prevD.getDate()).padStart(2, '0')}`;
+
     const liftsWk = state.lifts.filter((l) => l.date >= wkStart);
     const climbsWk = state.climbs.filter((c) => c.date >= wkStart);
+    const liftsPrev = state.lifts.filter((l) => l.date >= prevStart && l.date < wkStart);
+    const climbsPrev = state.climbs.filter((c) => c.date >= prevStart && c.date < wkStart);
     const sessionDates = new Set([...liftsWk, ...climbsWk].map((x) => x.date));
 
-    $('#hero-sessions').textContent = sessionDates.size;
-    const pct = Math.min(100, Math.round(sessionDates.size / 7 * 100));
-    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #eef0f4 0)`;
+    // Greeting
+    const hour = new Date().getHours();
+    const tod = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+    const first = (currentDisplayName() || '').trim().split(/\s+/)[0];
+    $('#greeting').textContent = `Good ${tod}${first ? ', ' + first : ''}`;
+    const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    const remaining = Math.max(0, WEEKLY_GOAL - sessionDates.size);
+    $('#greeting-sub').textContent = `${dateStr} · ${remaining
+      ? `${remaining} session${remaining === 1 ? '' : 's'} to hit your weekly goal`
+      : 'weekly goal hit — nice work'}`;
 
-    const volWk = liftsWk.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
-    $('#mini-volume').textContent = volWk ? `${fmtCompact(volWk)} ${unit}` : '0';
-    $('#mini-sends').textContent = climbsWk.filter((c) => isSend(c.result)).length;
-    const topWk = liftsWk.length ? Math.max(...liftsWk.map((l) => toUnit(l.weight, l.unit, unit))) : 0;
-    $('#mini-top').textContent = topWk ? `${fmtNum(topWk)} ${unit}` : '—';
+    // Hero: sessions + progress ring toward the weekly goal
+    $('#hero-sessions').textContent = sessionDates.size;
+    $('#hero-label').textContent = `sessions this week · goal ${WEEKLY_GOAL}`;
+    const pct = Math.min(100, Math.round(sessionDates.size / WEEKLY_GOAL * 100));
+    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #2e3038 0)`;
+    $('#hero-pct').textContent = pct + '%';
+
+    // Minis
+    const vol = (rows) => rows.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
+    const volWk = vol(liftsWk);
+    $('#mini-volume').innerHTML = volWk ? `${fmtCompact(volWk)} <span class="unit">${unit}</span>` : '0';
+    setMiniDelta('#mini-volume-sub', Math.round(volWk), Math.round(vol(liftsPrev)), 'pct');
+
+    const sendsWk = climbsWk.filter((c) => isSend(c.result)).length;
+    $('#mini-sends').textContent = sendsWk;
+    setMiniDelta('#mini-sends-sub', sendsWk, climbsPrev.filter((c) => isSend(c.result)).length, 'abs');
+
+    let top = null;
+    liftsWk.forEach((l) => {
+      const w = toUnit(l.weight, l.unit, unit);
+      if (!top || w > top.w) top = { w, exercise: display[exKey(l.exercise)] || l.exercise, date: l.date };
+    });
+    $('#mini-top').innerHTML = top ? `${fmtNum(top.w)} <span class="unit">${unit}</span>` : '—';
+    $('#mini-top-sub').textContent = top
+      ? `${top.exercise} · ${new Date(top.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' })}`
+      : '';
 
     // ----- Weekly streak: consecutive weeks (ending now) with ≥1 session -----
     const weekSet = new Set([...activeDates].map(weekStart));
@@ -1085,19 +1162,28 @@
     // ----- Recent activity: lifts + climbs merged -----
     const items = [
       ...state.lifts.map((l) => ({
+        kind: 'lift',
         icon: 'barbell',
-        main: display[exKey(l.exercise)] || l.exercise,
-        sub: `${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
+        main: `${display[exKey(l.exercise)] || l.exercise} · ${fmtNum(l.weight)} ${l.unit} · ${l.sets}×${l.reps}`,
+        sub: l.notes || '',
         date: l.date
       })),
       ...state.climbs.map((c) => ({
+        kind: 'climb',
         icon: 'mountain',
-        main: `${c.grade} · ${c.discipline}`,
-        sub: `${c.result}${c.location ? ' · ' + c.location : ''}`,
+        main: `${c.grade} · ${c.result}${c.attempts > 1 ? ` · ${c.attempts} attempts` : ''}`,
+        sub: [c.discipline !== 'Bouldering' ? c.discipline : '', c.location, c.notes].filter(Boolean).join(' · '),
         date: c.date
       }))
     ];
     renderFeed('#recent-feed', items, (m) => m, 'Tap ＋ to log your first set or climb.');
+  }
+
+  // Recent dates read as weekdays ("Thu"); older ones as short dates ("Jul 5").
+  function feedDate(iso) {
+    return iso >= daysAgoISO(6)
+      ? new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' })
+      : fmtDateShort(iso);
   }
 
   function renderFeed(sel, items, mapFn, emptyMsg) {
@@ -1111,13 +1197,13 @@
       const m = mapFn(it);
       return `<li>
         <div class="feed-left">
-          ${m.icon ? `<span class="feed-ico"><svg class="ico"><use href="#i-${m.icon}"/></svg></span>` : ''}
+          ${m.icon ? `<span class="feed-ico${m.kind ? ' ' + m.kind : ''}"><svg class="ico"><use href="#i-${m.icon}"/></svg></span>` : ''}
           <div>
             <div class="feed-main">${escapeHTML(m.main)}</div>
-            <div class="feed-sub">${escapeHTML(m.sub)}</div>
+            ${m.sub ? `<div class="feed-sub">${escapeHTML(m.sub)}</div>` : ''}
           </div>
         </div>
-        <div class="feed-date">${fmtDateShort(m.date)}</div>
+        <div class="feed-date">${feedDate(m.date)}</div>
       </li>`;
     }).join('');
   }
@@ -1126,7 +1212,40 @@
      Multi-series SVG line chart
      series: [{ label, points: [{date, value}] }] — dates form a shared x axis.
      ====================================================================== */
-  const CHART_COLORS = ['#f5a524', '#38bdf8', '#34d399', '#f472b6', '#a78bfa', '#fb923c', '#22d3ee', '#facc15'];
+  const CHART_COLORS = ['#16181d', '#f59e2c', '#1f3a5f', '#3a7d44', '#b9741f', '#85806f'];
+
+  // Weekly bar chart (dashboard lifting volume): muted sand bars, the current
+  // week highlighted orange with its value labeled above.
+  function drawBars(wrap, points, fmtValue) {
+    const max = points.length ? Math.max(...points.map((p) => p.value)) : 0;
+    if (max <= 0) {
+      wrap.innerHTML = '<div class="chart-empty">No data yet.</div>';
+      return;
+    }
+    const measured = Math.round(wrap.getBoundingClientRect().width);
+    const W = measured >= 200 ? measured : 640;
+    const H = 200, padT = 28, padB = 10, padX = 6;
+    const baseY = H - padB;
+    const n = points.length;
+    const slot = (W - padX * 2) / n;
+    const barW = Math.min(34, slot * 0.6);
+    const bars = points.map((p, i) => {
+      if (p.value <= 0) return '';
+      const h = Math.max(3, (p.value / max) * (baseY - padT));
+      const x = padX + slot * i + (slot - barW) / 2;
+      const y = baseY - h;
+      const last = i === n - 1;
+      const label = last
+        ? `<text x="${(x + barW / 2).toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="#b9741f" font-family="Space Grotesk, Archivo, sans-serif">${fmtCompact(p.value)}</text>`
+        : '';
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(7, barW / 2)}" fill="${last ? '#f59e2c' : '#e2d9c4'}"><title>Week of ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></rect>${label}`;
+    }).join('');
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly volume chart">
+        <line class="chart-base" x1="0" y1="${baseY}" x2="${W}" y2="${baseY}"/>
+        ${bars}
+      </svg>`;
+  }
 
   function drawChart(wrap, series, fmtValue) {
     series = series.filter((s) => s.points.length);
@@ -1159,34 +1278,42 @@
 
     const ticks = [min + (max - min) * 0.1, (min + max) / 2, max - (max - min) * 0.1];
     const yTicks = ticks.map((t) =>
-      `<line class="chart-axis" x1="${padL}" y1="${y(t).toFixed(1)}" x2="${W - padR}" y2="${y(t).toFixed(1)}" opacity="0.4"/>
+      `<line class="chart-axis" x1="${padL}" y1="${y(t).toFixed(1)}" x2="${W - padR}" y2="${y(t).toFixed(1)}"/>
        <text class="chart-label" x="${padL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end">${fmtValue(t)}</text>`
     ).join('');
+    const baseline = `<line class="chart-base" x1="${padL}" y1="${(padT + innerH).toFixed(1)}" x2="${W - padR}" y2="${(padT + innerH).toFixed(1)}"/>`;
 
     const idxs = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
     const xLabels = [...new Set(idxs)].map((i) =>
       `<text class="chart-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${fmtDateShort(dates[i])}</text>`
     ).join('');
 
+    const colorOf = (s, si) => s.color || CHART_COLORS[si % CHART_COLORS.length];
+
     const seriesSvg = series.map((s, si) => {
-      const color = CHART_COLORS[si % CHART_COLORS.length];
+      const color = colorOf(s, si);
       const pts = s.points.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
       const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(xi.get(p.date)).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
-      const dots = pts.map((p) =>
-        `<circle cx="${x(xi.get(p.date)).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3" fill="${color}"><title>${escapeHTML(s.label)} — ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></circle>`
+      // Invisible per-point hover targets keep the tooltips; only the line's
+      // end gets a visible dot (design: end-point dots).
+      const hovers = pts.map((p) =>
+        `<circle cx="${x(xi.get(p.date)).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="8" fill="transparent"><title>${escapeHTML(s.label)} — ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></circle>`
       ).join('');
-      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>${dots}`;
+      const end = pts[pts.length - 1];
+      const endDot = `<circle cx="${x(xi.get(end.date)).toFixed(1)}" cy="${y(end.value).toFixed(1)}" r="5" fill="${color}"/>`;
+      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${hovers}${endDot}`;
     }).join('');
 
     const legend = series.length > 1
       ? `<div class="chart-legend">${series.map((s, si) =>
-          `<span class="legend-item"><span class="legend-dot" style="background:${CHART_COLORS[si % CHART_COLORS.length]}"></span>${escapeHTML(s.label)}</span>`
+          `<span class="legend-item"><span class="legend-dot" style="background:${colorOf(s, si)}"></span>${escapeHTML(s.label)}</span>`
         ).join('')}</div>`
       : '';
 
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Progress chart">
         ${yTicks}
+        ${baseline}
         ${seriesSvg}
         ${xLabels}
       </svg>${legend}`;
@@ -1330,10 +1457,11 @@
     if (!signedIn) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
     const label = currentDisplayName() || session.user.email || 'Account';
-    // Compact chip: name opens the profile modal (edit name / sign out).
+    const initial = (label.trim()[0] || '?').toUpperCase();
+    // Navy circle avatar with the user's initial; opens the profile modal.
     accountEl.innerHTML = `
       <span class="sync-dot" id="sync-dot" title="Synced"></span>
-      <button class="acct-name" id="profile-btn" title="Account">${escapeHTML(label)} <span class="edit-ico"><svg class="ico"><use href="#i-pencil"/></svg></span></button>`;
+      <button class="avatar" id="profile-btn" title="${escapeHTML(label)} — account" aria-label="Account">${escapeHTML(initial)}</button>`;
     $('#profile-btn').addEventListener('click', () => openProfile(false));
   }
 

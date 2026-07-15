@@ -74,7 +74,7 @@ with your email on any device to see the same data.
 | File | Purpose |
 |------|---------|
 | `index.html` | Markup and layout for all views + login modal |
-| `styles.css` | Dark, responsive styling |
+| `styles.css` | Warm cream + ink responsive styling |
 | `app.js` | State, storage layer (local + cloud), auth, charts |
 | `supabase-config.js` | Your Supabase project URL + anon key |
 | `supabase-schema.sql` | Database tables + Row-Level Security policies |

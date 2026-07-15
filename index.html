@@ -7,7 +7,7 @@
   <meta name="description" content="Track your weightlifting and rock climbing progress separately." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
@@ -37,24 +37,24 @@
     setTimeout(function () { document.body.classList.remove('booting'); }, 6000);
   </script>
   <header class="topbar">
-    <div class="brand">
-      <span class="logo-tile"><svg class="ico"><use href="#i-kbpeak"/></svg></span>
-      <h1>gymtrack</h1>
-    </div>
-    <div class="topbar-right">
-      <div class="streak-pill" id="streak-pill" title="Consecutive weeks with at least one session" hidden>
-        <svg class="ico"><use href="#i-flame"/></svg> <b id="streak-count">0</b>
+    <div class="topbar-inner">
+      <div class="brand">
+        <svg class="brand-mark" aria-hidden="true"><use href="#i-kbpeak"/></svg>
+        <h1>gymtrack</h1>
       </div>
-      <div class="account" id="account" hidden></div>
+      <nav class="tabs" role="tablist" aria-label="Trackers">
+        <button class="tab is-active" role="tab" data-view="dashboard">Home</button>
+        <button class="tab" role="tab" data-view="lifting">Weightlifting</button>
+        <button class="tab" role="tab" data-view="climbing">Rock Climbing</button>
+      </nav>
+      <div class="topbar-right">
+        <div class="streak-pill" id="streak-pill" title="Consecutive weeks with at least one session" hidden>
+          <svg class="ico"><use href="#i-flame"/></svg> <b id="streak-count">0</b>&nbsp;wk
+        </div>
+        <div class="account" id="account" hidden></div>
+      </div>
     </div>
   </header>
-  <nav class="tabs-bar" aria-label="Trackers">
-    <div class="tabs" role="tablist">
-      <button class="tab is-active" role="tab" data-view="dashboard">Home</button>
-      <button class="tab" role="tab" data-view="lifting">Weightlifting</button>
-      <button class="tab" role="tab" data-view="climbing">Rock Climbing</button>
-    </div>
-  </nav>
 
   <!-- Bottom dock: mobile nav pill + global log button -->
   <div class="bottom-dock">
@@ -200,67 +200,54 @@
 
     <!-- ===================== HOME ===================== -->
     <section class="view is-active" id="view-dashboard">
-      <div class="home-col">
-        <!-- Last 7 days -->
-        <div class="week-strip" id="week-strip"></div>
+      <!-- Greeting -->
+      <div class="view-head has-action home-head">
+        <div>
+          <h2 id="greeting">Welcome back</h2>
+          <p class="muted" id="greeting-sub"></p>
+        </div>
+        <div class="log-wrap">
+          <button class="btn pill" id="dash-log-btn"><svg class="ico"><use href="#i-plus"/></svg> Log entry</button>
+          <div class="log-menu" id="log-menu" hidden>
+            <button class="fab-item" id="log-lift"><svg class="ico"><use href="#i-barbell"/></svg> Log a set</button>
+            <button class="fab-item" id="log-climb"><svg class="ico"><use href="#i-mountain"/></svg> Log a climb</button>
+          </div>
+        </div>
+      </div>
 
-        <!-- This week hero -->
-        <div class="panel hero-card">
+      <!-- Last 7 days -->
+      <div class="week-strip" id="week-strip"></div>
+
+      <!-- This week: hero + minis -->
+      <div class="hero-grid">
+        <div class="hero-card">
           <div>
             <span class="hero-value" id="hero-sessions">0</span>
-            <span class="hero-label">Sessions this week</span>
+            <span class="hero-label" id="hero-label">sessions this week</span>
           </div>
-          <div class="hero-ring" id="hero-ring"><svg class="ico hero-ico"><use href="#i-barbell"/></svg></div>
+          <div class="hero-ring" id="hero-ring"><span class="hero-pct" id="hero-pct">0%</span></div>
         </div>
-
-        <div class="mini-grid">
-          <div class="mini-card">
-            <span class="mini-value" id="mini-volume">0</span>
-            <span class="mini-label">Volume this week</span>
-            <div class="mini-ring t-orange"><svg class="ico"><use href="#i-barbell"/></svg></div>
-          </div>
-          <div class="mini-card">
-            <span class="mini-value" id="mini-sends">0</span>
-            <span class="mini-label">Sends this week</span>
-            <div class="mini-ring t-blue"><svg class="ico"><use href="#i-mountain"/></svg></div>
-          </div>
-          <div class="mini-card">
-            <span class="mini-value" id="mini-top">—</span>
-            <span class="mini-label">Top lift this week</span>
-            <div class="mini-ring t-violet"><svg class="ico"><use href="#i-trophy"/></svg></div>
-          </div>
+        <div class="mini-card">
+          <span class="mini-label">Volume this week</span>
+          <span class="mini-value" id="mini-volume">0</span>
+          <span class="mini-sub" id="mini-volume-sub"></span>
         </div>
-
-        <!-- Recent activity -->
-        <h3 class="section-title">Recent activity</h3>
-        <div class="panel">
-          <ul class="feed" id="recent-feed"><li class="empty">Tap ＋ to log your first set or climb.</li></ul>
+        <div class="mini-card">
+          <span class="mini-label">Sends this week</span>
+          <span class="mini-value" id="mini-sends">0</span>
+          <span class="mini-sub" id="mini-sends-sub"></span>
         </div>
-
-        <!-- Climbing leaderboard (shown when signed in and the function is installed) -->
-        <div class="panel" id="leaderboard-panel" hidden>
-          <div class="panel-head">
-            <h3>Leaderboard</h3>
-            <div class="panel-controls">
-              <label class="inline-select">Discipline
-                <select id="lb-discipline">
-                  <option value="Bouldering">Bouldering</option>
-                  <option value="Sport">Sport (lead)</option>
-                  <option value="Top Rope">Top Rope</option>
-                  <option value="Trad">Trad</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <p class="muted small">Hardest send over the selected range · ties broken by sends at that grade.</p>
-          <ul class="feed" id="leaderboard-list"></ul>
+        <div class="mini-card">
+          <span class="mini-label">Top lift this week</span>
+          <span class="mini-value" id="mini-top">—</span>
+          <span class="mini-sub" id="mini-top-sub"></span>
         </div>
       </div>
 
       <!-- Trends -->
-      <div class="view-head has-action" style="margin-top: 26px;">
+      <div class="view-head has-action">
         <div>
-          <h3 class="section-title" style="margin: 0 0 4px;">Trends</h3>
+          <h3 class="section-title">Trends</h3>
           <p class="muted small">The selected period, compared to the period before it.</p>
         </div>
         <label class="inline-select">Range
@@ -299,24 +286,53 @@
       <div class="two-col">
         <div class="panel">
           <h3>Lifting volume by week</h3>
-          <p class="muted small">Total weight moved per week over the selected range.</p>
+          <p class="muted small">Total weight moved per week.</p>
           <div class="chart-wrap" id="dash-lift-chart"></div>
         </div>
         <div class="panel">
           <h3>Climbing sends by week</h3>
-          <p class="muted small">Sends per week by discipline over the selected range.</p>
+          <p class="muted small">Sends per week by discipline.</p>
           <div class="chart-wrap" id="dash-climb-chart"></div>
         </div>
       </div>
 
+      <!-- Activity + leaderboard -->
+      <div class="two-col">
+        <div class="panel">
+          <h3>Recent activity</h3>
+          <ul class="feed" id="recent-feed"><li class="empty">Tap ＋ to log your first set or climb.</li></ul>
+        </div>
+        <div class="panel" id="leaderboard-panel" hidden>
+          <div class="panel-head">
+            <h3>Leaderboard</h3>
+            <div class="panel-controls">
+              <label class="inline-select">
+                <select id="lb-discipline" aria-label="Discipline">
+                  <option value="Bouldering">Bouldering</option>
+                  <option value="Sport">Sport (lead)</option>
+                  <option value="Top Rope">Top Rope</option>
+                  <option value="Trad">Trad</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <p class="muted small">Hardest send over the selected range · ties broken by sends at that grade.</p>
+          <ul class="feed" id="leaderboard-list"></ul>
+        </div>
+      </div>
     </section>
 
     <!-- ===================== WEIGHTLIFTING ===================== -->
     <section class="view" id="view-lifting">
-      <div class="view-head">
-        <h2>Weightlifting</h2>
-        <p class="muted">Track your lifting progress session by session.</p>
+      <div class="view-head has-action">
+        <div>
+          <h2>Weightlifting</h2>
+          <p class="muted">Track your lifting progress session by session.</p>
+        </div>
+        <button class="btn pill" id="lift-add-btn">＋ Log a set</button>
       </div>
+
+      <div class="pr-strip" id="lift-prs"></div>
 
       <div class="panel">
         <div class="panel-head">
@@ -341,7 +357,6 @@
         </div>
         <p class="muted small">Per-session progress for every exercise, over time.</p>
         <div class="chart-wrap" id="lift-chart"></div>
-        <div class="pr-strip" id="lift-prs"></div>
       </div>
 
       <div class="panel">
@@ -364,10 +379,15 @@
 
     <!-- ===================== ROCK CLIMBING ===================== -->
     <section class="view" id="view-climbing">
-      <div class="view-head">
-        <h2>Rock Climbing</h2>
-        <p class="muted">Track sends across bouldering and roped climbing.</p>
+      <div class="view-head has-action">
+        <div>
+          <h2>Rock Climbing</h2>
+          <p class="muted">Track sends across bouldering and roped climbing.</p>
+        </div>
+        <button class="btn pill" id="climb-add-btn">＋ Log a climb</button>
       </div>
+
+      <div class="pr-strip" id="climb-prs"></div>
 
       <div class="panel">
         <div class="panel-head">
@@ -391,7 +411,6 @@
         </div>
         <p class="muted small">Progress across every discipline, over time.</p>
         <div class="chart-wrap" id="climb-chart"></div>
-        <div class="pr-strip" id="climb-prs"></div>
       </div>
 
       <div class="panel">
