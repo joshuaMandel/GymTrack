@@ -1,0 +1,35 @@
+# Applies supabase-schema.sql to the Supabase database automatically, so
+# schema changes land with the deploy instead of via manual SQL-editor runs.
+#
+# One-time setup (repo Settings → Secrets and variables → Actions):
+#   Add a secret named SUPABASE_DB_URL containing the "Session pooler"
+#   connection string from the Supabase dashboard (Connect → Session pooler),
+#   with your database password filled in. It must be the pooler URI
+#   (…pooler.supabase.com:5432) — GitHub runners can't reach the direct
+#   IPv6-only host. Until the secret exists, this workflow no-ops politely.
+#
+# The schema file is idempotent (create or replace / drop if exists), so
+# re-applying the whole file is always safe.
+name: Apply Supabase schema
+
+on:
+  push:
+    branches: [main]
+    paths: [supabase-schema.sql]
+  workflow_dispatch: # manual "Run workflow" button for catch-up runs
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply supabase-schema.sql
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::warning::SUPABASE_DB_URL secret not set — skipping schema apply. Add the Session-pooler connection string as a repo secret to enable this."
+            exit 0
+          fi
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase-schema.sql
+          echo "Schema applied."
