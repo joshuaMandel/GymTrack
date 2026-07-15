@@ -279,19 +279,7 @@ body:not(.lifting-on) #log-lift { display: none !important; }
   color: var(--text);
   position: relative;
 }
-.day .dnum.ring-lift { border-color: var(--accent); }
 .day .dnum.ring-climb { border-color: var(--accent-2); }
-/* A day with both sports: half-orange / half-navy ring drawn behind the number */
-.day .dnum.ring-both { border-color: transparent; }
-.day .dnum.ring-both::before {
-  content: "";
-  position: absolute;
-  inset: -2.5px;
-  border-radius: 50%;
-  background: conic-gradient(var(--accent) 0 50%, var(--accent-2) 50% 100%);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px + 0.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px + 0.5px));
-}
 .day.today { padding: 8px 4px; background: var(--panel); border: 1px solid var(--border); }
 .day.today .dow { color: var(--text); font-weight: 700; }
 
@@ -600,7 +588,6 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   display: flex; align-items: center; justify-content: center;
   flex: none;
 }
-.feed .feed-ico.lift { background: var(--accent-tint); color: var(--accent-text); }
 .feed .feed-ico.climb { background: var(--accent-2-tint); color: var(--accent-2); }
 .feed .feed-ico .ico { width: 18px; height: 18px; }
 .feed .feed-main { font-weight: 700; }

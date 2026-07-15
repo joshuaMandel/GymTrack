@@ -2,14 +2,19 @@
    Data requests (Supabase) are never intercepted; the app itself queues
    offline writes and falls back to its last synced snapshot for reads. */
 
-const CACHE = 'gymtrack-v1';
+// Bump SW_VERSION with every deploy, matching index.html's ?v= tags. A new
+// version re-runs install (fresh precache) and activate drops the old cache,
+// so offline users never get a new index.html paired with a stale app.js.
+const SW_VERSION = '2026-07-15s';
+const CACHE = 'gymtrack-' + SW_VERSION;
 
-// Everything needed to boot with no network at all.
+// Everything needed to boot with no network at all — the versioned asset
+// URLs exactly as index.html requests them.
 const SHELL = [
   './',
   'index.html',
-  'styles.css',
-  'app.js',
+  'styles.css?v=' + SW_VERSION,
+  'app.js?v=' + SW_VERSION,
   'supabase-config.js',
   'manifest.webmanifest',
   'icons/icon-192.png',

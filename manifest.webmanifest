@@ -1,7 +1,7 @@
 {
-  "name": "GymTrack — Weightlifting & Climbing",
+  "name": "GymTrack — Climbing",
   "short_name": "GymTrack",
-  "description": "Track your weightlifting and rock climbing progress, synced across devices.",
+  "description": "Track your climbing, build your Send Score, and climb the leaderboard — synced across devices.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

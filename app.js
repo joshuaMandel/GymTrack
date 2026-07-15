@@ -197,18 +197,40 @@
   }
   const isTemp = (id) => String(id).startsWith('tmp_');
 
+  // Client-generated row id for inserts. Sending the id with the INSERT makes
+  // it idempotent: if a response is lost after the server committed, the
+  // queued replay hits the primary key instead of creating a duplicate row.
+  const newRowId = () => (crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      }));
+
+  const isDupKeyErr = (e) => e && (e.code === '23505' || /duplicate key/i.test(errMsg(e)));
+
   // Replay one queued op against Supabase (throws on failure).
   async function applyOp(op) {
     const table = op.table;
     const rowMap = { lifts: liftRow, climbs: climbRow, routines: routineRow }[table];
     const fromMap = { lifts: fromLift, climbs: fromClimb, routines: fromRoutine }[table];
     if (op.kind === 'add') {
-      const { data, error } = await sb.from(table).insert(rowMap(op.entry)).select().single();
-      if (error) throw error;
+      // Ops from before client ids existed have no rowId — they insert the
+      // old (non-idempotent) way rather than being dropped.
+      const row = op.rowId ? { id: op.rowId, ...rowMap(op.entry) } : rowMap(op.entry);
+      let rec;
+      const { data, error } = await sb.from(table).insert(row).select().single();
+      if (error) {
+        if (!(op.rowId && isDupKeyErr(error))) throw error;
+        rec = row; // a lost-response attempt already landed this exact row
+      } else {
+        rec = data;
+      }
       // Swap the optimistic temp row for the real one
       const arr = state[table];
       const i = arr.findIndex((x) => x.id === op.tempId);
-      if (i !== -1) arr[i] = fromMap(data); else arr.push(fromMap(data));
+      if (i !== -1) arr[i] = fromMap(rec);
+      else if (!arr.some((x) => x.id === rec.id)) arr.push(fromMap(rec));
     } else if (op.kind === 'upd') {
       const payload = op.patch || rowMap(op.entry);
       const { error } = await sb.from(table).update(payload).eq('id', op.id);
@@ -222,21 +244,35 @@
   let flushing = false;
   async function flushQueue() {
     if (flushing || !cloudOn()) return;
-    const q = loadQueue();
-    if (!q || q.userId !== session.user.id || !q.ops.length) return;
     flushing = true;
     let applied = false;
     try {
-      while (q.ops.length) {
+      while (true) {
+        // Re-read the queue every iteration: enqueue() may have appended ops
+        // while we awaited the previous replay, and a stale in-memory copy
+        // would clobber them on save. (Two tabs can still race each other —
+        // localStorage has no locking — but a single tab is now safe.)
+        const q = myQueue();
+        if (!q.ops.length) break;
+        const op = q.ops[0];
         try {
-          await applyOp(q.ops[0]);
+          await applyOp(op);
           applied = true;
         } catch (e) {
           if (isNetErr(e)) break; // still offline — leave the rest queued
-          console.warn('Dropping change that no longer applies:', q.ops[0], e);
+          // Real API error: keep the op and retry on later flushes, so a
+          // transient server hiccup doesn't silently eat the change. Only
+          // give up after several distinct flushes fail.
+          op.tries = (op.tries || 0) + 1;
+          if (op.tries < 3) { saveQueue(q); break; }
+          console.warn('Dropping change after repeated sync failures:', op, e);
+          alert(`One queued change couldn't sync (${errMsg(e)}) and was discarded.`);
         }
-        q.ops.shift();
-        saveQueue(q);
+        // Handled (applied or dropped) — remove it. Ops are append-only, so
+        // it is still at index 0 of a fresh read.
+        const q2 = myQueue();
+        q2.ops.shift();
+        saveQueue(q2);
       }
     } finally {
       flushing = false;
@@ -310,14 +346,15 @@
     async addLift(entry) {
       if (cloudOn()) {
         const tempId = 'tmp_' + uid();
+        const rowId = newRowId();
         await cloudWrite(
           async () => {
-            const { data, error } = await sb.from('lifts').insert(liftRow(entry)).select().single();
+            const { data, error } = await sb.from('lifts').insert({ id: rowId, ...liftRow(entry) }).select().single();
             if (error) throw error;
             state.lifts.push(fromLift(data));
           },
           () => state.lifts.push({ id: tempId, ...entry }),
-          { kind: 'add', table: 'lifts', tempId, entry }
+          { kind: 'add', table: 'lifts', tempId, rowId, entry }
         );
       } else {
         state.lifts.push({ id: uid(), ...entry });
@@ -327,14 +364,15 @@
     async addClimb(entry) {
       if (cloudOn()) {
         const tempId = 'tmp_' + uid();
+        const rowId = newRowId();
         await cloudWrite(
           async () => {
-            const { data, error } = await sb.from('climbs').insert(climbRow(entry)).select().single();
+            const { data, error } = await sb.from('climbs').insert({ id: rowId, ...climbRow(entry) }).select().single();
             if (error) throw error;
             state.climbs.push(fromClimb(data));
           },
           () => state.climbs.push({ id: tempId, ...entry }),
-          { kind: 'add', table: 'climbs', tempId, entry }
+          { kind: 'add', table: 'climbs', tempId, rowId, entry }
         );
       } else {
         state.climbs.push({ id: uid(), ...entry });
@@ -405,14 +443,15 @@
     async addRoutine(entry) {
       if (cloudOn()) {
         const tempId = 'tmp_' + uid();
+        const rowId = newRowId();
         await cloudWrite(
           async () => {
-            const { data, error } = await sb.from('routines').insert(routineRow(entry)).select().single();
+            const { data, error } = await sb.from('routines').insert({ id: rowId, ...routineRow(entry) }).select().single();
             if (error) throw error;
             state.routines.push(fromRoutine(data));
           },
           () => state.routines.push({ id: tempId, ...routineRow(entry) }),
-          { kind: 'add', table: 'routines', tempId, entry }
+          { kind: 'add', table: 'routines', tempId, rowId, entry }
         );
       } else {
         state.routines.push({ id: uid(), ...routineRow(entry) });
@@ -529,7 +568,9 @@
         state.lifts = []; state.climbs = [];
         saveCloudCache();
       } else {
-        state = { lifts: [], climbs: [] };
+        // "All logged data" = the logs. Routines are templates and survive a
+        // reset in both modes (the cloud branch above leaves them too).
+        state = { lifts: [], climbs: [], routines: state.routines };
         saveLocal();
       }
     },
@@ -865,7 +906,7 @@
       tr.innerHTML = `
         <td class="date">${sameGroup ? '' : fmtDate(l.date)}</td>
         <td class="ex">${sameGroup ? '<span class="set-cont">＋ set</span>' : escapeHTML(display[exKey(l.exercise)] || l.exercise)}</td>
-        <td class="wt">${l.weight > 0 ? `${fmtNum(l.weight)} ${l.unit}` : 'BW'}</td>
+        <td class="wt">${l.weight > 0 ? `${fmtNum(l.weight)} ${escapeHTML(l.unit)}` : 'BW'}</td>
         <td>${l.sets} × ${l.reps}</td>
         <td class="muted">${escapeHTML(l.notes)}</td>
         <td class="row-actions">
@@ -1007,9 +1048,9 @@
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td class="date">${fmtDate(c.date)}</td>
-        <td><span class="badge ${discClass}">${c.discipline}</span></td>
-        <td class="wt">${routeDot(c.color)}${c.grade}</td>
-        <td><span class="badge ${resClass}">${c.result}</span></td>
+        <td><span class="badge ${discClass}">${escapeHTML(c.discipline)}</span></td>
+        <td class="wt">${routeDot(c.color)}${escapeHTML(c.grade)}</td>
+        <td><span class="badge ${resClass}">${escapeHTML(c.result)}</span></td>
         <td>${c.attempts}</td>
         <td class="muted">${escapeHTML(c.location)}</td>
         <td class="muted">${escapeHTML(c.notes)}</td>
@@ -1596,10 +1637,9 @@
     return rs[(i + 1) % rs.length].id;
   }
 
-  // The program panel appears on both Home and the Weightlifting page —
-  // render the same content into every routine-list container.
+  // The program panel lives on the Weightlifting page.
   function renderProgram() {
-    const containers = [$('#routine-list'), $('#routine-list-lift')].filter(Boolean);
+    const containers = [$('#routine-list-lift')].filter(Boolean);
     const rs = state.routines.slice().sort((a, b) => (a.position | 0) - (b.position | 0));
     containers.forEach((el) => {
       if (!rs.length) {
@@ -2139,7 +2179,7 @@
       cursor.setDate(cursor.getDate() - 1);
     }
     $('#streak-count').textContent = streak;
-    $('#streak-pill').hidden = false;
+    $('#streak-pill').hidden = streak === 0; // no sad "🔥 0" for new climbers
 
     // ----- Recent activity: climbs only (Home is the climbing dashboard) -----
     const items = state.climbs.map((c) => ({
@@ -2421,12 +2461,29 @@
       authStatus.textContent = `Sign-in link problem: ${authHashError}. Request a new link below.`;
       authHashError = null;
     }
+    // A code was requested before a reload — reopen the code box so pasting
+    // it still works (the pending email is restored from localStorage).
+    if (gated && pendingAuthEmail) {
+      $('#otp-form').hidden = false;
+      $('#auth-email').value = $('#auth-email').value || pendingAuthEmail;
+    }
   }
 
   // Send the sign-in email (gate form). The email carries both a link (fine
   // in a normal browser) and a 6-digit code — the code is what works inside
   // the installed app, where email links would open Safari's separate session.
+  // The pending email survives a reload (people often close the app while
+  // fetching the code from their mail client) so the code still verifies.
+  const PENDING_EMAIL_KEY = 'gymtrack.pending_email';
   let pendingAuthEmail = null;
+  try { pendingAuthEmail = localStorage.getItem(PENDING_EMAIL_KEY) || null; } catch (e) { /* ignore */ }
+  function setPendingAuthEmail(email) {
+    pendingAuthEmail = email;
+    try {
+      if (email) localStorage.setItem(PENDING_EMAIL_KEY, email);
+      else localStorage.removeItem(PENDING_EMAIL_KEY);
+    } catch (e) { /* ignore */ }
+  }
   authForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = $('#auth-email').value.trim();
@@ -2439,7 +2496,7 @@
       const redirectTo = location.href.split('#')[0].split('?')[0];
       const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
       if (error) throw error;
-      pendingAuthEmail = email;
+      setPendingAuthEmail(email);
       $('#otp-form').hidden = false;
       authStatus.className = 'auth-status ok';
       authStatus.textContent = 'Check your email — enter the 6-digit code here (or tap the link if you\'re in a browser).';
@@ -2467,7 +2524,13 @@
       }
     } catch (x) { /* not a URL — treat as a code */ }
     const isDigits = /^\d{6,10}$/.test(raw); // OTP length is configurable (6–10 digits)
-    if (isDigits && !pendingAuthEmail) return;
+    if (isDigits && !pendingAuthEmail) {
+      // A code only verifies against the email it was sent to, and we no
+      // longer know it — say so instead of silently ignoring the submit.
+      authStatus.className = 'auth-status err';
+      authStatus.textContent = 'Enter your email above and send a new code first — a code only works with the email it was sent to.';
+      return;
+    }
     // A pasted token hash could have been minted as any of these kinds
     // depending on the email template / whether the account is new.
     const attempts = isDigits
@@ -2491,6 +2554,7 @@
       }
       if (lastErr) throw lastErr;
       // Success fires onAuthStateChange(SIGNED_IN), which un-gates the app.
+      setPendingAuthEmail(null);
       $('#otp-form').hidden = true;
       $('#otp-token').value = '';
       authStatus.textContent = '';
@@ -2797,6 +2861,7 @@
         applyGate();
         if (event === 'SIGNED_IN') {
           cleanAuthHash(); // tokens are consumed by now; drop them from the URL
+          setPendingAuthEmail(null); // signed in — the outstanding code is moot
           await maybeMigrate();
           maybePromptName();
         }

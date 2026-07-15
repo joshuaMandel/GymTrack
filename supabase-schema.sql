@@ -98,7 +98,10 @@ create policy "own routines" on public.routines
 -- onsight +80 / flash +40; repeated attempts −8 each, capped at −40.
 drop function if exists public.climb_leaderboard(integer, text); -- replaced by Send Score standings
 drop function if exists public.climb_send_scores(text);
-create function public.climb_send_scores(grp text default 'boulder')
+drop function if exists public.climb_send_scores_impl(text);
+-- The replay itself: emits every user in history order (RETURN NEXT can't
+-- sort). Internal only — the public wrapper below orders and limits it.
+create function public.climb_send_scores_impl(grp text default 'boulder')
 returns table (
   user_id uuid,
   display_name text,
@@ -219,6 +222,31 @@ begin
   end if;
 end
 $fn$;
+
+-- Nobody calls the impl directly (definer-only, via the wrapper).
+revoke all on function public.climb_send_scores_impl(text) from public, anon, authenticated;
+
+-- What the app calls: top 50 standings, best score first.
+create function public.climb_send_scores(grp text default 'boulder')
+returns table (
+  user_id uuid,
+  display_name text,
+  is_me boolean,
+  score integer,
+  sessions integer,
+  provisional boolean,
+  last_delta integer,
+  hardest text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select * from public.climb_send_scores_impl(grp)
+  order by score desc, sessions desc
+  limit 50
+$$;
 
 revoke all on function public.climb_send_scores(text) from public, anon;
 grant execute on function public.climb_send_scores(text) to authenticated;
