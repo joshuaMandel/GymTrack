@@ -953,9 +953,12 @@
     const panel = $('#leaderboard-panel');
     if (!cloudOn()) { panel.hidden = true; return; }
     // Default the filter to the discipline this user climbs most (e.g. Sport
-    // for a lead climber); a manual selection always wins afterwards.
+    // for a lead climber). Recent climbs (90d) decide, so a stack of old
+    // entries in another discipline doesn't win; manual selection sticks.
     if (!lbDefaultApplied && state.climbs.length) {
-      const main = mostCommon(state.climbs.map((c) => c.discipline));
+      const recentCut = daysAgoISO(90);
+      const recent = state.climbs.filter((c) => c.date >= recentCut);
+      const main = mostCommon((recent.length ? recent : state.climbs).map((c) => c.discipline));
       const sel = $('#lb-discipline');
       if (main && [...sel.options].some((o) => o.value === main)) sel.value = main;
       lbDefaultApplied = true;
