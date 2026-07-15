@@ -27,10 +27,14 @@ create table if not exists public.climbs (
   grade      text not null,
   attempts   integer not null default 1,
   result     text not null,
+  color      text default '',   -- hold color of the route ("Blue", "Pink", …)
   location   text default '',
   notes      text default '',
   created_at timestamptz not null default now()
 );
+
+-- Existing installs: add the color column if the table predates it.
+alter table public.climbs add column if not exists color text default '';
 
 create index if not exists lifts_user_idx  on public.lifts  (user_id);
 create index if not exists climbs_user_idx on public.climbs (user_id);

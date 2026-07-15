@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; bump it when styles.css/app.js change -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15b" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15c" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -145,6 +145,10 @@
         <label>Grade
           <select name="grade" id="edit-climb-grade"></select>
         </label>
+        <label class="color-label">Hold color <span class="opt">(optional — which route it was)</span></label>
+        <div class="color-row" id="climb-colors">
+          <input type="hidden" name="color" />
+        </div>
         <div class="row-2">
           <label>Attempts
             <input type="number" name="attempts" min="1" step="1" required />
@@ -496,6 +500,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15b"></script>
+  <script src="app.js?v=2026-07-15c"></script>
 </body>
 </html>

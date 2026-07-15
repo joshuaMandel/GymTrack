@@ -91,12 +91,18 @@
     date: l.date, exercise: l.exercise, weight: Number(l.weight),
     sets: Number(l.sets), reps: Number(l.reps), unit: l.unit, notes: l.notes || ''
   });
-  const climbRow = (c) => ({
-    date: c.date, discipline: c.discipline, grade: c.grade,
-    attempts: Number(c.attempts), result: c.result, location: c.location || '', notes: c.notes || ''
-  });
+  const climbRow = (c) => {
+    const row = {
+      date: c.date, discipline: c.discipline, grade: c.grade,
+      attempts: Number(c.attempts), result: c.result, location: c.location || '', notes: c.notes || ''
+    };
+    // Only send color when set, so inserts keep working on databases that
+    // haven't run the color-column migration yet.
+    if (c.color) row.color = c.color;
+    return row;
+  };
   const fromLift = (r) => ({ id: r.id, ...liftRow(r) });
-  const fromClimb = (r) => ({ id: r.id, ...climbRow(r) });
+  const fromClimb = (r) => ({ id: r.id, ...climbRow(r), color: r.color || '' });
   const routineRow = (r) => ({
     name: r.name, position: r.position | 0,
     exercises: r.exercises || [], last_run: r.last_run || null
@@ -682,7 +688,7 @@
       tr.innerHTML = `
         <td class="date">${fmtDate(c.date)}</td>
         <td><span class="badge ${discClass}">${c.discipline}</span></td>
-        <td class="wt">${c.grade}</td>
+        <td class="wt">${routeDot(c.color)}${c.grade}</td>
         <td><span class="badge ${resClass}">${c.result}</span></td>
         <td>${c.attempts}</td>
         <td class="muted">${escapeHTML(c.location)}</td>
@@ -804,6 +810,41 @@
   let editingLiftId = null;
   let editingClimbId = null;
 
+  /* ----- Hold-color picker (climb form) ----- */
+  const CLIMB_COLORS = {
+    'Red': '#d64545', 'Orange': '#f59e2c', 'Yellow': '#eac54f', 'Green': '#3a7d44',
+    'Blue': '#3b82c4', 'Purple': '#8b5cf6', 'Pink': '#ec6aa0', 'Black': '#16181d',
+    'White': '#f5f2ea', 'Gray': '#9aa0a8', 'Brown': '#8a6240'
+  };
+  const routeDot = (color) =>
+    CLIMB_COLORS[color] ? `<span class="route-dot" style="background:${CLIMB_COLORS[color]}" title="${color} route"></span>` : '';
+
+  // Build the swatch row once; tapping selects, tapping again clears.
+  (function buildColorRow() {
+    const row = $('#climb-colors');
+    Object.keys(CLIMB_COLORS).forEach((name) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-swatch';
+      btn.style.background = CLIMB_COLORS[name];
+      btn.dataset.color = name;
+      btn.title = name;
+      btn.setAttribute('aria-label', name);
+      btn.setAttribute('aria-pressed', 'false');
+      btn.addEventListener('click', () => {
+        setClimbColor(editClimbForm.elements.color.value === name ? '' : name);
+      });
+      row.appendChild(btn);
+    });
+  })();
+
+  function setClimbColor(name) {
+    editClimbForm.elements.color.value = name || '';
+    $$('#climb-colors .color-swatch').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.color === name));
+    });
+  }
+
   function populateEditGradeSelect() {
     const d = $('#edit-climb-discipline').value;
     const sel = $('#edit-climb-grade');
@@ -923,6 +964,7 @@
     const last = state.climbs.length ? state.climbs[state.climbs.length - 1] : null;
     editClimbForm.elements.discipline.value = last ? last.discipline : 'Bouldering';
     populateEditGradeSelect();
+    setClimbColor(''); // every route is its own color — start unpicked
     editClimbForm.elements.attempts.value = 1;
     editClimbForm.elements.result.value = 'Send';
     if (last && last.location) editClimbForm.elements.location.value = last.location;
@@ -937,6 +979,7 @@
     editClimbForm.elements.discipline.value = c.discipline;
     populateEditGradeSelect();
     editClimbForm.elements.grade.value = c.grade;
+    setClimbColor(c.color || '');
     editClimbForm.elements.attempts.value = c.attempts;
     editClimbForm.elements.result.value = c.result;
     editClimbForm.elements.location.value = c.location || '';
@@ -955,6 +998,7 @@
       grade: f.get('grade'),
       attempts: parseInt(f.get('attempts'), 10) || 1,
       result: f.get('result'),
+      color: f.get('color') || '',
       location: (f.get('location') || '').trim(),
       notes: (f.get('notes') || '').trim()
     };
@@ -969,6 +1013,7 @@
         editStatus.textContent = `Added ${entry.grade} · ${entry.discipline}. Log the next climb:`;
         editClimbForm.elements.attempts.value = 1;
         editClimbForm.elements.notes.value = '';
+        setClimbColor(''); // the next route will be a different color
       } else {
         closeEditModal();
       }
@@ -1593,6 +1638,7 @@
       ...state.climbs.map((c) => ({
         kind: 'climb',
         icon: 'mountain',
+        dot: c.color,
         main: `${c.grade} · ${c.result}${c.attempts > 1 ? ` · ${c.attempts} attempts` : ''}`,
         sub: [c.discipline !== 'Bouldering' ? c.discipline : '', c.location, c.notes].filter(Boolean).join(' · '),
         date: c.date
@@ -1621,7 +1667,7 @@
         <div class="feed-left">
           ${m.icon ? `<span class="feed-ico${m.kind ? ' ' + m.kind : ''}"><svg class="ico"><use href="#i-${m.icon}"/></svg></span>` : ''}
           <div>
-            <div class="feed-main">${escapeHTML(m.main)}</div>
+            <div class="feed-main">${m.dot ? routeDot(m.dot) : ''}${escapeHTML(m.main)}</div>
             ${m.sub ? `<div class="feed-sub">${escapeHTML(m.sub)}</div>` : ''}
           </div>
         </div>

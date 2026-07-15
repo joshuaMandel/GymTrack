@@ -390,6 +390,31 @@ label.inline-select { flex-direction: row; align-items: center; gap: 8px; margin
 label.check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); flex: none; }
 
+/* Hold-color swatch picker (climb form) */
+.color-label { margin-bottom: 6px; }
+.color-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.color-swatch {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(22, 24, 29, 0.12);
+  padding: 0;
+  cursor: pointer;
+  flex: none;
+}
+.color-swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4.5px var(--ink);
+}
+
+/* Route color dot shown next to grades in tables and the feed */
+.route-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(22, 24, 29, 0.18);
+  margin-right: 6px;
+  flex: none;
+}
+
 /* Compact selects on desktop only — phones keep 16px so iOS doesn't zoom */
 @media (min-width: 781px) {
   .inline-select select { font-size: 13px; padding: 7px 10px; border-radius: 10px; }
