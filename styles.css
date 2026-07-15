@@ -676,6 +676,64 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .pr-chip b { color: var(--accent-text); font-family: var(--font-disp); font-weight: 700; }
 #climb-prs .pr-chip b { color: var(--accent-2); }
 
+/* ---------- Profile page ---------- */
+.profile-col { max-width: 760px; margin: 0 auto; }
+.profile-col .section-title { margin: 6px 0 12px; }
+.profile-ident { display: flex; gap: 16px; align-items: flex-start; }
+.profile-ava {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  color: var(--cream);
+  font-family: var(--font-disp);
+  font-weight: 700;
+  font-size: 22px;
+  display: flex; align-items: center; justify-content: center;
+  flex: none;
+}
+.profile-who { flex: 1; min-width: 0; }
+.profile-who form { margin: 0 0 8px; }
+.name-row { display: flex; gap: 8px; }
+.name-row input { flex: 1; }
+.name-row .btn { flex: none; }
+#profile-meta { margin: 0; }
+.profile-who .auth-status { margin: 6px 0 0; min-height: 0; }
+
+.profile-stats { grid-template-columns: repeat(3, 1fr); }
+.stat-value .unit { font-size: 14px; color: var(--muted); font-family: "Archivo", Helvetica, Arial, sans-serif; font-weight: 600; }
+
+.pref-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.pref-row.no-line { border-bottom: 0; padding-bottom: 4px; }
+.pref-row:first-of-type { padding-top: 2px; }
+.pref-name { font-weight: 700; font-size: 14.5px; }
+.pref-row select { width: auto; }
+#pref-colors { margin: 6px 0 2px; }
+
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.badge-card {
+  background: var(--panel-2);
+  border-radius: var(--radius-row);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.badge-card .b-ico {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  display: flex; align-items: center; justify-content: center;
+}
+.badge-card .b-ico .ico { width: 18px; height: 18px; }
+.badge-card .b-name { font-weight: 800; font-size: 13.5px; }
+.badge-card .b-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.badge-card.locked { opacity: 0.55; }
+.badge-card.locked .b-ico { background: #eee9dc; color: var(--muted); }
+
+.data-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.signout-btn { width: 100%; }
+
 /* ---------- Account / auth ---------- */
 .account { display: flex; align-items: center; gap: 8px; }
 .account .avatar {
@@ -692,6 +750,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   flex: none;
 }
 .account .avatar:hover { filter: brightness(1.2); }
+.account .avatar.is-active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink); }
 .account .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; }
 .account .sync-dot.busy { background: var(--accent); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -721,7 +780,6 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .auth-status { font-size: 13px; margin: 12px 0 0; min-height: 18px; }
 .auth-status.ok { color: var(--good); }
 .auth-status.err { color: var(--danger); }
-.modal-signout { width: 100%; margin-top: 14px; }
 
 /* ---------- Bottom dock: nav pill + FAB ---------- */
 .bottom-dock {
@@ -811,9 +869,8 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .fab-item .ico { width: 18px; height: 18px; color: var(--muted); }
 
 /* ---------- Footer ---------- */
-.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); }
+.footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
 .footer p { color: var(--muted); font-size: 13px; margin: 0; }
-.footer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- Mobile ---------- */
 @media (max-width: 780px) {

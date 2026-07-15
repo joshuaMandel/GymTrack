@@ -631,17 +631,18 @@
   /* ======================================================================
      Tabs
      ====================================================================== */
-  // Top tab bar and mobile bottom nav both switch views; keep them in sync.
-  // (Profile in the bottom nav has no data-view — it opens a modal instead.)
+  // Top tab bar, mobile bottom nav, and the header avatar all switch views.
+  function showView(view) {
+    $$('.tab[data-view], .bnav-btn[data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
+    $$('.view').forEach((v) => v.classList.remove('is-active'));
+    $('#view-' + view).classList.add('is-active');
+    const ava = $('#profile-btn');
+    if (ava) ava.classList.toggle('is-active', view === 'profile');
+    window.scrollTo(0, 0); // each page opens from its top
+    redrawActiveCharts();  // charts drawn while hidden re-fit to real width
+  }
   $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
-      $$('.tab[data-view], .bnav-btn[data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
-      $$('.view').forEach((v) => v.classList.remove('is-active'));
-      $('#view-' + view).classList.add('is-active');
-      window.scrollTo(0, 0); // each page opens from its top
-      redrawActiveCharts();  // charts drawn while hidden re-fit to real width
-    });
+    btn.addEventListener('click', () => showView(btn.dataset.view));
   });
 
   /* ----- Floating "+" button: log a set or a climb from anywhere ----- */
@@ -1630,13 +1631,11 @@
   }
 
   // Redraw the visible view's charts at their current on-screen width.
+  // (Profile has no charts — nothing to do there.)
   function redrawActiveCharts() {
-    if (!$('#view-dashboard').classList.contains('is-active')) {
-      if ($('#view-lifting').classList.contains('is-active')) renderLiftChart();
-      else renderClimbChart();
-    } else {
-      renderDashCharts();
-    }
+    if ($('#view-dashboard').classList.contains('is-active')) renderDashCharts();
+    else if ($('#view-lifting').classList.contains('is-active')) renderLiftChart();
+    else if ($('#view-climbing').classList.contains('is-active')) renderClimbChart();
   }
 
   let resizeTimer = null;
@@ -1787,7 +1786,11 @@
     box.innerHTML = chips + rows;
   }
 
-  const WEEKLY_GOAL = 6; // sessions per week the hero ring fills toward
+  // Sessions per week the hero ring fills toward — user-set in Profile.
+  function weeklyGoal() {
+    const g = parseInt(getSettings().weekly_goal, 10);
+    return g >= 1 && g <= 14 ? g : 6;
+  }
 
   // "▲ 8% vs last week" / "▲ 2 vs last week" — mini-card bottom line
   function setMiniDelta(sel, cur, prev, mode) {
@@ -1856,15 +1859,16 @@
     const first = (currentDisplayName() || '').trim().split(/\s+/)[0];
     $('#greeting').textContent = `Good ${tod}${first ? ', ' + first : ''}`;
     const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-    const remaining = Math.max(0, WEEKLY_GOAL - sessionDates.size);
+    const goal = weeklyGoal();
+    const remaining = Math.max(0, goal - sessionDates.size);
     $('#greeting-sub').textContent = `${dateStr} · ${remaining
       ? `${remaining} session${remaining === 1 ? '' : 's'} to hit your weekly goal`
       : 'weekly goal hit — nice work'}`;
 
     // Hero: sessions + progress ring toward the weekly goal
     $('#hero-sessions').textContent = sessionDates.size;
-    $('#hero-label').textContent = `sessions this week · goal ${WEEKLY_GOAL}`;
-    const pct = Math.min(100, Math.round(sessionDates.size / WEEKLY_GOAL * 100));
+    $('#hero-label').textContent = `sessions this week · goal ${goal}`;
+    const pct = Math.min(100, Math.round(sessionDates.size / goal * 100));
     $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #2e3038 0)`;
     $('#hero-pct').textContent = pct + '%';
 
@@ -2067,6 +2071,8 @@
 
   /* ----- Unit + time helpers for progress metrics ----- */
   function dominantUnit() {
+    const pref = getSettings().unit;
+    if (pref === 'lbs' || pref === 'kg') return pref;
     return mostCommon(state.lifts.map((l) => l.unit)) || 'lbs';
   }
   function toUnit(w, from, to) {
@@ -2138,8 +2144,25 @@
   const gate = $('#gate');
   const authForm = $('#auth-form');
   const authStatus = $('#auth-status');
-  const profileModal = $('#profile-modal');
   let namePrompted = false;
+
+  /* ----- User settings (display name, weekly goal, units, avatar color) -----
+     Signed in: stored on the account in user_metadata, so they follow you
+     across devices. Local mode: stored in this browser. */
+  const SETTINGS_KEY = 'gymtrack.settings.v1';
+  function getSettings() {
+    if (session && session.user) return session.user.user_metadata || {};
+    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; }
+  }
+  async function saveSettings(patch) {
+    if (cloudOn()) {
+      const { error } = await sb.auth.updateUser({ data: patch });
+      if (error) throw error;
+      session.user.user_metadata = Object.assign({}, session.user.user_metadata, patch);
+    } else {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(Object.assign({}, getSettings(), patch)));
+    }
+  }
 
   // Strip leftover auth tokens/errors from the address bar. Supabase puts the
   // session in the URL hash on magic-link redirects; if a stale hash survives
@@ -2257,40 +2280,172 @@
   });
 
   function currentDisplayName() {
-    return (session && session.user && session.user.user_metadata && session.user.user_metadata.display_name) || '';
+    return getSettings().display_name || '';
   }
 
   function renderAccount() {
     const signedIn = CONFIGURED && !!session;
-    $('#nav-profile').hidden = !signedIn; // mobile bottom-nav Profile
     if (!signedIn) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
     const label = currentDisplayName() || session.user.email || 'Account';
     const initial = (label.trim()[0] || '?').toUpperCase();
-    // Navy circle avatar with the user's initial; opens the profile modal.
+    const color = AVATAR_COLORS[getSettings().avatar_color] || AVATAR_COLORS.Navy;
+    // Colored circle avatar with the user's initial; opens the Profile page.
     accountEl.innerHTML = `
       <span class="sync-dot" id="sync-dot" title="Synced"></span>
-      <button class="avatar" id="profile-btn" title="${escapeHTML(label)} — account" aria-label="Account">${escapeHTML(initial)}</button>`;
-    $('#profile-btn').addEventListener('click', () => openProfile(false));
+      <button class="avatar" id="profile-btn" style="background:${color}" title="${escapeHTML(label)} — profile" aria-label="Profile">${escapeHTML(initial)}</button>`;
+    const btn = $('#profile-btn');
+    btn.addEventListener('click', () => showView('profile'));
+    btn.classList.toggle('is-active', $('#view-profile').classList.contains('is-active'));
   }
 
-  $('#nav-profile').addEventListener('click', () => { if (CONFIGURED && session) openProfile(false); });
+  /* ======================================================================
+     Profile page — identity, lifetime stats, achievements, settings
+     ====================================================================== */
+  const AVATAR_COLORS = {
+    'Navy': '#1f3a5f', 'Orange': '#f59e2c', 'Green': '#3a7d44', 'Purple': '#8b5cf6',
+    'Pink': '#ec6aa0', 'Red': '#d64545', 'Blue': '#3b82c4', 'Ink': '#16181d'
+  };
 
-  // ----- Edit-name modal -----
-  function openProfile(onboarding) {
-    $('#profile-name').value = currentDisplayName();
-    $('#profile-title').textContent = onboarding ? 'Welcome! What should we call you?' : 'Your name';
-    const status = $('#profile-status'); status.textContent = ''; status.className = 'auth-status';
-    profileModal.hidden = false;
-    setTimeout(() => $('#profile-name').focus(), 50);
+  // Longest run of session days, where a single rest day keeps the chain
+  // alive — the same rule as the header streak, over all history.
+  function longestStreak() {
+    const dates = [...new Set([...state.lifts, ...state.climbs].map((x) => x.date))].sort();
+    let best = 0, cur = 0, prev = null;
+    dates.forEach((d) => {
+      if (prev) {
+        const gap = Math.round((new Date(d + 'T00:00:00') - new Date(prev + 'T00:00:00')) / 86400000);
+        cur = gap <= 2 ? cur + 1 : 1;
+      } else {
+        cur = 1;
+      }
+      prev = d;
+      if (cur > best) best = cur;
+    });
+    return best;
   }
-  function closeProfile() { profileModal.hidden = true; }
-  $('#profile-close').addEventListener('click', closeProfile);
-  profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfile(); });
-  $('#modal-signout').addEventListener('click', async () => {
-    closeProfile();
-    await sb.auth.signOut();
-  });
+
+  function profileStats() {
+    const unit = dominantUnit();
+    const sessions = new Set([...state.lifts, ...state.climbs].map((x) => x.date)).size;
+    const volume = state.lifts.reduce((s, l) => s + toUnit(l.weight, l.unit, unit) * l.sets * l.reps, 0);
+    const sendsArr = state.climbs.filter((c) => isSend(c.result));
+    const boulderRank = Math.max(-1, ...sendsArr.filter((c) => c.discipline === 'Bouldering').map((c) => gradeRank('Bouldering', c.grade)));
+    const routeRank = Math.max(-1, ...sendsArr.filter((c) => ROPE_DISCIPLINES.includes(c.discipline)).map((c) => gradeRank(c.discipline, c.grade)));
+    const liftDates = new Set(state.lifts.map((l) => l.date));
+    const doubleDay = state.climbs.some((c) => liftDates.has(c.date));
+    return {
+      unit, sessions, volume, sends: sendsArr.length,
+      boulderRank, routeRank,
+      hardestBoulder: boulderRank >= 0 ? V_GRADES[boulderRank] : null,
+      hardestRoute: routeRank >= 0 ? YDS_GRADES[routeRank] : null,
+      longest: longestStreak(), doubleDay
+    };
+  }
+
+  const ACHIEVEMENTS = [
+    { id: 'first', name: 'First Entry', desc: 'Log your first set or climb', icon: 'star', earned: (s) => s.sessions >= 1 },
+    { id: 'double', name: 'Double Day', desc: 'Lift and climb on the same day', icon: 'star', earned: (s) => s.doubleDay },
+    { id: 's10', name: 'Regular', desc: '10 sessions', icon: 'flame', earned: (s) => s.sessions >= 10, progress: (s) => `${s.sessions}/10 sessions` },
+    { id: 's50', name: 'Committed', desc: '50 sessions', icon: 'flame', earned: (s) => s.sessions >= 50, progress: (s) => `${s.sessions}/50 sessions` },
+    { id: 's100', name: 'Century Club', desc: '100 sessions', icon: 'trophy', earned: (s) => s.sessions >= 100, progress: (s) => `${s.sessions}/100 sessions` },
+    { id: 'streak7', name: 'One Week Strong', desc: '7-day streak', icon: 'flame', earned: (s) => s.longest >= 7, progress: (s) => `best ${s.longest}/7 days` },
+    { id: 'streak30', name: 'Unstoppable', desc: '30-day streak', icon: 'flame', earned: (s) => s.longest >= 30, progress: (s) => `best ${s.longest}/30 days` },
+    { id: 'v100k', name: '100k Club', desc: '100,000 lifted, lifetime', icon: 'barbell', earned: (s) => s.volume >= 100000, progress: (s) => `${fmtCompact(s.volume)}/100K ${s.unit}` },
+    { id: 'v1m', name: 'Million Mover', desc: '1,000,000 lifted, lifetime', icon: 'medal', earned: (s) => s.volume >= 1000000, progress: (s) => `${fmtCompact(s.volume)}/1M ${s.unit}` },
+    { id: 'send1', name: 'First Send', desc: 'Top out your first climb', icon: 'mountain', earned: (s) => s.sends >= 1 },
+    { id: 'send50', name: 'Sender', desc: '50 sends', icon: 'mountain', earned: (s) => s.sends >= 50, progress: (s) => `${s.sends}/50 sends` },
+    { id: 'v5', name: 'V5 Club', desc: 'Send V5 or harder', icon: 'medal', earned: (s) => s.boulderRank >= V_GRADES.indexOf('V5') },
+    { id: 'v8', name: 'V8 Club', desc: 'Send V8 or harder', icon: 'trophy', earned: (s) => s.boulderRank >= V_GRADES.indexOf('V8') },
+    { id: 'r511', name: '5.11 Club', desc: 'Send 5.11a or harder', icon: 'medal', earned: (s) => s.routeRank >= YDS_GRADES.indexOf('5.11a') },
+    { id: 'r512', name: '5.12 Club', desc: 'Send 5.12a or harder', icon: 'trophy', earned: (s) => s.routeRank >= YDS_GRADES.indexOf('5.12a') }
+  ];
+
+  const statCard = (label, value, unit) =>
+    `<div class="stat-card"><span class="stat-label">${label}</span><span class="stat-value">${value}${unit ? ` <span class="unit">${unit}</span>` : ''}</span></div>`;
+
+  function renderProfile() {
+    const s = profileStats();
+    const settings = getSettings();
+
+    // Identity
+    const name = currentDisplayName();
+    const label = name || (session && session.user && session.user.email) || 'Athlete';
+    const ava = $('#profile-ava');
+    ava.textContent = (label.trim()[0] || '?').toUpperCase();
+    ava.style.background = AVATAR_COLORS[settings.avatar_color] || AVATAR_COLORS.Navy;
+    if (document.activeElement !== $('#profile-name')) $('#profile-name').value = name;
+    const meta = [];
+    if (session && session.user) {
+      if (session.user.email) meta.push(session.user.email);
+      if (session.user.created_at) {
+        meta.push('Member since ' + new Date(session.user.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }));
+      }
+    } else {
+      meta.push('Local mode — data lives in this browser');
+    }
+    $('#profile-meta').textContent = meta.join(' · ');
+    $('#modal-signout').hidden = !(CONFIGURED && session);
+
+    // Lifetime stats
+    $('#profile-stats').innerHTML =
+      statCard('Sessions', s.sessions) +
+      statCard('Volume lifted', s.volume ? fmtCompact(s.volume) : '0', s.unit) +
+      statCard('Sends', s.sends) +
+      statCard('Hardest boulder', s.hardestBoulder || '—') +
+      statCard('Hardest route', s.hardestRoute || '—') +
+      statCard('Longest streak', s.longest, s.longest === 1 ? 'day' : 'days');
+
+    // Controls reflect current settings
+    $('#pref-goal').value = String(weeklyGoal());
+    $('#pref-unit').value = settings.unit === 'lbs' || settings.unit === 'kg' ? settings.unit : '';
+    $$('#pref-colors .color-swatch').forEach((b) => {
+      b.setAttribute('aria-pressed', String((settings.avatar_color || 'Navy') === b.dataset.color));
+    });
+
+    // Achievements
+    const earned = ACHIEVEMENTS.filter((a) => a.earned(s)).length;
+    $('#ach-count').textContent = `${earned} of ${ACHIEVEMENTS.length} earned`;
+    $('#badge-grid').innerHTML = ACHIEVEMENTS.map((a) => {
+      const ok = a.earned(s);
+      return `
+        <div class="badge-card${ok ? '' : ' locked'}" title="${escapeHTML(a.desc)}">
+          <span class="b-ico"><svg class="ico"><use href="#i-${a.icon}"/></svg></span>
+          <div>
+            <div class="b-name">${a.name}</div>
+            <div class="b-desc">${ok ? a.desc : (a.progress ? a.progress(s) : a.desc)}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // Save a setting, then repaint everything it can touch.
+  function applySetting(patch) {
+    withSync(async () => {
+      await saveSettings(patch);
+      renderAccount();
+      renderAll();
+    });
+  }
+
+  (function buildAvatarColorRow() {
+    const row = $('#pref-colors');
+    Object.keys(AVATAR_COLORS).forEach((cName) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-swatch';
+      btn.style.background = AVATAR_COLORS[cName];
+      btn.dataset.color = cName;
+      btn.title = cName;
+      btn.setAttribute('aria-label', cName);
+      btn.setAttribute('aria-pressed', 'false');
+      btn.addEventListener('click', () => applySetting({ avatar_color: cName }));
+      row.appendChild(btn);
+    });
+  })();
+
+  $('#pref-goal').addEventListener('change', () => applySetting({ weekly_goal: parseInt($('#pref-goal').value, 10) }));
+  $('#pref-unit').addEventListener('change', () => applySetting({ unit: $('#pref-unit').value }));
 
   $('#profile-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2301,13 +2456,13 @@
     status.className = 'auth-status';
     status.textContent = 'Saving…';
     try {
-      const { error } = await sb.auth.updateUser({ data: { display_name: name } });
-      if (error) throw error;
-      if (session && session.user) {
-        session.user.user_metadata = Object.assign({}, session.user.user_metadata, { display_name: name });
-      }
+      await saveSettings({ display_name: name });
+      status.className = 'auth-status ok';
+      status.textContent = 'Saved.';
+      setTimeout(() => { if (status.textContent === 'Saved.') status.textContent = ''; }, 1600);
       renderAccount();
-      closeProfile();
+      renderHome();
+      renderProfile();
     } catch (err) {
       console.error('Save name error:', err);
       status.className = 'auth-status err';
@@ -2317,12 +2472,17 @@
     }
   });
 
-  // On first sign-in with no name yet, gently prompt for one.
+  $('#modal-signout').addEventListener('click', async () => {
+    if (sb) await sb.auth.signOut();
+  });
+
+  // On first sign-in with no name yet, land on Profile to set one.
   function maybePromptName() {
     if (namePrompted) return;
     if (session && !currentDisplayName()) {
       namePrompted = true;
-      openProfile(true);
+      showView('profile');
+      setTimeout(() => $('#profile-name').focus(), 300);
     }
   }
 
@@ -2338,6 +2498,7 @@
     renderDashboard();
     renderLifting();
     renderClimbing();
+    renderProfile();
   }
 
   async function refresh() {

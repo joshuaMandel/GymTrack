@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; bump it when styles.css/app.js change -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15k" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15l" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -33,6 +33,8 @@
     <symbol id="i-pencil" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></g></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g></symbol>
     <symbol id="i-trophy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M6 22h12"/><path d="M10 15v3c0 1-1 1.6-2 2-1 .5-1.5 1-1.5 2"/><path d="M14 15v3c0 1 1 1.6 2 2 1 .5 1.5 1 1.5 2"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></g></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1-5.4-2.9-5.4 2.9 1.1-6.1L3.2 9.4l6.1-.8L12 3z"/></g></symbol>
+    <symbol id="i-medal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="15" r="5.5"/><path d="M9 10 5.5 3"/><path d="m15 10 3.5-7"/><path d="M9.5 3h5"/></g></symbol>
   </svg>
 
   <!-- Shown only while checking sign-in state, so the app never flashes before the gate -->
@@ -79,7 +81,7 @@
       <button class="bnav-btn" data-view="climbing">
         <svg class="ico" aria-hidden="true"><use href="#i-mountain"/></svg><span>Climbing</span>
       </button>
-      <button class="bnav-btn" id="nav-profile" hidden>
+      <button class="bnav-btn" id="nav-profile" data-view="profile">
         <svg class="ico" aria-hidden="true"><use href="#i-user"/></svg><span>Profile</span>
       </button>
     </nav>
@@ -212,23 +214,6 @@
         <button type="button" class="btn ghost danger routine-del" id="routine-delete" hidden>Delete routine</button>
       </form>
       <p class="auth-status" id="routine-status" role="status"></p>
-    </div>
-  </div>
-
-  <!-- Edit-name modal -->
-  <div class="modal-overlay" id="profile-modal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-      <button class="modal-close" id="profile-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
-      <h2 id="profile-title">Your name</h2>
-      <p class="muted small">This is the name shown in the app. It doesn't change your login email.</p>
-      <form id="profile-form" autocomplete="off">
-        <label>Display name
-          <input type="text" name="name" id="profile-name" placeholder="e.g. Josh" maxlength="60" />
-        </label>
-        <button type="submit" class="btn primary" id="profile-submit">Save name</button>
-      </form>
-      <p class="auth-status" id="profile-status" role="status"></p>
-      <button type="button" class="btn ghost danger modal-signout" id="modal-signout">Sign out</button>
     </div>
   </div>
 
@@ -516,19 +501,97 @@
       </div>
     </section>
 
+    <!-- ===================== PROFILE ===================== -->
+    <section class="view" id="view-profile">
+      <div class="profile-col">
+        <div class="view-head">
+          <h2>Profile</h2>
+          <p class="muted">Your stats, achievements, and settings.</p>
+        </div>
+
+        <!-- Identity -->
+        <div class="panel profile-ident">
+          <div class="profile-ava" id="profile-ava">?</div>
+          <div class="profile-who">
+            <form id="profile-form" autocomplete="off">
+              <div class="name-row">
+                <input type="text" name="name" id="profile-name" placeholder="Your name" maxlength="60" aria-label="Display name" />
+                <button type="submit" class="btn" id="profile-submit">Save</button>
+              </div>
+            </form>
+            <p class="muted small" id="profile-meta"></p>
+            <p class="auth-status" id="profile-status" role="status"></p>
+          </div>
+        </div>
+
+        <!-- Lifetime stats -->
+        <h3 class="section-title">All time</h3>
+        <div class="stat-grid profile-stats" id="profile-stats"></div>
+
+        <!-- Goal & preferences -->
+        <div class="panel">
+          <h3>Goal &amp; preferences</h3>
+          <div class="pref-row">
+            <div>
+              <div class="pref-name">Weekly goal</div>
+              <div class="feed-sub">Sessions per week the Home ring fills toward.</div>
+            </div>
+            <select id="pref-goal">
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+              <option value="7">7</option>
+            </select>
+          </div>
+          <div class="pref-row">
+            <div>
+              <div class="pref-name">Units</div>
+              <div class="feed-sub">Default for new sets and all totals.</div>
+            </div>
+            <select id="pref-unit">
+              <option value="">Auto</option>
+              <option value="lbs">lbs</option>
+              <option value="kg">kg</option>
+            </select>
+          </div>
+          <div class="pref-row no-line">
+            <div>
+              <div class="pref-name">Avatar color</div>
+              <div class="feed-sub">Shown in the header.</div>
+            </div>
+          </div>
+          <div class="color-row" id="pref-colors"></div>
+        </div>
+
+        <!-- Achievements -->
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Achievements</h3>
+            <span class="muted small" id="ach-count"></span>
+          </div>
+          <div class="badge-grid" id="badge-grid"></div>
+        </div>
+
+        <!-- Data & account -->
+        <div class="panel">
+          <h3>Data &amp; account</h3>
+          <div class="data-actions">
+            <button class="btn ghost" id="export-btn">Export data</button>
+            <button class="btn ghost" id="import-btn">Import data</button>
+            <button class="btn ghost danger" id="reset-btn">Reset all</button>
+            <input type="file" id="import-file" accept="application/json" hidden />
+          </div>
+          <button type="button" class="btn ghost danger signout-btn" id="modal-signout">Sign out</button>
+        </div>
+      </div>
+    </section>
+
     <footer class="footer">
       <p>Your data is saved to your account and synced across your devices.</p>
-      <div class="footer-actions">
-        <button class="btn ghost" id="export-btn">Export data</button>
-        <button class="btn ghost" id="import-btn">Import data</button>
-        <button class="btn ghost danger" id="reset-btn">Reset all</button>
-        <input type="file" id="import-file" accept="application/json" hidden />
-      </div>
     </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15k"></script>
+  <script src="app.js?v=2026-07-15l"></script>
 </body>
 </html>
