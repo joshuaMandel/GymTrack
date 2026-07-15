@@ -2059,36 +2059,25 @@
       return;
     }
     const totalSends = grades.reduce((s, g) => s + byGrade[g].sends, 0);
+    const totalFlash = grades.reduce((s, g) => s + byGrade[g].flash, 0);
     const hardest = grades.find((g) => byGrade[g].sends > 0);
-    const maxN = Math.max(...grades.map((g) => byGrade[g].sends + byGrade[g].project));
     const chips = `
       <div class="pr-strip">
         <span class="pr-chip">Hardest <b>${hardest ? escapeHTML(hardest) : '—'}</b></span>
         <span class="pr-chip">Sends <b>${totalSends}</b></span>
+        ${totalFlash ? `<span class="pr-chip">Flashes <b>${totalFlash}</b></span>` : ''}
         <span class="pr-chip">Sessions <b>${data.sessions || 0}</b></span>
       </div>`;
-    const rows = grades.map((g) => {
+    // One wrapping row of pills, hardest grade first: solid pills count
+    // sends; dashed muted pills mark grades still being projected.
+    const pills = grades.map((g) => {
       const b = byGrade[g];
-      // Flashes ARE sends — show them as a breakdown of the send count
-      // ("1 send (flash)"), never as a separate tally beside it.
-      const parts = [];
-      if (b.sends) {
-        let label = `${b.sends} send${b.sends === 1 ? '' : 's'}`;
-        if (b.flash) {
-          label += b.sends === 1 ? ' (flash)' : ` (${b.flash} flash${b.flash === 1 ? '' : 'es'})`;
-        }
-        parts.push(label);
-      }
-      if (b.project) parts.push(`${b.project} project${b.project === 1 ? '' : 's'}`);
-      const w = Math.max(4, Math.round(((b.sends + b.project) / maxN) * 100));
-      return `
-        <div class="lbs-row">
-          <span class="lbs-grade">${escapeHTML(g)}</span>
-          <div class="lbs-bar"><span style="width:${w}%"></span></div>
-          <span class="lbs-count">${parts.join(' · ')}</span>
-        </div>`;
+      const out = [];
+      if (b.sends) out.push(`<span class="grade-pill">${escapeHTML(g)}${b.sends > 1 ? ` <i>×${b.sends}</i>` : ''}</span>`);
+      if (b.project) out.push(`<span class="grade-pill proj">${escapeHTML(g)} <i>proj${b.project > 1 ? ' ×' + b.project : ''}</i></span>`);
+      return out.join('');
     }).join('');
-    box.innerHTML = chips + rows;
+    box.innerHTML = `${chips}<div class="grade-pills">${pills}</div>`;
   }
 
   // Sessions per week the hero ring fills toward — user-set in Profile.
