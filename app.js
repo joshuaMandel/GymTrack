@@ -111,6 +111,21 @@
 
   const cloudOn = () => !!(sb && session);
 
+  /* ----- Weightlifting is owner-only -----
+     Everyone else gets a climbing-only app. This is a UI gate (the email
+     is visible in the source), not a security boundary — but each user's
+     data is already private per-account via RLS regardless. Local/dev mode
+     (no Supabase) always keeps lifting on. */
+  const OWNER_EMAILS = ['jmandelmvp@gmail.com'];
+  function liftingEnabled() {
+    if (!CONFIGURED) return true;
+    const email = session && session.user && session.user.email;
+    return !!email && OWNER_EMAILS.includes(email.toLowerCase());
+  }
+  function applyLiftingMode() {
+    document.body.classList.toggle('lifting-on', liftingEnabled());
+  }
+
   /* ======================================================================
      Offline support (cloud mode)
      Reads:  every successful load/mutation snapshots state to localStorage,
@@ -649,6 +664,7 @@
   const fabMenu = $('#fab-menu');
   $('#fab').addEventListener('click', (e) => {
     e.stopPropagation();
+    if (!liftingEnabled()) { openAddClimb(); return; } // climbing-only: skip the chooser
     fabMenu.hidden = !fabMenu.hidden;
   });
   $('#fab-lift').addEventListener('click', () => { fabMenu.hidden = true; openAddLift(); });
@@ -658,6 +674,7 @@
   const logMenu = $('#log-menu');
   $('#dash-log-btn').addEventListener('click', (e) => {
     e.stopPropagation();
+    if (!liftingEnabled()) { openAddClimb(); return; }
     logMenu.hidden = !logMenu.hidden;
   });
   $('#log-lift').addEventListener('click', () => { logMenu.hidden = true; openAddLift(); });
@@ -2005,6 +2022,19 @@
       ? `${top.exercise} · ${new Date(top.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' })}`
       : '';
 
+    // Climbing-only replacement mini: hardest grade sent this week
+    const wkSends = climbsWk.filter((c) => isSend(c.result));
+    const wkBoulder = wkSends.filter((c) => c.discipline === 'Bouldering');
+    const wkRope = wkSends.filter((c) => ROPE_DISCIPLINES.includes(c.discipline));
+    let hv = '—', hsub = '';
+    if (wkBoulder.length) {
+      hv = V_GRADES[Math.max(...wkBoulder.map((c) => gradeRank('Bouldering', c.grade)))]; hsub = 'Bouldering';
+    } else if (wkRope.length) {
+      hv = YDS_GRADES[Math.max(...wkRope.map((c) => gradeRank(c.discipline, c.grade)))]; hsub = 'Roped';
+    }
+    $('#mini-hardest').textContent = hv;
+    $('#mini-hardest-sub').textContent = hsub;
+
     // ----- Day streak: session days in a row, ending now -----
     // A single rest day between sessions keeps the chain alive; two missed
     // days in a row break it. Today doesn't count against you until it's over.
@@ -2020,15 +2050,15 @@
     $('#streak-count').textContent = streak;
     $('#streak-pill').hidden = false;
 
-    // ----- Recent activity: lifts + climbs merged -----
+    // ----- Recent activity: climbs (+ lifts when weightlifting is on) -----
     const items = [
-      ...state.lifts.map((l) => ({
+      ...(liftingEnabled() ? state.lifts.map((l) => ({
         kind: 'lift',
         icon: 'barbell',
         main: `${display[exKey(l.exercise)] || l.exercise} · ${l.weight > 0 ? `${fmtNum(l.weight)} ${l.unit}` : 'BW'} · ${l.sets}×${l.reps}`,
         sub: l.notes || '',
         date: l.date
-      })),
+      })) : []),
       ...state.climbs.map((c) => ({
         kind: 'climb',
         icon: 'mountain',
@@ -2038,7 +2068,8 @@
         date: c.date
       }))
     ];
-    renderFeed('#recent-feed', items, (m) => m, 'Tap ＋ to log your first set or climb.');
+    renderFeed('#recent-feed', items, (m) => m,
+      liftingEnabled() ? 'Tap ＋ to log your first set or climb.' : 'Tap ＋ to log your first climb.');
   }
 
   // Recent dates read as weekdays ("Thu"); older ones as short dates ("Jul 5").
@@ -2396,6 +2427,7 @@
   }
 
   function renderAccount() {
+    applyLiftingMode(); // owner sees weightlifting; everyone else gets climbing-only
     const signedIn = CONFIGURED && !!session;
     if (!signedIn) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
@@ -2499,14 +2531,16 @@
     $('#profile-meta').textContent = meta.join(' · ');
     $('#modal-signout').hidden = !(CONFIGURED && session);
 
-    // Lifetime stats
-    $('#profile-stats').innerHTML =
-      statCard('Sessions', s.sessions) +
-      statCard('Volume lifted', s.volume ? fmtCompact(s.volume) : '0', s.unit) +
-      statCard('Sends', s.sends) +
-      statCard('Hardest boulder', s.hardestBoulder || '—') +
-      statCard('Hardest route', s.hardestRoute || '—') +
-      statCard('Longest streak', s.longest, s.longest === 1 ? 'day' : 'days');
+    // Lifetime stats (Volume lifted only when weightlifting is on)
+    const lifting = liftingEnabled();
+    $('#profile-stats').innerHTML = [
+      statCard('Sessions', s.sessions),
+      lifting ? statCard('Volume lifted', s.volume ? fmtCompact(s.volume) : '0', s.unit) : '',
+      statCard('Sends', s.sends),
+      statCard('Hardest boulder', s.hardestBoulder || '—'),
+      statCard('Hardest route', s.hardestRoute || '—'),
+      statCard('Longest streak', s.longest, s.longest === 1 ? 'day' : 'days')
+    ].join('');
 
     // Climber rating cards (climbing page + profile)
     renderClimberRating();
@@ -2519,10 +2553,12 @@
       b.setAttribute('aria-pressed', String((settings.avatar_color || 'Navy') === b.dataset.color));
     });
 
-    // Achievements
-    const earned = ACHIEVEMENTS.filter((a) => a.earned(s)).length;
-    $('#ach-count').textContent = `${earned} of ${ACHIEVEMENTS.length} earned`;
-    $('#badge-grid').innerHTML = ACHIEVEMENTS.map((a) => {
+    // Achievements (drop lifting-only badges when weightlifting is off)
+    const LIFT_ACH = new Set(['v100k', 'v1m', 'double']);
+    const achList = lifting ? ACHIEVEMENTS : ACHIEVEMENTS.filter((a) => !LIFT_ACH.has(a.id));
+    const earned = achList.filter((a) => a.earned(s)).length;
+    $('#ach-count').textContent = `${earned} of ${achList.length} earned`;
+    $('#badge-grid').innerHTML = achList.map((a) => {
       const ok = a.earned(s);
       return `
         <div class="badge-card${ok ? '' : ' locked'}" title="${escapeHTML(a.desc)}">

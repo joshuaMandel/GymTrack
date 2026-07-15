@@ -187,6 +187,27 @@ body.auth-gated .footer { display: none !important; }
 .tab:hover { color: var(--text); }
 .tab.is-active { background: var(--ink); color: var(--cream); }
 
+/* ---------- Weightlifting visibility (owner-only) ----------
+   By default the app is climbing-only: lifting UI is hidden and the
+   climbing-only replacements show. body.lifting-on (set for the owner)
+   flips it back to the full dual-sport app. */
+.climb-only { display: none; }
+body:not(.lifting-on) .climb-only { display: flex; }
+body.lifting-on .climb-only { display: none !important; }
+body:not(.lifting-on) .lift-only { display: none !important; }
+/* Nav + logging entries for lifting */
+body:not(.lifting-on) .tab[data-view="lifting"],
+body:not(.lifting-on) .bnav-btn[data-view="lifting"],
+body:not(.lifting-on) #fab-lift,
+body:not(.lifting-on) #log-lift { display: none !important; }
+/* Reflow the Home grids once the two lifting cards / chart are gone */
+body:not(.lifting-on) .hero-grid { grid-template-columns: 2fr 1fr 1fr; }
+body:not(.lifting-on) .stat-grid { grid-template-columns: repeat(2, 1fr); }
+body:not(.lifting-on) .charts-row { grid-template-columns: 1fr; }
+@media (max-width: 780px) {
+  body:not(.lifting-on) .hero-grid { grid-template-columns: 1fr 1fr; }
+}
+
 /* ---------- Layout ---------- */
 .container { max-width: 1120px; margin: 0 auto; padding: 32px 28px 110px; }
 .view { display: none; }

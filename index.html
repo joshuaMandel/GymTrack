@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; bump it when styles.css/app.js change -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15n" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-15o" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -310,7 +310,7 @@
           </div>
           <div class="hero-ring" id="hero-ring"><span class="hero-pct" id="hero-pct">0%</span></div>
         </div>
-        <div class="mini-card">
+        <div class="mini-card lift-only">
           <span class="mini-label">Volume this week</span>
           <span class="mini-value" id="mini-volume">0</span>
           <span class="mini-sub" id="mini-volume-sub"></span>
@@ -320,15 +320,21 @@
           <span class="mini-value" id="mini-sends">0</span>
           <span class="mini-sub" id="mini-sends-sub"></span>
         </div>
-        <div class="mini-card">
+        <div class="mini-card lift-only">
           <span class="mini-label">Top lift this week</span>
           <span class="mini-value" id="mini-top">—</span>
           <span class="mini-sub" id="mini-top-sub"></span>
         </div>
+        <!-- Climbing-only replacement mini (shown when lifting is hidden) -->
+        <div class="mini-card climb-only">
+          <span class="mini-label">Hardest this week</span>
+          <span class="mini-value" id="mini-hardest">—</span>
+          <span class="mini-sub" id="mini-hardest-sub"></span>
+        </div>
       </div>
 
       <!-- Program / routines -->
-      <div class="panel" id="program-panel">
+      <div class="panel lift-only" id="program-panel">
         <div class="panel-head">
           <h3>Your program</h3>
           <button class="btn ghost routine-new-btn">＋ New routine</button>
@@ -352,12 +358,12 @@
       </div>
 
       <div class="stat-grid">
-        <div class="stat-card">
+        <div class="stat-card lift-only">
           <span class="stat-label">Lifting sessions · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-lift-sessions">0</span>
           <span class="stat-sub" id="dash-lift-sessions-delta"></span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card lift-only">
           <span class="stat-label">Volume lifted · <span class="rng">30d</span></span>
           <span class="stat-value" id="dash-lift-volume">0</span>
           <span class="stat-sub" id="dash-lift-volume-unit"></span>
@@ -375,8 +381,8 @@
         </div>
       </div>
 
-      <div class="two-col">
-        <div class="panel">
+      <div class="two-col charts-row">
+        <div class="panel lift-only">
           <h3>Lifting volume by week</h3>
           <p class="muted small">Total weight moved per week.</p>
           <div class="chart-wrap" id="dash-lift-chart"></div>
@@ -583,7 +589,7 @@
               <option value="7">7</option>
             </select>
           </div>
-          <div class="pref-row">
+          <div class="pref-row lift-only">
             <div>
               <div class="pref-name">Units</div>
               <div class="feed-sub">Default for new sets and all totals.</div>
@@ -640,6 +646,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15n"></script>
+  <script src="app.js?v=2026-07-15o"></script>
 </body>
 </html>
