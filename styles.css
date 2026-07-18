@@ -1190,7 +1190,10 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 /* ---------- Friends + activity feed ---------- */
 .username-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .username-row .at { font-family: var(--font-disp); font-weight: 700; color: var(--muted); font-size: 18px; }
-.username-row input { flex: 1; min-width: 0; }
+.username-row input { flex: 1 1 auto; min-width: 0; }
+/* keep action buttons sized to their label inside flex rows (the base
+   .btn.primary is full-width, which would otherwise crush the input/name) */
+.username-row .btn, .feed-actions .btn { width: auto; flex: 0 0 auto; margin-top: 0; }
 #friend-search { width: 100%; margin: 6px 0 4px; }
 .feed-stale { font-size: 11px; color: var(--accent-text); background: var(--accent-tint); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
 .feed-score { display: inline-block; margin-top: 3px; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--accent-2); }
