@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-16i" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-16j" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -28,6 +28,7 @@
     <symbol id="i-mountain" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></g></symbol>
     <symbol id="i-home" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/></g></symbol>
     <symbol id="i-user" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.4-3.4 4-5 7.5-5s6.1 1.6 7.5 5"/></g></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c1.2-3 3.4-4.5 6.5-4.5s5.3 1.5 6.5 4.5"/><path d="M16 5.2a3.2 3.2 0 0 1 0 6"/><path d="M17.5 15.6c2.4.5 3.8 1.9 4.5 4"/></g></symbol>
     <symbol id="i-flame" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 1.072-2.143.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></g></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></g></symbol>
     <symbol id="i-pencil" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></g></symbol>
@@ -58,6 +59,7 @@
         <button class="tab is-active" role="tab" data-view="dashboard">Home</button>
         <button class="tab" role="tab" data-view="lifting">Weightlifting</button>
         <button class="tab" role="tab" data-view="climbing">Rock Climbing</button>
+        <button class="tab" role="tab" data-view="friends">Friends</button>
       </nav>
       <div class="topbar-right">
         <div class="pending-pill" id="pending-pill" title="Changes saved on this device — they'll sync automatically when you're back online" hidden>
@@ -82,6 +84,10 @@
       </button>
       <button class="bnav-btn" data-view="climbing">
         <svg class="ico" aria-hidden="true"><use href="#i-mountain"/></svg><span>Climbing</span>
+      </button>
+      <button class="bnav-btn" data-view="friends">
+        <svg class="ico" aria-hidden="true"><use href="#i-users"/></svg><span>Friends</span>
+        <span class="bnav-badge" id="friends-badge" hidden></span>
       </button>
       <button class="bnav-btn" id="nav-profile" data-view="profile">
         <svg class="ico" aria-hidden="true"><use href="#i-user"/></svg><span>Profile</span>
@@ -505,6 +511,15 @@
           <ul class="feed" id="leaderboard-list"></ul>
         </div>
       </div>
+
+      <!-- Friends' activity (dashboard: lifting + climbing) -->
+      <div class="panel" id="friends-feed-panel" hidden>
+        <div class="panel-head">
+          <h3>Friends' activity</h3>
+          <span class="feed-stale" id="friends-feed-stale" hidden>reconnecting…</span>
+        </div>
+        <ul class="feed" id="friends-feed"></ul>
+      </div>
     </section>
 
     <!-- ===================== WEIGHTLIFTING ===================== -->
@@ -608,6 +623,15 @@
         <ul class="feed" id="leaderboard-list-climb"></ul>
       </div>
 
+      <!-- Friends' climbing activity only -->
+      <div class="panel" id="friends-feed-climb-panel" hidden>
+        <div class="panel-head">
+          <h3>Friends' climbing</h3>
+          <span class="feed-stale" id="friends-feed-climb-stale" hidden>reconnecting…</span>
+        </div>
+        <ul class="feed" id="friends-feed-climb"></ul>
+      </div>
+
       <div class="pr-strip" id="climb-prs"></div>
 
       <div class="panel">
@@ -649,6 +673,55 @@
         </div>
         <p class="muted small">Sessions, newest first — tap one to see every climb and its ± points. Edit or delete climbs from there.</p>
         <div class="sess-list" id="climb-sessions"></div>
+      </div>
+    </section>
+
+    <!-- ===================== FRIENDS ===================== -->
+    <section class="view" id="view-friends">
+      <div class="view-head">
+        <div>
+          <h2>Friends</h2>
+          <p class="muted">Add friends and follow their sessions in real time.</p>
+        </div>
+      </div>
+
+      <div class="panel" id="friends-auth-note" hidden>
+        <p class="muted">Sign in to find friends and see their activity.</p>
+      </div>
+
+      <div id="friends-body" hidden>
+        <!-- Your @username -->
+        <div class="panel" id="friends-username-panel">
+          <h3>Your @username</h3>
+          <p class="muted small">A unique handle so friends can find you — 3–20 letters, numbers or underscores.</p>
+          <form id="username-form" autocomplete="off">
+            <div class="username-row">
+              <span class="at">@</span>
+              <input id="username-input" name="username" maxlength="20" placeholder="yourname" spellcheck="false" autocapitalize="none" autocomplete="off" />
+              <button class="btn primary sm" type="submit">Save</button>
+            </div>
+            <div class="auth-status" id="username-status" hidden></div>
+          </form>
+        </div>
+
+        <!-- Search / add -->
+        <div class="panel">
+          <h3>Find climbers</h3>
+          <input id="friend-search" type="search" placeholder="Search @username or name" spellcheck="false" autocapitalize="none" />
+          <ul class="feed" id="friend-search-results"></ul>
+        </div>
+
+        <!-- Requests -->
+        <div class="panel" id="friend-requests-panel" hidden>
+          <h3>Requests</h3>
+          <ul class="feed" id="friend-requests-list"></ul>
+        </div>
+
+        <!-- Friends -->
+        <div class="panel">
+          <h3>Your friends</h3>
+          <ul class="feed" id="friends-list"><li class="empty">No friends yet — search above to add some.</li></ul>
+        </div>
       </div>
     </section>
 
@@ -753,6 +826,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-16i"></script>
+  <script src="app.js?v=2026-07-16j"></script>
 </body>
 </html>

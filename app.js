@@ -696,6 +696,7 @@
     if (ava) ava.classList.toggle('is-active', view === 'profile');
     window.scrollTo(0, 0); // each page opens from its top
     redrawActiveCharts();  // charts drawn while hidden re-fit to real width
+    if (view === 'friends') { renderFriendsScreen(); loadFriends(); loadFeed(); } // freshest data on entry
   }
   $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
@@ -2209,6 +2210,263 @@
     });
   });
 
+  /* ======================================================================
+     Friends + activity feed.
+
+     A social layer on top of the same Supabase backend. Friendship is the
+     permission boundary — enforced SERVER-SIDE by RLS + SECURITY DEFINER RPCs
+     (see supabase-schema.sql); the client never sees a non-friend's data.
+
+     The feed is READ-ONLY and fully isolated from the local-first logging
+     path: every call is cloudOn()-gated and its failures are swallowed, so a
+     flaky feed never blocks or slows logging. Realtime uses Supabase Realtime
+     (websockets) with RLS-authorized postgres_changes — chosen because it's
+     native to the stack and reuses the existing auth session, delivering new
+     friend activity in well under the 10s bar. If the socket drops we show a
+     subtle "reconnecting" indicator, fall back to an ~8s poll, and render the
+     last cached items until it recovers on its own.
+     ====================================================================== */
+  const FEED_CACHE_KEY = 'gymtrack.feedcache.v1';
+  let friends = { me: null, list: [], requests: [] };
+  let feedItems = [];
+  let feedChannel = null, feedStatus = 'idle', feedPollTimer = null, searchTimer = null;
+  const myUid = () => (session && session.user ? session.user.id : null);
+
+  function feedCacheLoad() {
+    try { const c = JSON.parse(localStorage.getItem(FEED_CACHE_KEY)); return c && c.userId === myUid() ? c.items : null; } catch (e) { return null; }
+  }
+  function feedCacheSave() {
+    try { localStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ userId: myUid(), items: feedItems.slice(0, 50) })); } catch (e) {}
+  }
+  function ago(iso) {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  const friendRating = (userId) => { const f = friends.list.find((x) => x.user_id === userId); return f && f.boulder != null ? f.boulder : (f && f.rope != null ? f.rope : null); };
+
+  // Headline text for one sanitized activity item.
+  function feedLine(it) {
+    const p = it.payload || {};
+    const who = escapeHTML(it.display_name || 'Climber');
+    if (it.kind === 'lift_session') {
+      const parts = [`${p.exercises || 0} exercise${p.exercises === 1 ? '' : 's'}`];
+      if (p.volume) parts.push(`${Math.round(p.volume).toLocaleString()} ${escapeHTML(p.unit || 'lbs')}`);
+      if (p.top_exercise) parts.push(escapeHTML(p.top_exercise));
+      return { ico: 'i-barbell', cls: '', main: `${who} lifted`, sub: parts.join(' · ') };
+    }
+    const bits = [`${p.sends || 0} send${p.sends === 1 ? '' : 's'}`];
+    if (p.hardest) bits.push(`hardest ${escapeHTML(p.hardest)}`);
+    let sub = bits.join(' · ');
+    if (p.new_hardest) sub += ' · <span class="pr-flag">new PR!</span>';
+    return { ico: 'i-mountain', cls: 'climb', main: `${who} climbed`, sub };
+  }
+  function renderFeedInto(el, items) {
+    if (!el) return;
+    el.innerHTML = items.length ? items.map((it) => {
+      const L = feedLine(it);
+      const r = friendRating(it.user_id);
+      return `<li>
+        <div class="feed-left">
+          <span class="feed-ico ${L.cls}"><svg class="ico"><use href="#${L.ico}"/></svg></span>
+          <div><div class="feed-main">${L.main}</div><div class="feed-sub">${L.sub}</div></div>
+        </div>
+        <div class="feed-date">${ago(it.created_at)}${r != null ? `<span class="feed-score">${r}</span>` : ''}</div>
+      </li>`;
+    }).join('') : '<li class="empty">No friend activity yet.</li>';
+  }
+  function renderFeeds() {
+    const show = cloudOn() && (feedItems.length || friends.list.length);
+    const dash = $('#friends-feed-panel'), climb = $('#friends-feed-climb-panel');
+    if (dash) dash.hidden = !show;
+    if (climb) climb.hidden = !show;
+    renderFeedInto($('#friends-feed'), feedItems);
+    renderFeedInto($('#friends-feed-climb'), feedItems.filter((i) => i.kind === 'climb_session'));
+    const stale = feedStatus === 'stale';
+    ['#friends-feed-stale', '#friends-feed-climb-stale'].forEach((s) => { const e = $(s); if (e) e.hidden = !stale; });
+  }
+
+  async function loadFeed() {
+    if (!cloudOn()) { feedItems = []; renderFeeds(); return; }
+    const cached = feedCacheLoad();
+    if (cached && !feedItems.length) { feedItems = cached; renderFeeds(); }
+    try {
+      const { data, error } = await sb.rpc('friend_feed', { surface: 'all', before_ts: null, before_id: null, lim: 30 });
+      if (error) throw error;
+      feedItems = (data || []).map((r) => ({ ...r, payload: typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload }));
+      feedCacheSave();
+      // A successful load means we're reachable again; clear the stale state
+      // (unless the realtime socket itself is down and will re-flag it).
+      if (feedStatus === 'stale') feedStatus = feedChannel ? 'live' : 'idle';
+      stopFeedPoll();
+      renderFeeds();
+    } catch (e) {
+      // Offline or dropped: keep the cached items on screen, show the stale
+      // badge, and poll until we recover. Logging is untouched by any of this.
+      console.warn('Feed unavailable:', e);
+      feedStatus = 'stale';
+      startFeedPoll();
+      renderFeeds();
+    }
+  }
+
+  // A person row (search result, request, or friend), with the right actions.
+  function personRow(p, rel) {
+    const name = escapeHTML(p.display_name || 'Climber');
+    const handle = p.username ? ` <span class="feed-handle">@${escapeHTML(p.username)}</span>` : '';
+    let right = '';
+    if (rel === 'friends') {
+      const score = p.boulder != null ? `<span class="feed-score">${p.boulder}</span>` : (p.rope != null ? `<span class="feed-score">${p.rope}</span>` : '');
+      right = `${score}<button class="btn ghost sm" data-fact="unfriend" data-uid="${p.user_id}">Unfriend</button>`;
+    } else if (rel === 'outgoing') {
+      right = `<span class="rel-chip">Requested</span><button class="btn ghost sm" data-fact="cancel" data-uid="${p.user_id}">Cancel</button>`;
+    } else if (rel === 'incoming') {
+      right = `<button class="btn primary sm" data-fact="accept" data-uid="${p.user_id}">Accept</button><button class="btn ghost sm" data-fact="decline" data-uid="${p.user_id}">Decline</button>`;
+    } else if (rel === 'self') {
+      right = `<span class="rel-chip">You</span>`;
+    } else {
+      right = `<button class="btn primary sm" data-fact="request" data-uid="${p.user_id}">Add</button>`;
+    }
+    return `<li>
+      <div class="feed-left">
+        <span class="feed-ico"><svg class="ico"><use href="#i-user"/></svg></span>
+        <div><div class="feed-main">${name}${handle}</div></div>
+      </div>
+      <div class="feed-actions">${right}</div>
+    </li>`;
+  }
+
+  function renderFriendsScreen() {
+    const note = $('#friends-auth-note'), body = $('#friends-body');
+    if (!cloudOn()) { if (note) note.hidden = false; if (body) body.hidden = true; updateFriendsBadge(); return; }
+    if (note) note.hidden = true; if (body) body.hidden = false;
+    const ui = $('#username-input');
+    if (ui && friends.me && friends.me.username && document.activeElement !== ui && !ui.value) ui.value = friends.me.username;
+    const reqPanel = $('#friend-requests-panel'), reqList = $('#friend-requests-list');
+    if (reqList) {
+      reqPanel.hidden = !friends.requests.length;
+      reqList.innerHTML = friends.requests.map((r) => personRow(r, r.direction === 'incoming' ? 'incoming' : 'outgoing')).join('');
+    }
+    const fl = $('#friends-list');
+    if (fl) fl.innerHTML = friends.list.length ? friends.list.map((f) => personRow(f, 'friends')).join('') : '<li class="empty">No friends yet — search above to add some.</li>';
+    updateFriendsBadge();
+  }
+  function updateFriendsBadge() {
+    const inc = friends.requests.filter((r) => r.direction === 'incoming').length;
+    const b = $('#friends-badge'); if (b) { b.hidden = !inc; b.textContent = inc || ''; }
+  }
+
+  async function loadFriends() {
+    if (!cloudOn()) { friends = { me: null, list: [], requests: [] }; renderFriendsScreen(); return; }
+    try {
+      const [me, list, reqs] = await Promise.all([
+        sb.from('profiles').select('username, display_name').eq('id', myUid()).maybeSingle(),
+        sb.rpc('friend_list'),
+        sb.rpc('friend_requests')
+      ]);
+      friends.me = (me && me.data) || null;
+      friends.list = (list && list.data) || [];
+      friends.requests = (reqs && reqs.data) || [];
+    } catch (e) { console.warn('Friends unavailable:', e); }
+    renderFriendsScreen();
+    renderFeeds(); // ratings may have arrived
+  }
+
+  async function friendAct(fact, targetUid) {
+    if (!cloudOn() || !targetUid) return;
+    try {
+      if (fact === 'request') await sb.rpc('friend_request', { target: targetUid });
+      else if (fact === 'accept') await sb.rpc('friend_respond', { other: targetUid, accept: true });
+      else if (fact === 'decline') await sb.rpc('friend_respond', { other: targetUid, accept: false });
+      else if (fact === 'cancel') await sb.rpc('friend_cancel', { other: targetUid });
+      else if (fact === 'unfriend') await sb.rpc('unfriend', { other: targetUid });
+    } catch (e) { console.warn('Friend action failed:', e); }
+    await loadFriends();
+    await loadFeed();
+    if ($('#friend-search').value.trim().length >= 2) runFriendSearch();
+  }
+
+  async function runFriendSearch() {
+    const q = $('#friend-search').value.trim();
+    const box = $('#friend-search-results');
+    if (!box) return;
+    if (q.length < 2 || !cloudOn()) { box.innerHTML = ''; return; }
+    try {
+      const { data, error } = await sb.rpc('friend_search', { q });
+      if (error) throw error;
+      box.innerHTML = (data && data.length)
+        ? data.map((p) => personRow(p, p.relationship === 'none' ? 'none' : p.relationship)).join('')
+        : '<li class="empty">No climbers found.</li>';
+    } catch (e) { console.warn('Search failed:', e); box.innerHTML = ''; }
+  }
+
+  // ---- Realtime: new friend activity within seconds; graceful degradation ----
+  function onRealtimeActivity(row) {
+    if (!row || row.user_id === myUid()) return;
+    const f = friends.list.find((x) => x.user_id === row.user_id);
+    const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+    const item = { id: row.id, user_id: row.user_id, kind: row.kind, occurred_on: row.occurred_on, created_at: row.created_at, payload, username: f && f.username, display_name: (f && f.display_name) || 'Climber' };
+    feedItems = [item, ...feedItems.filter((i) => i.id !== item.id && !(i.user_id === item.user_id && i.kind === item.kind && i.occurred_on === item.occurred_on))].slice(0, 50);
+    feedCacheSave();
+    renderFeeds();
+    if (!f) loadFriends(); // a brand-new friend we don't have a name/rating for yet
+  }
+  function startFeedPoll() { if (feedPollTimer) return; feedPollTimer = setInterval(() => { if (feedStatus !== 'live') { loadFeed(); loadFriends(); } }, 8000); }
+  function stopFeedPoll() { if (feedPollTimer) { clearInterval(feedPollTimer); feedPollTimer = null; } }
+  function unsubscribeRealtime() { try { if (feedChannel && sb.removeChannel) sb.removeChannel(feedChannel); } catch (e) {} feedChannel = null; }
+  function subscribeRealtime() {
+    if (!cloudOn() || typeof sb.channel !== 'function' || feedChannel) return;
+    try {
+      feedChannel = sb.channel('friends-activity')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity' }, (p) => onRealtimeActivity(p.new))
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'activity' }, (p) => onRealtimeActivity(p.new))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => { loadFriends(); loadFeed(); })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') { feedStatus = 'live'; stopFeedPoll(); }
+          else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { feedStatus = 'stale'; startFeedPoll(); }
+          renderFeeds();
+        });
+    } catch (e) { console.warn('Realtime unavailable:', e); feedStatus = 'stale'; startFeedPoll(); }
+  }
+
+  // Called from refresh(): (re)load friends + feed and ensure a subscription.
+  function initFriends() {
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; renderFriendsScreen(); renderFeeds(); return; }
+    loadFriends();
+    loadFeed();
+    subscribeRealtime();
+  }
+
+  // One-time UI bindings (module load).
+  (function bindFriendsUI() {
+    const search = $('#friend-search');
+    if (search) search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runFriendSearch, 250); });
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-fact]');
+      if (btn) { e.preventDefault(); friendAct(btn.dataset.fact, btn.dataset.uid); }
+    });
+    const uform = $('#username-form');
+    if (uform) uform.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const st = $('#username-status');
+      const handle = ($('#username-input').value || '').trim().toLowerCase();
+      const show = (msg, ok) => { if (st) { st.hidden = false; st.textContent = msg; st.className = 'auth-status ' + (ok ? 'ok' : 'err'); } };
+      if (!/^[a-z0-9_]{3,20}$/.test(handle)) return show('3–20 letters, numbers or underscores.', false);
+      if (!cloudOn()) return show('Sign in first.', false);
+      try {
+        const { error } = await sb.rpc('friend_set_username', { handle, dname: currentDisplayName() || null });
+        if (error) throw error;
+        show('Saved ✓', true);
+        loadFriends();
+      } catch (err) {
+        show(/taken|duplicate|23505/.test(errMsg(err)) ? 'That @username is taken.' : 'Could not save that username.', false);
+      }
+    });
+  })();
+
   /* ----- Climber summary modal: what a leaderboard entry actually did.
      Same privacy stance as the leaderboard itself — grade-by-grade counts
      only, never locations, notes, dates, or individual climbs. ----- */
@@ -2236,6 +2494,15 @@
       // Whole-history view — the pyramid and sessions never clip to a range.
       const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days: 36500, grp });
       if (error) throw error;
+      // Detailed sessions are friends-only: the RPC returns null for a
+      // non-friend. Show the public score with an invitation to connect.
+      if (!data) {
+        box.innerHTML = `<p class="muted small">Add ${escapeHTML(row.display_name)} as a friend to see their sessions.</p>
+          <p class="muted small" style="margin-top:6px"><a href="#" class="lb-add-friend" data-uid="${row.user_id}">Send a friend request →</a></p>`;
+        const link = box.querySelector('.lb-add-friend');
+        if (link) link.addEventListener('click', (ev) => { ev.preventDefault(); lbModal.hidden = true; showView('friends'); friendAct('request', row.user_id); });
+        return;
+      }
       // Any rope discipline reads grades off the shared YDS scale
       renderLbSummary(box, data, grp === 'boulder' ? 'Bouldering' : 'Sport');
     } catch (e) {
@@ -3142,6 +3409,8 @@
     status.textContent = 'Saving…';
     try {
       await saveSettings({ display_name: name });
+      // Mirror the name into the friends directory so friends see the update.
+      if (cloudOn()) sb.rpc('profile_set_display', { dname: name }).then(() => loadFriends()).catch(() => {});
       status.className = 'auth-status ok';
       status.textContent = 'Saved.';
       setTimeout(() => { if (status.textContent === 'Saved.') status.textContent = ''; }, 1600);
@@ -3214,6 +3483,8 @@
     renderLifting();
     renderClimbing();
     renderProfile();
+    renderFriendsScreen();
+    renderFeeds();
   }
 
   async function refresh() {
@@ -3234,6 +3505,7 @@
     renderAll();
     maybeShowWhatsNew();
     flushQueue(); // push anything logged while offline
+    initFriends(); // read-only social layer; isolated from the logging path
   }
 
   async function boot() {

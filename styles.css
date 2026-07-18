@@ -1186,3 +1186,22 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   .week-strip { gap: 4px; }
   .day { padding: 8px 2px; }
 }
+
+/* ---------- Friends + activity feed ---------- */
+.username-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.username-row .at { font-family: var(--font-disp); font-weight: 700; color: var(--muted); font-size: 18px; }
+.username-row input { flex: 1; min-width: 0; }
+#friend-search { width: 100%; margin: 6px 0 4px; }
+.feed-stale { font-size: 11px; color: var(--accent-text); background: var(--accent-tint); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.feed-score { display: inline-block; margin-top: 3px; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--accent-2); }
+.pr-flag { color: var(--good); font-weight: 700; }
+.feed-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.feed-actions .btn.sm { padding: 6px 12px; font-size: 13px; min-height: 36px; }
+.feed-handle { color: var(--muted); font-weight: 500; }
+.rel-chip { font-size: 12px; color: var(--muted); font-weight: 600; }
+.rel-chip.friends { color: var(--good); }
+/* incoming-request badge on the Friends nav button */
+.bnav-btn { position: relative; }
+.bnav-badge { position: absolute; top: 4px; right: calc(50% - 20px); min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--danger); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; line-height: 1; }
