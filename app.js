@@ -705,21 +705,21 @@
   const fabMenu = $('#fab-menu');
   $('#fab').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!liftingEnabled()) { openAddClimb(); return; } // climbing-only: skip the chooser
+    if (!liftingEnabled()) { openQuickLog(); return; } // climbing-only: straight to the quick sheet
     fabMenu.hidden = !fabMenu.hidden;
   });
   $('#fab-lift').addEventListener('click', () => { fabMenu.hidden = true; openAddLift(); });
-  $('#fab-climb').addEventListener('click', () => { fabMenu.hidden = true; openAddClimb(); });
+  $('#fab-climb').addEventListener('click', () => { fabMenu.hidden = true; openQuickLog(); });
 
   /* ----- "Log entry" pill on the dashboard: same chooser, under the button ----- */
   const logMenu = $('#log-menu');
   $('#dash-log-btn').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!liftingEnabled()) { openAddClimb(); return; }
+    if (!liftingEnabled()) { openQuickLog(); return; }
     logMenu.hidden = !logMenu.hidden;
   });
   $('#log-lift').addEventListener('click', () => { logMenu.hidden = true; openAddLift(); });
-  $('#log-climb').addEventListener('click', () => { logMenu.hidden = true; openAddClimb(); });
+  $('#log-climb').addEventListener('click', () => { logMenu.hidden = true; openQuickLog(); });
   document.addEventListener('click', (e) => {
     if (!fabMenu.hidden && !e.target.closest('.fab-wrap')) fabMenu.hidden = true;
     if (!logMenu.hidden && !e.target.closest('.log-wrap')) logMenu.hidden = true;
@@ -727,7 +727,7 @@
 
   /* ----- Per-view "log" buttons in the page headers ----- */
   $('#lift-add-btn').addEventListener('click', openAddLift);
-  $('#climb-add-btn').addEventListener('click', openAddClimb);
+  $('#climb-add-btn').addEventListener('click', openQuickLog);
 
   /* ======================================================================
      Weightlifting
@@ -1411,8 +1411,10 @@
     editModal.hidden = true;
     editingLiftId = null;
     editingClimbId = null;
-    // Leaving the modal ends any routine session and removes its chrome.
+    // Leaving the modal pauses any routine session; its saved state (if not
+    // finished) surfaces as the Resume bar on the program panel.
     run = null;
+    renderResumeBar();
     $('#run-strip').hidden = true;
     $('#run-hint').hidden = true;
     $('#run-next').hidden = true;
@@ -1440,6 +1442,20 @@
     editLiftForm.elements.date.value = todayISO();
     editLiftForm.elements.sets.value = 1;
     editLiftForm.elements.unit.value = dominantUnit();
+    // Fast path: prefill the most recent exercise and its last numbers, so
+    // an ad-hoc set needs zero typing (change the exercise only if needed).
+    if (state.lifts.length) {
+      const recent = state.lifts[state.lifts.length - 1];
+      const last = lastFor(recent.exercise);
+      editLiftForm.elements.exercise.value = recent.exercise;
+      if (last) {
+        editLiftForm.elements.bodyweight.checked = !(last.weight > 0);
+        applyBodyweight();
+        if (last.weight > 0) editLiftForm.elements.weight.value = last.weight;
+        editLiftForm.elements.reps.value = last.reps;
+        editLiftForm.elements.unit.value = last.unit;
+      }
+    }
     $('#edit-lift-submit').textContent = 'Add set';
     $('#lift-another').hidden = false;
     openEntryModal('lift', 'Log a set');
@@ -1498,6 +1514,22 @@
 
   editLiftForm.addEventListener('submit', (e) => { e.preventDefault(); saveLift(false); });
   $('#lift-another').addEventListener('click', () => saveLift(true));
+
+  // Steppers: weight moves by 5 lbs / 2.5 kg, sets and reps by 1 — a changed
+  // set is a couple of taps instead of typing mid-workout.
+  $$('#edit-lift-form .step-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = editLiftForm.elements[btn.dataset.target];
+      if (input.disabled) return; // bodyweight mode locks the weight field
+      const dir = Number(btn.dataset.dir);
+      const stepBy = btn.dataset.target === 'weight'
+        ? (editLiftForm.elements.unit.value === 'kg' ? 2.5 : 5)
+        : 1;
+      const min = btn.dataset.target === 'weight' ? 0 : 1;
+      const cur = parseFloat(input.value) || 0;
+      input.value = Math.max(min, Math.round((cur + dir * stepBy) * 100) / 100);
+    });
+  });
 
   /* ----- Climbs ----- */
   function openAddClimb() {
@@ -1568,6 +1600,123 @@
   $('#climb-another').addEventListener('click', () => saveClimb(true));
 
   /* ======================================================================
+     Quick-Log sheet — the fast path for climbs. Grade chip + result button
+     = logged (two taps), saved instantly with today's date and defaults.
+     Detail (color, attempts, location, notes) is deferred to the full
+     modal. The sheet stays open for rapid-fire logging at the wall.
+     ====================================================================== */
+  const QS_KEY = 'gymtrack.quicklog.v1';
+  const quickSheet = $('#quick-sheet');
+  let qsState = { discipline: 'Bouldering', grade: null };
+  try { qsState = { ...qsState, ...(JSON.parse(localStorage.getItem(QS_KEY)) || {}) }; } catch (e) { /* ignore */ }
+  const saveQs = () => { try { localStorage.setItem(QS_KEY, JSON.stringify(qsState)); } catch (e) { /* ignore */ } };
+
+  let toastTimer = null;
+  function showToast(msg, onUndo) {
+    const t = $('#toast');
+    $('#toast-msg').textContent = msg;
+    $('#toast-undo').hidden = !onUndo;
+    $('#toast-undo').onclick = () => { t.hidden = true; if (onUndo) onUndo(); };
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  function openQuickLog() {
+    if (!qsState.grade && state.climbs.length) {
+      const last = state.climbs[state.climbs.length - 1];
+      qsState.discipline = last.discipline;
+      qsState.grade = last.grade;
+    }
+    renderQuickLog();
+    quickSheet.hidden = false;
+    // Bring the selected grade into view once the sheet has laid out
+    const active = $('#qs-grades .qs-grade.is-active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
+  function renderQuickLog() {
+    $('#qs-disciplines').innerHTML = ALL_DISCIPLINES.map((d) =>
+      `<button type="button" class="qs-tab${d === qsState.discipline ? ' is-active' : ''}" data-d="${d}">${d === 'Bouldering' ? 'Boulder' : d}</button>`).join('');
+    $$('#qs-disciplines .qs-tab').forEach((b) => b.addEventListener('click', () => {
+      qsState.discipline = b.dataset.d;
+      if (!gradesFor(qsState.discipline).includes(qsState.grade)) qsState.grade = null;
+      saveQs();
+      renderQuickLog();
+    }));
+
+    $('#qs-grades').innerHTML = gradesFor(qsState.discipline).map((g) =>
+      `<button type="button" class="qs-grade${g === qsState.grade ? ' is-active' : ''}" data-g="${escapeHTML(g)}">${escapeHTML(g)}</button>`).join('');
+    $$('#qs-grades .qs-grade').forEach((b) => b.addEventListener('click', () => {
+      qsState.grade = b.dataset.g;
+      saveQs();
+      renderQuickLog();
+    }));
+
+    // One-tap repeat of the most recent climb
+    const last = state.climbs.length ? state.climbs[state.climbs.length - 1] : null;
+    const rpt = $('#qs-repeat');
+    rpt.hidden = !last;
+    if (last) {
+      rpt.innerHTML = `Same as last: <b>${escapeHTML(last.grade)} · ${escapeHTML(last.result)}</b>`;
+      rpt.onclick = () => quickSaveClimb(last.discipline, last.grade, last.result);
+    }
+
+    // Today's climbs — tap to fix a mistake without leaving the wall
+    const today = state.climbs.filter((c) => c.date === todayISO()).slice(-3).reverse();
+    $('#qs-recent').innerHTML = today.length
+      ? '<span class="qs-recent-label">Today</span>' + today.map((c) => `
+          <button type="button" class="qs-recent-row" data-id="${escapeHTML(String(c.id))}">
+            ${escapeHTML(c.grade)} · ${escapeHTML(c.result)} <svg class="ico"><use href="#i-pencil"/></svg>
+          </button>`).join('')
+      : '';
+    $$('#qs-recent .qs-recent-row').forEach((b) => b.addEventListener('click', () => {
+      const c = state.climbs.find((x) => String(x.id) === b.dataset.id);
+      if (c) { quickSheet.hidden = true; openEditClimb(c); }
+    }));
+
+    $$('#quick-sheet .qs-result').forEach((b) => { b.disabled = !qsState.grade; });
+  }
+
+  function quickSaveClimb(discipline, grade, result) {
+    const entry = {
+      date: todayISO(), discipline, grade,
+      attempts: result === 'Project' ? 2 : 1, // a project implies more than one go
+      result, location: '', notes: ''
+    };
+    withSync(async () => {
+      await Store.addClimb(entry);
+      renderClimbing();
+      renderDashboard();
+      const added = state.climbs[state.climbs.length - 1];
+      showToast(`${grade} ${result} ✓`, () => {
+        withSync(async () => {
+          await Store.delClimb(added.id);
+          renderClimbing(); renderDashboard(); renderQuickLog();
+        });
+      });
+      qsState.discipline = discipline;
+      qsState.grade = grade;
+      saveQs();
+      renderQuickLog(); // sheet stays open — refresh the Today list
+    });
+  }
+
+  $$('#quick-sheet .qs-result').forEach((b) => b.addEventListener('click', () => {
+    if (qsState.grade) quickSaveClimb(qsState.discipline, qsState.grade, b.dataset.result);
+  }));
+  $('#qs-close').addEventListener('click', () => { quickSheet.hidden = true; });
+  quickSheet.addEventListener('click', (e) => { if (e.target === quickSheet) quickSheet.hidden = true; });
+  $('#qs-detail').addEventListener('click', () => {
+    quickSheet.hidden = true;
+    openAddClimb();
+    // Carry the sheet's selection into the full form
+    editClimbForm.elements.discipline.value = qsState.discipline;
+    populateEditGradeSelect();
+    if (qsState.grade) editClimbForm.elements.grade.value = qsState.grade;
+  });
+
+  /* ======================================================================
      Routines — saved training days, runnable as a guided session.
      ====================================================================== */
   const rx = (exercise, sets, reps) => ({ exercise, sets, reps });
@@ -1625,6 +1774,7 @@
 
   // The program panel lives on the Weightlifting page.
   function renderProgram() {
+    renderResumeBar(); // interrupted session? offer the one-tap pickup
     const containers = [$('#routine-list-lift')].filter(Boolean);
     const rs = state.routines.slice().sort((a, b) => (a.position | 0) - (b.position | 0));
     containers.forEach((el) => {
@@ -1734,6 +1884,47 @@
   /* ----- Session runner: walk a routine exercise by exercise ----- */
   let run = null; // { routine, idx } while a session is in progress
 
+  // The in-progress session survives an app close: every exercise change
+  // snapshots {routineId, idx, date} so reopening offers a one-tap resume.
+  const RUN_KEY = 'gymtrack.run.v1';
+  function saveRunState() {
+    try {
+      if (run) localStorage.setItem(RUN_KEY, JSON.stringify({ routineId: run.routine.id, idx: run.idx, date: todayISO() }));
+    } catch (e) { /* ignore */ }
+  }
+  function clearRunState() {
+    try { localStorage.removeItem(RUN_KEY); } catch (e) { /* ignore */ }
+    renderResumeBar();
+  }
+  function savedRunState() {
+    try {
+      const s = JSON.parse(localStorage.getItem(RUN_KEY));
+      if (s && s.date === todayISO() && state.routines.some((r) => String(r.id) === String(s.routineId))) return s;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function renderResumeBar() {
+    const bar = $('#resume-bar');
+    if (!bar) return;
+    const s = savedRunState();
+    // Hidden while the runner is actually open — it's for coming back later.
+    if (!s || run) { bar.hidden = true; return; }
+    const r = state.routines.find((x) => String(x.id) === String(s.routineId));
+    bar.hidden = false;
+    bar.innerHTML = `
+      <span class="resume-text">Session in progress: <b>${escapeHTML(r.name)}</b> — exercise ${Math.min(s.idx + 1, r.exercises.length)} of ${r.exercises.length}</span>
+      <span class="resume-actions">
+        <button type="button" class="btn pill sm" id="resume-run">Resume</button>
+        <button type="button" class="btn ghost sm" id="resume-dismiss">Dismiss</button>
+      </span>`;
+    $('#resume-run').addEventListener('click', () => {
+      run = { routine: r, idx: Math.min(s.idx, r.exercises.length - 1) };
+      renderResumeBar();
+      runExercise();
+    });
+    $('#resume-dismiss').addEventListener('click', clearRunState);
+  }
+
   // The most recent day this exercise was logged; heaviest set from that day.
   function lastFor(exercise) {
     const k = exKey(exercise);
@@ -1754,6 +1945,7 @@
   }
 
   function runExercise() {
+    saveRunState();
     const { routine, idx } = run;
     const item = routine.exercises[idx];
     const lastEx = idx === routine.exercises.length - 1;
@@ -1792,8 +1984,12 @@
 
   function advanceRun() {
     run.idx++;
-    if (run.idx >= run.routine.exercises.length) closeEditModal();
-    else runExercise();
+    if (run.idx >= run.routine.exercises.length) {
+      clearRunState(); // finished — nothing to resume
+      closeEditModal();
+    } else {
+      runExercise();
+    }
   }
   $('#run-next').addEventListener('click', advanceRun);
 

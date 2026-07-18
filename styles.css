@@ -827,6 +827,106 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 /* ---------- "What's new" popup ---------- */
 .wn-modal { max-width: 440px; }
 
+/* ---------- Quick-Log sheet (fast climb logging) ---------- */
+.sheet-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(22, 24, 29, 0.35);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet {
+  position: relative;
+  width: 100%; max-width: 520px;
+  background: var(--panel);
+  border: 1px solid var(--border); border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  max-height: 82vh; overflow-y: auto;
+}
+.sheet-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-right: 40px; }
+.qs-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.qs-tab {
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  padding: 7px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.qs-tab.is-active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+.qs-repeat {
+  width: 100%; margin-bottom: 10px; padding: 11px 14px;
+  border: 1px dashed var(--border); border-radius: 12px;
+  background: transparent; color: var(--muted); font-family: inherit; font-size: 13.5px;
+  cursor: pointer; text-align: left;
+}
+.qs-repeat b { color: var(--text); font-family: var(--font-disp); }
+.qs-grades {
+  display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 10px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.qs-grades::-webkit-scrollbar { display: none; }
+.qs-grade {
+  flex: 0 0 auto; min-width: 52px; min-height: 46px; /* one-handed targets */
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel-2); color: var(--text);
+  font-family: var(--font-disp); font-weight: 700; font-size: 15px;
+  cursor: pointer;
+}
+.qs-grade.is-active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+.qs-results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.qs-result {
+  min-height: 54px; border-radius: 14px; border: 0; cursor: pointer;
+  font-family: var(--font-disp); font-weight: 700; font-size: 16px;
+}
+.qs-result:disabled { opacity: 0.45; cursor: default; }
+.qs-result.r-send { background: var(--accent-2); color: var(--cream); }
+.qs-result.r-flash { background: var(--accent); color: #2b1c04; }
+.qs-result.r-proj { background: var(--panel-2); border: 1px dashed var(--border); color: var(--muted); }
+.qs-recent { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.qs-recent-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.qs-recent-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: transparent; font-family: var(--font-disp); font-weight: 700; font-size: 13.5px;
+  color: var(--text); cursor: pointer;
+}
+.qs-recent-row .ico { width: 14px; height: 14px; color: var(--muted); }
+.qs-foot { margin-top: 10px; text-align: center; }
+
+/* ---------- Undo toast ---------- */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px)); z-index: 70;
+  display: flex; align-items: center; gap: 14px;
+  background: var(--ink); color: var(--cream);
+  padding: 12px 16px; border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+  box-shadow: 0 8px 24px rgba(22, 24, 29, 0.35);
+}
+.toast button {
+  background: transparent; border: 0; color: var(--accent);
+  font-family: inherit; font-weight: 800; font-size: 14px; cursor: pointer; padding: 0;
+}
+
+/* ---------- Steppers (lift form) ---------- */
+.stepper { display: flex; align-items: stretch; gap: 4px; }
+.stepper input { flex: 1; min-width: 0; text-align: center; }
+.step-btn {
+  flex: 0 0 36px; min-height: 44px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel-2); color: var(--text);
+  font-size: 17px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.step-btn:active { background: var(--ink); color: var(--cream); }
+
+/* ---------- Resume bar (interrupted routine session) ---------- */
+.resume-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 10px;
+  background: var(--accent-tint); border: 1px solid var(--border); border-radius: 12px;
+  font-size: 13.5px;
+}
+.resume-bar b { font-family: var(--font-disp); }
+.resume-actions { display: flex; gap: 6px; }
+
 /* ---------- Session lists (Home, climbing History, climber summary) ---------- */
 .sess-list { display: flex; flex-direction: column; gap: 8px; }
 .sess-list .empty { color: var(--muted); font-size: 14px; padding: 14px 4px; }

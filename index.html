@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-15z" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-16a" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -94,6 +94,33 @@
     </div>
   </div>
 
+  <!-- Quick-Log sheet: grade + result, two taps, saves instantly -->
+  <div class="sheet-overlay" id="quick-sheet" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Quick log a climb">
+      <div class="sheet-head">
+        <div class="qs-tabs" id="qs-disciplines"></div>
+        <button class="modal-close" id="qs-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
+      </div>
+      <button type="button" class="qs-repeat" id="qs-repeat" hidden></button>
+      <div class="qs-grades" id="qs-grades"></div>
+      <div class="qs-results">
+        <button type="button" class="qs-result r-send" data-result="Send">Send</button>
+        <button type="button" class="qs-result r-flash" data-result="Flash">Flash</button>
+        <button type="button" class="qs-result r-proj" data-result="Project">Project</button>
+      </div>
+      <div class="qs-recent" id="qs-recent"></div>
+      <div class="qs-foot">
+        <button type="button" class="btn ghost sm" id="qs-detail">More detail (color, attempts, notes)…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Undo toast for quick-logged climbs -->
+  <div class="toast" id="toast" hidden>
+    <span id="toast-msg"></span>
+    <button type="button" id="toast-undo">Undo</button>
+  </div>
+
   <!-- Edit-entry modal -->
   <div class="modal-overlay" id="edit-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
@@ -119,13 +146,25 @@
         </label>
         <div class="row-3">
           <label>Weight
-            <input type="number" name="weight" min="0" step="0.5" required />
+            <div class="stepper">
+              <button type="button" class="step-btn" data-target="weight" data-dir="-1" aria-label="Decrease weight">−</button>
+              <input type="number" name="weight" min="0" step="0.5" required />
+              <button type="button" class="step-btn" data-target="weight" data-dir="1" aria-label="Increase weight">＋</button>
+            </div>
           </label>
           <label>Sets
-            <input type="number" name="sets" min="1" step="1" required />
+            <div class="stepper">
+              <button type="button" class="step-btn" data-target="sets" data-dir="-1" aria-label="Fewer sets">−</button>
+              <input type="number" name="sets" min="1" step="1" required />
+              <button type="button" class="step-btn" data-target="sets" data-dir="1" aria-label="More sets">＋</button>
+            </div>
           </label>
           <label>Reps
-            <input type="number" name="reps" min="1" step="1" required />
+            <div class="stepper">
+              <button type="button" class="step-btn" data-target="reps" data-dir="-1" aria-label="Fewer reps">−</button>
+              <input type="number" name="reps" min="1" step="1" required />
+              <button type="button" class="step-btn" data-target="reps" data-dir="1" aria-label="More reps">＋</button>
+            </div>
           </label>
         </div>
         <label>Units
@@ -476,6 +515,7 @@
           <h3>Your program</h3>
           <button class="btn ghost routine-new-btn">＋ New routine</button>
         </div>
+        <div class="resume-bar" id="resume-bar" hidden></div>
         <div class="routine-list" id="routine-list-lift"></div>
       </div>
 
@@ -703,6 +743,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-15z"></script>
+  <script src="app.js?v=2026-07-16a"></script>
 </body>
 </html>
