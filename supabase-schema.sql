@@ -885,3 +885,89 @@ begin
   end if;
 end
 $backfill$;
+
+-- ---------- Make the directory cover EVERYONE, not just @username-claimers ----------
+-- A user's display name lives in auth.users (set via the profile rename long
+-- before the friends feature existed); the profiles row (which holds the
+-- @username) only appears once they claim a handle. So search + name display
+-- must fall back to the auth display name, or existing climbers are invisible.
+create or replace function public.user_display(uid uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce(
+    nullif(trim((select p.display_name from public.profiles p where p.id = uid)), ''),
+    nullif(trim((select u.raw_user_meta_data->>'display_name' from auth.users u where u.id = uid)), ''),
+    'Climber')
+$$;
+revoke all on function public.user_display(uuid) from public, anon, authenticated;
+
+-- Search by @username (profiles) OR display name (profiles or auth.users).
+create or replace function public.friend_search(q text)
+returns table (user_id uuid, username text, display_name text, relationship text)
+language sql stable security definer set search_path = public as $$
+  select u.id, p.username::text,
+         coalesce(nullif(trim(p.display_name), ''), nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Climber'),
+         public.friend_status(u.id)
+  from auth.users u
+  left join public.profiles p on p.id = u.id
+  where u.id <> auth.uid()
+    and length(coalesce(trim(q), '')) >= 2
+    and (
+      p.username ilike (trim(q) || '%')
+      or coalesce(p.display_name, u.raw_user_meta_data->>'display_name') ilike (trim(q) || '%')
+    )
+  order by (p.username ilike (trim(q) || '%')) desc nulls last, p.username nulls last
+  limit 20
+$$;
+
+-- Friend/request/feed name display also falls back to the auth display name.
+create or replace function public.friend_list()
+returns table (user_id uuid, username text, display_name text, boulder integer, rope integer, last_active timestamptz)
+language sql stable security definer set search_path = public as $$
+  with fr as (
+    select case when f.user_a = auth.uid() then f.user_b else f.user_a end as fid
+    from public.friendships f
+    where f.status = 'accepted' and (f.user_a = auth.uid() or f.user_b = auth.uid())
+  ),
+  b as (select s.user_id, s.score from public.climb_send_scores_impl('boulder') s),
+  r as (select s.user_id, s.score from public.climb_send_scores_impl('rope') s)
+  select fr.fid, p.username::text, public.user_display(fr.fid), b.score, r.score,
+         (select max(a.created_at) from public.activity a where a.user_id = fr.fid) as last_active
+  from fr
+  left join public.profiles p on p.id = fr.fid
+  left join b on b.user_id = fr.fid
+  left join r on r.user_id = fr.fid
+  order by last_active desc nulls last
+$$;
+
+create or replace function public.friend_requests()
+returns table (user_id uuid, username text, display_name text, direction text, since timestamptz)
+language sql stable security definer set search_path = public as $$
+  select (case when f.user_a = auth.uid() then f.user_b else f.user_a end) as uid,
+         p.username::text,
+         public.user_display(case when f.user_a = auth.uid() then f.user_b else f.user_a end),
+         (case when f.requested_by = auth.uid() then 'outgoing' else 'incoming' end),
+         f.created_at
+  from public.friendships f
+  left join public.profiles p on p.id = (case when f.user_a = auth.uid() then f.user_b else f.user_a end)
+  where f.status = 'pending' and (f.user_a = auth.uid() or f.user_b = auth.uid())
+  order by f.created_at desc
+$$;
+
+create or replace function public.friend_feed(surface text default 'all', before_ts timestamptz default null, before_id uuid default null, lim integer default 20)
+returns table (id uuid, user_id uuid, username text, display_name text, kind text, occurred_on date, created_at timestamptz, payload jsonb)
+language sql stable security definer set search_path = public as $$
+  with fr as (
+    select case when f.user_a = auth.uid() then f.user_b else f.user_a end as fid
+    from public.friendships f
+    where f.status = 'accepted' and (f.user_a = auth.uid() or f.user_b = auth.uid())
+  )
+  select a.id, a.user_id, p.username::text, public.user_display(a.user_id),
+         a.kind, a.occurred_on, a.created_at, a.payload
+  from public.activity a
+  join fr on fr.fid = a.user_id
+  left join public.profiles p on p.id = a.user_id
+  where (surface <> 'climbing' or a.kind = 'climb_session')
+    and (before_ts is null or (a.created_at, a.id) < (before_ts, before_id))
+  order by a.created_at desc, a.id desc
+  limit greatest(1, least(coalesce(lim, 20), 50))
+$$;
