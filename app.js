@@ -2492,8 +2492,8 @@
         return `
         <div class="sess-climb" data-id="${escapeHTML(String(c.id))}">
           <div class="sc-main">
-            <div class="feed-main">${opts.editable ? routeDot(c.color) : ''}${escapeHTML(c.grade)} <span class="badge ${resClass}">${escapeHTML(c.result)}</span>${(Number(c.attempts) || 1) > 1 ? ` <span class="muted">· ${Number(c.attempts)} attempts</span>` : ''}</div>
-            ${extra ? `<div class="feed-sub">${escapeHTML(extra)}</div>` : ''}
+            <div class="sc-head">${opts.editable ? routeDot(c.color) : ''}<span class="sc-grade">${escapeHTML(c.grade)}</span><span class="badge ${resClass}">${escapeHTML(c.result)}</span>${(Number(c.attempts) || 1) > 1 ? `<span class="sc-att">${Number(c.attempts)} tries</span>` : ''}</div>
+            ${extra ? `<div class="sc-meta">${escapeHTML(extra)}</div>` : ''}
           </div>
           <span class="sc-pts ${p && p.pts > 0 ? 'up' : p && p.pts < 0 ? 'down' : ''}">${p ? (p.pts >= 0 ? '+' : '') + p.pts : ''}</span>
           ${opts.editable ? `
