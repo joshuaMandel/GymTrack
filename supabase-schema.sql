@@ -94,7 +94,9 @@ create policy "own routines" on public.routines
 -- app runs client-side (scoreBreakdown in app.js) so your own hero number and
 -- your leaderboard number always agree. KEEP THE CONSTANTS AND grade→D MAPS
 -- IN SYNC with app.js (SS_BASE, SS_STEP, SS_SPREAD, SS_K_*, SS_FLASH_EDGE):
---   • routeRating = 1000 + 100·D   (boulder VB=-1 … V17=17; roped 5.10c≈D0).
+--   • routeRating = 1000 + 100·D   (boulder VB=-1 … V17=17; roped 5.10c≈D0),
+--     plus a +300 offset for roped so a 5.10c climber lands ~1300 not 1000
+--     (a pure display shift — both R and routeR move together, dynamics unchanged).
 --   • Each climb updates the rating like a chess match against the route:
 --       E = 1 / (1 + 10^((routeR − R)/200));   R += K·(didSend − E)
 --     so the rating CONVERGES to the climber's level and volume can't inflate
@@ -138,6 +140,8 @@ declare
   BASE constant numeric := 1000; STEP constant numeric := 100; SPREAD constant numeric := 200;
   K_PROV constant numeric := 40; K_EST constant numeric := 16; PROV_SESSIONS constant int := 5;
   FLASH_EDGE constant numeric := 30;
+  ROPE_OFFSET constant numeric := 300;  -- roped ratings sit higher: 5.10c→~1300, not 1000
+  disc_offset numeric := 0;             -- 0 for boulder, ROPE_OFFSET for roped (pure display shift)
   rec record;
   cur_uid uuid := null;
   cur_date date := null;
@@ -156,9 +160,11 @@ begin
   if grp = 'boulder' then
     scale := array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17'];
     dvals := array[-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17];
+    disc_offset := 0;
   else
     scale := array['5.5','5.6','5.7','5.8','5.9','5.10a','5.10b','5.10c','5.10d','5.11a','5.11b','5.11c','5.11d','5.12a','5.12b','5.12c','5.12d','5.13a','5.13b','5.13c','5.13d','5.14a','5.14b','5.14c','5.14d','5.15a','5.15b','5.15c','5.15d'];
     dvals := array[-4,-3.5,-3,-2.5,-2,-1,-0.5,0,0.5,1,1.5,2,2.5,3,3.7,4.3,5,6,6.7,7.3,8,9,9.7,10.3,11,12,13,14,15];
+    disc_offset := ROPE_OFFSET;
   end if;
 
   for rec in
@@ -201,7 +207,7 @@ begin
             and array_position(scale, c2.grade) is not null
           order by c2.date, c2.id limit 1;
       end if;
-      R := BASE + STEP * dvals[array_position(scale, seed_grade)];
+      R := BASE + disc_offset + STEP * dvals[array_position(scale, seed_grade)];
       s_idx := 0; n_sessions := 0; hardest_pos := null; last_sess_delta := 0;
       cur_date := null;
     end if;
@@ -219,7 +225,7 @@ begin
     end if;
 
     -- ----- the climb: one Elo update (flash adds FLASH_EDGE to routeR) -----
-    route_r := BASE + STEP * dvals[rec.pos] + (case when rec.res = 'Flash' then FLASH_EDGE else 0 end);
+    route_r := BASE + disc_offset + STEP * dvals[rec.pos] + (case when rec.res = 'Flash' then FLASH_EDGE else 0 end);
     e := 1 / (1 + power(10, (route_r - R) / SPREAD));
     R := R + k_now * ((case when rec.res <> 'Project' then 1 else 0 end) - e);
     if rec.res <> 'Project' and (hardest_pos is null or rec.pos > hardest_pos) then
