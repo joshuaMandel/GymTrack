@@ -115,6 +115,30 @@ body.auth-gated .footer { display: none !important; }
 .gate-card .muted { font-size: 14px; line-height: 1.6; margin-bottom: 22px; }
 .gate-card form { text-align: left; }
 
+/* ---------- One-tap social sign-in ---------- */
+.social-auth { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.google-btn-mount { display: flex; justify-content: center; min-height: 40px; }
+.google-btn-mount > div { width: 100% !important; }
+/* Apple's guidelines: solid black button, white logo + label, full width to
+   match the Google button. Kept legible in both themes (always black/white). */
+.gate-card .apple-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: #000; color: #fff; border: 1px solid #000; border-radius: 8px;
+  height: 40px; margin: 0; font-size: 15px; font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.gate-card .apple-btn:hover { background: #000; opacity: 0.9; }
+.apple-glyph { width: 16px; height: 16px; fill: #fff; margin-top: -2px; }
+.auth-divider { display: flex; align-items: center; text-align: center; gap: 12px; color: var(--muted-soft); font-size: 12px; margin: 18px 0; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.modal-actions .btn { width: auto; flex: 0 0 auto; margin-top: 0; }
+/* Linked sign-in methods rows */
+#linked-accounts-list .feed-left { display: flex; align-items: center; gap: 10px; }
+.linked-prov { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); font-size: 13px; }
+.linked-badge { font-size: 11px; font-weight: 700; color: var(--good); }
+.micro { font-size: 12px; }
+
 /* ---------- Top bar ---------- */
 .topbar {
   position: sticky;

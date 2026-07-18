@@ -3249,7 +3249,7 @@
     const gated = CONFIGURED && !session;
     document.body.classList.toggle('auth-gated', gated);
     gate.hidden = !gated;
-    if (gated) revealApp();
+    if (gated) { revealApp(); initSocial(); }
     // A failed magic link (expired / already used) redirects here with the
     // error in the hash — explain it instead of showing a blank gate.
     if (gated && authHashError) {
@@ -3363,6 +3363,278 @@
     }
   });
 
+  /* ======================================================================
+     One-tap social sign-in (Google + Apple)
+     ----------------------------------------------------------------------
+     Web PWA path: the provider hands back a signed ID token, which we pass
+     to Supabase's signInWithIdToken — GoTrue verifies the token's signature
+     and audience server-side before issuing a session, exactly the way the
+     rest of the app's auth works (no separate backend to run). Google uses
+     Identity Services / One Tap for a genuine "Continue as [name]" single
+     tap; Apple uses Sign in with Apple JS in a popup. Both are gated on a
+     configured public client id — with none set, only email shows.
+     ====================================================================== */
+  const socialCfg = {
+    google: (cfg.googleClientId && !/YOUR-GOOGLE/i.test(cfg.googleClientId)) ? cfg.googleClientId : null,
+    apple:  (cfg.appleServicesId && !/YOUR-APPLE/i.test(cfg.appleServicesId)) ? cfg.appleServicesId : null
+  };
+  const SOCIAL_ON = CONFIGURED && !!(socialCfg.google || socialCfg.apple);
+
+  // Nonce: replay protection for the ID token. GIS embeds the SHA-256 of our
+  // raw nonce in the token; Supabase re-hashes the raw value we pass and
+  // compares — so the token can't be replayed to a different session.
+  function randNonce() {
+    const a = new Uint8Array(32); crypto.getRandomValues(a);
+    return Array.from(a, (b) => ('0' + b.toString(16)).slice(-2)).join('');
+  }
+  async function sha256hex(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf), (b) => ('0' + b.toString(16)).slice(-2)).join('');
+  }
+  function loadScript(src, id) {
+    return new Promise((resolve, reject) => {
+      if (document.getElementById(id)) return resolve();
+      const s = document.createElement('script');
+      s.src = src; s.async = true; s.defer = true; s.id = id;
+      s.onload = () => resolve(); s.onerror = () => reject(new Error('Could not load ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  // Cancel is not an error — dismissing the sheet just returns to the login
+  // screen. Providers signal this in assorted ways; treat them all as calm.
+  function isAuthCancel(e) {
+    const code = ((e && (e.error || e.code || e.message)) || '').toString();
+    return /popup_closed|closed_by_user|user_cancel|user_trigger_new_signin|abort|canceled|cancelled|dismiss/i.test(code);
+  }
+  function socialStatus(msg, kind) {
+    if (!authStatus) return;
+    authStatus.className = 'auth-status' + (kind ? ' ' + kind : '');
+    authStatus.textContent = msg || '';
+  }
+  function setSocialBusy(b) { const g = $('#social-auth'); if (g) g.classList.toggle('busy', !!b); }
+
+  async function exchangeIdToken(provider, token, nonce) {
+    setSocialBusy(true);
+    try {
+      const opts = { provider, token };
+      if (nonce) opts.nonce = nonce;
+      const { error } = await sb.auth.signInWithIdToken(opts);
+      if (error) throw error;
+      socialStatus('', ''); // SIGNED_IN fires → the app un-gates
+    } catch (e) {
+      if (isAuthCancel(e)) socialStatus('', '');
+      else socialStatus('Sign-in error: ' + errMsg(e), 'err');
+    } finally {
+      setSocialBusy(false);
+    }
+  }
+
+  let googleReady = false, googleNonceRaw = null;
+  async function initGoogle() {
+    if (!socialCfg.google) return;
+    await loadScript('https://accounts.google.com/gsi/client', 'gis-sdk');
+    googleNonceRaw = randNonce();
+    const hashed = await sha256hex(googleNonceRaw);
+    /* global google */
+    google.accounts.id.initialize({
+      client_id: socialCfg.google,
+      callback: (resp) => { if (resp && resp.credential) exchangeIdToken('google', resp.credential, googleNonceRaw); },
+      nonce: hashed,
+      use_fedcm_for_prompt: true,
+      auto_select: false,
+      cancel_on_tap_outside: true
+    });
+    const mount = $('#google-btn');
+    if (mount) {
+      mount.hidden = false;
+      mount.innerHTML = '';
+      google.accounts.id.renderButton(mount, {
+        type: 'standard', theme: 'outline', size: 'large',
+        text: 'continue_with', shape: 'pill', logo_alignment: 'left', width: 300
+      });
+    }
+    googleReady = true;
+    promptOneTap();
+  }
+  // One Tap: the "Continue as [name]" auto-prompt returning users get — the
+  // genuine single tap. Safe to call again whenever we land back on the gate.
+  function promptOneTap() {
+    if (!googleReady || session) return;
+    try { google.accounts.id.prompt(); } catch (e) { /* One Tap unavailable — the button still works */ }
+  }
+
+  let appleBound = false;
+  async function initApple() {
+    if (!socialCfg.apple) return;
+    await loadScript('https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js', 'apple-sdk');
+    /* global AppleID */
+    AppleID.auth.init({
+      clientId: socialCfg.apple,
+      scope: 'name email',
+      redirectURI: location.href.split('#')[0].split('?')[0],
+      usePopup: true
+    });
+    const btn = $('#apple-btn');
+    if (btn) {
+      btn.hidden = false;
+      if (!appleBound) {
+        appleBound = true;
+        btn.addEventListener('click', async () => {
+          try {
+            setSocialBusy(true);
+            const data = await AppleID.auth.signIn();
+            const idToken = data && data.authorization && data.authorization.id_token;
+            if (!idToken) throw new Error('No Apple identity token returned');
+            // Apple's popup returns a fresh, single-use token each time and
+            // Supabase verifies its signature + audience (your Services ID),
+            // so we rely on that rather than a nonce round-trip here.
+            await exchangeIdToken('apple', idToken, null);
+          } catch (e) {
+            if (isAuthCancel(e)) socialStatus('', '');
+            else socialStatus('Sign-in error: ' + errMsg(e), 'err');
+          } finally {
+            setSocialBusy(false);
+          }
+        });
+      }
+    }
+  }
+
+  let socialInited = false;
+  function initSocial() {
+    if (!SOCIAL_ON) return;
+    if (socialInited) { promptOneTap(); return; }
+    socialInited = true;
+    const wrap = $('#social-auth'); if (wrap) wrap.hidden = false;
+    const div = $('#auth-divider'); if (div) div.hidden = false;
+    initGoogle().catch((e) => console.warn('Google sign-in unavailable:', e));
+    initApple().catch((e) => console.warn('Apple sign-in unavailable:', e));
+  }
+
+  /* ---------- First sign-in: pick a @username once ---------- */
+  const USERNAME_PROMPTED_KEY = 'gymtrack.username_prompted';
+  function usernamePrompted(uid) { try { return localStorage.getItem(USERNAME_PROMPTED_KEY) === uid; } catch (e) { return false; } }
+  function markUsernamePrompted(uid) { try { localStorage.setItem(USERNAME_PROMPTED_KEY, uid); } catch (e) { /* ignore */ } }
+  function suggestUsername() {
+    const src = (currentDisplayName() || (session && session.user && session.user.email) || '').toString();
+    let base = src.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (base.length < 3) base = ('climber' + base).slice(0, 20);
+    return base.slice(0, 20);
+  }
+  // Called ONLY from the SIGNED_IN event (an actual sign-in this session), so
+  // an existing user restoring a session on reload is never nagged — and once
+  // shown (saved or skipped) a per-user flag means it never appears again.
+  async function maybePromptUsername() {
+    if (!cloudOn()) return;
+    const uid = session.user.id;
+    if (usernamePrompted(uid)) return;
+    let uname = friends && friends.me ? friends.me.username : undefined;
+    if (!uname) {
+      try { const { data } = await sb.from('profiles').select('username').eq('id', uid).maybeSingle(); uname = data && data.username; } catch (e) { /* ignore */ }
+    }
+    if (uname) { markUsernamePrompted(uid); return; }
+    openUsernameModal();
+  }
+  function openUsernameModal() {
+    const modal = $('#username-modal'); if (!modal) return;
+    const input = $('#username-modal-input');
+    const status = $('#username-modal-status');
+    if (status) { status.hidden = true; status.textContent = ''; }
+    if (input) input.value = suggestUsername();
+    modal.hidden = false;
+    setTimeout(() => { if (input) { input.focus(); input.select(); } }, 60);
+  }
+  function closeUsernameModal() {
+    const modal = $('#username-modal'); if (modal) modal.hidden = true;
+    if (session && session.user) markUsernamePrompted(session.user.id); // never ask again
+  }
+  (function bindUsernameModal() {
+    const form = $('#username-modal-form');
+    const skip = $('#username-modal-skip');
+    if (skip) skip.addEventListener('click', () => closeUsernameModal());
+    if (form) form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!cloudOn()) return closeUsernameModal();
+      const input = $('#username-modal-input');
+      const status = $('#username-modal-status');
+      const handle = (input.value || '').trim().toLowerCase();
+      if (!/^[a-z0-9_]{3,20}$/.test(handle)) {
+        if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = '3–20 characters: letters, numbers, or underscore.'; }
+        return;
+      }
+      try {
+        const { error } = await sb.rpc('friend_set_username', { handle, dname: currentDisplayName() || null });
+        if (error) throw error;
+        closeUsernameModal();
+        loadFriends();
+      } catch (err) {
+        if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = /taken|duplicate|unique/i.test(errMsg(err)) ? 'That username is taken — try another.' : errMsg(err); }
+      }
+    });
+  })();
+
+  /* ---------- Linked sign-in methods (Profile) ---------- */
+  const PROVIDER_META = { google: { icon: 'G', label: 'Google' }, apple: { icon: '', label: 'Apple' }, email: { icon: '✉', label: 'Email' } };
+  function isRelayEmail(email) { return /@privaterelay\.appleid\.com$/i.test(email || ''); }
+  async function renderLinkedAccounts() {
+    const panel = $('#linked-accounts-panel');
+    const listEl = $('#linked-accounts-list');
+    if (!panel || !listEl) return;
+    if (!SOCIAL_ON || !cloudOn() || typeof sb.auth.getUserIdentities !== 'function') { panel.hidden = true; return; }
+    let identities = [];
+    try {
+      const { data } = await sb.auth.getUserIdentities();
+      identities = (data && data.identities) || [];
+    } catch (e) { panel.hidden = true; return; }
+    panel.hidden = false;
+    const have = new Set(identities.map((i) => i.provider));
+    const rows = identities.map((i) => {
+      const m = PROVIDER_META[i.provider] || { icon: '•', label: i.provider };
+      const email = (i.identity_data && i.identity_data.email) || '';
+      const relay = isRelayEmail(email) ? ' <span class="muted micro">(private relay)</span>' : '';
+      const canUnlink = identities.length > 1;
+      return `<li class="feed-item"><div class="feed-left"><span class="linked-prov">${escapeHTML(m.icon || m.label[0])}</span><div><b>${escapeHTML(m.label)}</b><span class="muted micro"> ${escapeHTML(email)}${relay}</span></div></div>
+        <div class="feed-actions">${canUnlink ? `<button class="btn ghost sm" data-unlink="${i.provider}">Unlink</button>` : `<span class="linked-badge">Primary</span>`}</div></li>`;
+    });
+    // Offer to link whichever configured provider isn't attached yet.
+    ['google', 'apple'].forEach((p) => {
+      if (!socialCfg[p] || have.has(p)) return;
+      const m = PROVIDER_META[p];
+      rows.push(`<li class="feed-item"><div class="feed-left"><span class="linked-prov">${escapeHTML(m.icon || m.label[0])}</span><div><b>${escapeHTML(m.label)}</b><span class="muted micro"> Not linked</span></div></div>
+        <div class="feed-actions"><button class="btn primary sm" data-link="${p}">Link</button></div></li>`);
+    });
+    listEl.innerHTML = rows.join('');
+    listEl.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => linkProvider(b.getAttribute('data-link'))));
+    listEl.querySelectorAll('[data-unlink]').forEach((b) => b.addEventListener('click', () => unlinkProvider(b.getAttribute('data-unlink'), identities)));
+  }
+  async function linkProvider(provider) {
+    const status = $('#linked-accounts-status');
+    if (!cloudOn() || typeof sb.auth.linkIdentity !== 'function') return;
+    try {
+      // Explicit, user-initiated link to THIS account — the safe path for
+      // Apple's private-relay email, which won't auto-match your other emails.
+      const { error } = await sb.auth.linkIdentity({ provider, options: { redirectTo: location.href.split('#')[0].split('?')[0] } });
+      if (error) throw error;
+      await renderLinkedAccounts();
+    } catch (e) {
+      if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = errMsg(e); }
+    }
+  }
+  async function unlinkProvider(provider, identities) {
+    const status = $('#linked-accounts-status');
+    if (!cloudOn() || typeof sb.auth.unlinkIdentity !== 'function') return;
+    if ((identities || []).length <= 1) return; // never strip the last method
+    const target = identities.find((i) => i.provider === provider);
+    if (!target) return;
+    try {
+      const { error } = await sb.auth.unlinkIdentity(target);
+      if (error) throw error;
+      await renderLinkedAccounts();
+    } catch (e) {
+      if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = errMsg(e); }
+    }
+  }
+
   function currentDisplayName() {
     return getSettings().display_name || '';
   }
@@ -3471,6 +3743,7 @@
     }
     $('#profile-meta').textContent = meta.join(' · ');
     $('#modal-signout').hidden = !(CONFIGURED && session);
+    renderLinkedAccounts(); // Google/Apple/email link management (async, self-gated)
 
     // Lifetime stats (Volume lifted only when weightlifting is on)
     const lifting = liftingEnabled();
@@ -3670,6 +3943,7 @@
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
           await refresh();
         }
+        if (event === 'SIGNED_IN') maybePromptUsername(); // fresh sign-in → offer @username once
       });
 
       // getSession() awaits client initialization, which includes consuming
