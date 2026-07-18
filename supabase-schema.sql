@@ -437,7 +437,9 @@ create table if not exists public.activity (
   unique (user_id, kind, occurred_on)
 );
 alter table public.activity drop constraint if exists activity_kind_chk;
-alter table public.activity add constraint activity_kind_chk check (kind in ('lift_session','climb_session'));
+-- match_result is a later feed kind (see the match section); allow it here too
+-- so re-applying this file over a DB that already has match_result rows works.
+alter table public.activity add constraint activity_kind_chk check (kind in ('lift_session','climb_session','match_result'));
 create index if not exists activity_user_created_idx on public.activity (user_id, created_at desc, id desc);
 
 alter table public.activity enable row level security;
@@ -971,3 +973,358 @@ language sql stable security definer set search_path = public as $$
   order by a.created_at desc, a.id desc
   limit greatest(1, least(coalesce(lim, 20), 50))
 $$;
+
+-- ============================================================================
+-- Head-to-head match game
+-- ============================================================================
+-- Two friends compete in a climbing session. Each is really racing THEIR OWN
+-- baseline: a match is scored with the EXISTING Send Score engine
+-- (climb_send_scores_impl) — the match score is how many rating points that
+-- climber's match-window climbs earned, i.e. the engine's own session delta
+-- (send above your level → positive, coast on easy repeats → ~0, fall short →
+-- negative; fails drag it via the existing penalty math). The winner is
+-- whoever out-performed their own level the most. The chess outcome is a real
+-- Elo step between the two players' ratings (Δ = 16·(outcome − E), reusing the
+-- engine's own K and E), stored per match and added on top of the displayed
+-- rating. The per-climb algorithm itself is NEVER modified; climbs are scored
+-- once by the normal pipeline and the match adjustment is applied once on top.
+
+create table if not exists public.matches (
+  id           uuid primary key default gen_random_uuid(),
+  challenger   uuid not null references auth.users (id) on delete cascade,
+  opponent     uuid not null references auth.users (id) on delete cascade,
+  status       text not null default 'pending',   -- pending/active/declined/canceled/resolved/abandoned
+  ch_snap_boulder integer, ch_snap_rope integer,  -- each player's rating per group at accept (baseline)
+  op_snap_boulder integer, op_snap_rope integer,
+  window_start timestamptz, window_end timestamptz, -- time cap
+  ch_ended     boolean not null default false,
+  op_ended     boolean not null default false,
+  grp          text,                              -- dominant discipline (set at resolve)
+  ch_score     numeric, op_score numeric,         -- handicapped match scores (rating deltas)
+  winner       text,                              -- 'challenger' | 'opponent' | 'draw'
+  ch_delta     integer, op_delta integer,         -- elo adjustments applied (+X / −X)
+  created_at   timestamptz not null default now(),
+  resolved_at  timestamptz
+);
+alter table public.matches drop constraint if exists matches_no_self;
+alter table public.matches drop constraint if exists matches_status_chk;
+alter table public.matches add constraint matches_no_self check (challenger <> opponent);
+alter table public.matches add constraint matches_status_chk check (status in ('pending','active','declined','canceled','resolved','abandoned'));
+create index if not exists matches_ch_idx on public.matches (challenger, status);
+create index if not exists matches_op_idx on public.matches (opponent, status);
+
+alter table public.matches enable row level security;
+-- Only the two participants may read a match. Writes go only through the
+-- SECURITY DEFINER RPCs below (no write policy = default deny), so a
+-- non-participant can neither read nor inject into someone else's match.
+drop policy if exists "match participants read" on public.matches;
+create policy "match participants read" on public.matches for select to authenticated
+  using (auth.uid() = challenger or auth.uid() = opponent);
+grant select on public.matches to authenticated;
+revoke all on public.matches from anon;
+
+-- Allow a 'match_result' feed item, and relax the once-per-day uniqueness to
+-- session kinds only (a climber can play several matches in a day).
+alter table public.activity drop constraint if exists activity_kind_chk;
+alter table public.activity add constraint activity_kind_chk check (kind in ('lift_session','climb_session','match_result'));
+alter table public.activity drop constraint if exists activity_user_id_kind_occurred_on_key;
+drop index if exists public.activity_user_id_kind_occurred_on_key;
+create unique index if not exists activity_session_key on public.activity (user_id, kind, occurred_on) where kind in ('lift_session','climb_session');
+
+-- A user's total match elo adjustment for a group = sum of their per-match
+-- deltas across resolved matches whose dominant discipline was that group.
+create or replace function public.match_adjustment(uid uuid, grp text)
+returns integer language sql stable security definer set search_path = public as $$
+  select coalesce(sum(case when m.challenger = uid then m.ch_delta else m.op_delta end), 0)::int
+  from public.matches m
+  where m.status = 'resolved' and m.grp = grp and (m.challenger = uid or m.opponent = uid)
+$$;
+revoke all on function public.match_adjustment(uuid, text) from public, anon, authenticated;
+
+-- The DISPLAYED rating = the pure climb-replay rating (unchanged engine) PLUS
+-- the match adjustment. The per-climb algorithm is untouched; this is the
+-- additive win/loss layer the challenge feature adds on top.
+create or replace function public.climb_display_rating(uid uuid, grp text)
+returns integer language sql stable security definer set search_path = public as $$
+  select (select s.score from public.climb_send_scores_impl(grp) s where s.user_id = uid)
+       + public.match_adjustment(uid, grp)
+$$;
+revoke all on function public.climb_display_rating(uuid, text) from public, anon, authenticated;
+
+-- Inject the match adjustment into the public leaderboard ranking (the ranking
+-- stays public; the number now includes match results). Rewrites the wrapper
+-- only — the replay engine climb_send_scores_impl is untouched.
+create or replace function public.climb_send_scores(grp text default 'boulder')
+returns table (user_id uuid, display_name text, is_me boolean, score integer, sessions integer, provisional boolean, last_delta integer, hardest text)
+language sql stable security definer set search_path = public as $$
+  select s.user_id, s.display_name, s.is_me,
+         s.score + public.match_adjustment(s.user_id, grp),
+         s.sessions, s.provisional, s.last_delta, s.hardest
+  from public.climb_send_scores_impl(grp) s
+  order by (s.score + public.match_adjustment(s.user_id, grp)) desc, s.sessions desc
+  limit 50
+$$;
+
+-- Thin accessor: a user's pure climb-replay rating (existing engine).
+create or replace function public.impl_rating(uid uuid, grp text)
+returns integer language sql stable security definer set search_path = public as $$
+  select (select s.score from public.climb_send_scores_impl(grp) s where s.user_id = uid)
+$$;
+revoke all on function public.impl_rating(uuid, text) from public, anon, authenticated;
+
+-- A player's handicapped match score = how far their match-window climbs moved
+-- their rating (the EXISTING engine's session delta), summed across disciplines.
+-- Baseline is the rating snapshot taken at accept; for a brand-new discipline
+-- the baseline is the engine's own seed (first send's grade rating).
+create or replace function public.match_score(mid uuid, uid uuid)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+declare m record; s numeric := 0; g text; cur int; snap int; seedg numeric; fg text; fd text;
+begin
+  select * into m from public.matches where id = mid;
+  if not found then return 0; end if;
+  foreach g in array array['boulder','rope'] loop
+    cur := public.impl_rating(uid, g);
+    snap := case when uid = m.challenger then (case g when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end)
+                 else (case g when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) end;
+    if cur is null then
+      continue;
+    elsif snap is not null then
+      s := s + (cur - snap);
+    else
+      select c.grade, c.discipline into fg, fd from public.climbs c
+      where c.user_id = uid and c.created_at >= m.window_start
+        and (case when g = 'boulder' then c.discipline = 'Bouldering' else c.discipline <> 'Bouldering' end)
+        and public.grade_d(c.discipline, c.grade) is not null
+      order by c.date, c.id limit 1;
+      if fg is not null then
+        seedg := 1000 + (case when fd = 'Bouldering' then 0 else 300 end) + 100 * public.grade_d(fd, fg);
+        s := s + (cur - round(seedg));
+      end if;
+    end if;
+  end loop;
+  return s;
+end $$;
+revoke all on function public.match_score(uuid, uuid) from public, anon, authenticated;
+
+-- Post a match result to a player's activity feed (visible to their friends).
+create or replace function public.post_match_result(me uuid, opp uuid, winner text, my_delta integer, grp text, my_score numeric, opp_score numeric, mid uuid, i_am_challenger boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare res text;
+begin
+  res := case when winner = 'draw' then 'draw' when (winner = 'challenger') = i_am_challenger then 'won' else 'lost' end;
+  insert into public.activity (user_id, kind, occurred_on, payload, created_at, updated_at)
+  values (me, 'match_result', current_date,
+    jsonb_build_object('opponent', public.user_display(opp), 'result', res, 'delta', my_delta,
+      'group', grp, 'my_score', round(my_score, 1), 'opp_score', round(opp_score, 1), 'match_id', mid),
+    now(), now());
+end $$;
+revoke all on function public.post_match_result(uuid, uuid, text, integer, text, numeric, numeric, uuid, boolean) from public, anon, authenticated;
+
+-- Resolve a match: handicapped winner + chess-Elo stake between the two
+-- DISPLAYED ratings (Δ = 16·(outcome − E)). Abandoned if nobody logged a climb.
+create or replace function public.match_resolve(mid uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare m record; chs numeric; ops numeric; g text; ra int; rb int; ea numeric; kf numeric := 16; d int; win text;
+  chb int; chr int; opb int; opr int;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or m.status <> 'active' then return; end if;
+  select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
+    into chb, chr from public.climbs where user_id = m.challenger and created_at >= m.window_start;
+  select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
+    into opb, opr from public.climbs where user_id = m.opponent and created_at >= m.window_start;
+  if coalesce(chb,0)+coalesce(chr,0)+coalesce(opb,0)+coalesce(opr,0) = 0 then
+    update public.matches set status = 'abandoned', resolved_at = now(), ch_score = 0, op_score = 0 where id = mid;
+    return;
+  end if;
+  chs := public.match_score(mid, m.challenger);
+  ops := public.match_score(mid, m.opponent);
+  g := case when (coalesce(chb,0)+coalesce(opb,0)) >= (coalesce(chr,0)+coalesce(opr,0)) then 'boulder' else 'rope' end;
+  -- Match scores are integer rating deltas. Even climbing exactly at your level
+  -- nudges the rating up a few points, so two equivalent sessions land a couple
+  -- points apart from noise, not skill. A ≤4-point gap is a virtual tie — this
+  -- sits well below a genuine edge (~half a grade of over-performance ≈ 8-12+)
+  -- and stops that noise from handing the underdog a full upset payout.
+  if abs(chs - ops) <= 4 then win := 'draw';
+  elsif chs > ops then win := 'challenger'; else win := 'opponent'; end if;
+  ra := coalesce(public.climb_display_rating(m.challenger, g), 1000);
+  rb := coalesce(public.climb_display_rating(m.opponent, g), 1000);
+  ea := 1 / (1 + power(10, (rb - ra) / 200.0));
+  d := round(kf * ((case win when 'challenger' then 1 when 'opponent' then 0 else 0.5 end) - ea));
+  -- A genuine draw means both climbers performed equally relative to their OWN
+  -- baselines, so neither out-performed the other: no rating changes hands. (For
+  -- wins/losses the chess-Elo gap still makes upsets pay more than expected wins.)
+  if win = 'draw' then d := 0; end if;
+  update public.matches set status = 'resolved', resolved_at = now(), grp = g,
+    ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
+  perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
+  perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+end $$;
+revoke all on function public.match_resolve(uuid) from public, anon, authenticated;
+
+-- ---------- Match lifecycle RPCs (participant + friendship checked) ----------
+create or replace function public.match_challenge(friend uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); mid uuid; a uuid := least(auth.uid(), friend); b uuid := greatest(auth.uid(), friend);
+begin
+  if me is null then raise exception 'not authenticated'; end if;
+  if friend = me then raise exception 'cannot challenge yourself'; end if;
+  if not exists (select 1 from public.friendships f where f.status='accepted' and f.user_a=a and f.user_b=b) then
+    raise exception 'can only challenge friends';
+  end if;
+  if exists (select 1 from public.matches m where m.status in ('pending','active')
+      and ((m.challenger=me and m.opponent=friend) or (m.challenger=friend and m.opponent=me))) then
+    raise exception 'a match with this friend is already in progress';
+  end if;
+  insert into public.matches (challenger, opponent, status) values (me, friend, 'pending') returning id into mid;
+  return mid;
+end $$;
+
+create or replace function public.match_respond(mid uuid, accept boolean)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m record;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or m.opponent <> me or m.status <> 'pending' then raise exception 'no pending challenge'; end if;
+  if not accept then
+    update public.matches set status = 'declined' where id = mid; return 'declined';
+  end if;
+  update public.matches set status = 'active', window_start = now(), window_end = now() + interval '4 hours',
+    ch_snap_boulder = public.impl_rating(m.challenger, 'boulder'), ch_snap_rope = public.impl_rating(m.challenger, 'rope'),
+    op_snap_boulder = public.impl_rating(m.opponent, 'boulder'),  op_snap_rope = public.impl_rating(m.opponent, 'rope')
+  where id = mid;
+  return 'active';
+end $$;
+
+create or replace function public.match_cancel(mid uuid)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m record;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or m.challenger <> me or m.status <> 'pending' then raise exception 'nothing to cancel'; end if;
+  update public.matches set status = 'canceled' where id = mid;
+  return 'canceled';
+end $$;
+
+-- End your side of an active match. When both have ended (or the time cap has
+-- passed) the match resolves. A player who never ends still resolves at the cap.
+create or replace function public.match_end(mid uuid)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m record;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
+  if m.status <> 'active' then return m.status; end if;
+  if me = m.challenger then update public.matches set ch_ended = true where id = mid; m.ch_ended := true; end if;
+  if me = m.opponent  then update public.matches set op_ended = true where id = mid; m.op_ended := true; end if;
+  if m.ch_ended and m.op_ended then perform public.match_resolve(mid); end if;
+  return (select status from public.matches where id = mid);
+end $$;
+
+-- Live head-to-head state (participant only). Resolves on read if the time cap
+-- has passed. Returns each side's live handicapped score, baseline, and elo —
+-- numbers only, never the opponent's raw climbs.
+create or replace function public.match_state(mid uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m record;
+begin
+  select * into m from public.matches where id = mid;
+  if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
+  if m.status = 'active' and m.window_end is not null and now() > m.window_end then
+    perform public.match_resolve(mid);
+    select * into m from public.matches where id = mid;
+  end if;
+  return jsonb_build_object(
+    'id', m.id, 'status', m.status, 'window_end', m.window_end,
+    'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
+    'winner', m.winner, 'group', m.grp,
+    'challenger', jsonb_build_object('name', public.user_display(m.challenger),
+      'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
+      'elo', coalesce(public.climb_display_rating(m.challenger, coalesce(m.grp,'boulder')), public.climb_display_rating(m.challenger, 'rope')),
+      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0) else public.match_score(mid, m.challenger) end, 1),
+      'ended', m.ch_ended, 'delta', m.ch_delta),
+    'opponent', jsonb_build_object('name', public.user_display(m.opponent),
+      'baseline', coalesce(m.op_snap_boulder, m.op_snap_rope),
+      'elo', coalesce(public.climb_display_rating(m.opponent, coalesce(m.grp,'boulder')), public.climb_display_rating(m.opponent, 'rope')),
+      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0) else public.match_score(mid, m.opponent) end, 1),
+      'ended', m.op_ended, 'delta', m.op_delta)
+  );
+end $$;
+
+-- My matches: pending/active (to act on) and resolved (history).
+create or replace function public.match_list()
+returns table (id uuid, status text, i_am text, opponent uuid, opponent_name text, winner text, my_delta integer, my_score numeric, opp_score numeric, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select m.id, m.status,
+    case when m.challenger = auth.uid() then 'challenger' else 'opponent' end,
+    case when m.challenger = auth.uid() then m.opponent else m.challenger end,
+    public.user_display(case when m.challenger = auth.uid() then m.opponent else m.challenger end),
+    m.winner,
+    case when m.challenger = auth.uid() then m.ch_delta else m.op_delta end,
+    case when m.challenger = auth.uid() then m.ch_score else m.op_score end,
+    case when m.challenger = auth.uid() then m.op_score else m.ch_score end,
+    m.created_at
+  from public.matches m
+  where m.challenger = auth.uid() or m.opponent = auth.uid()
+  order by m.created_at desc
+$$;
+
+revoke all on function public.match_challenge(uuid)        from public, anon;
+revoke all on function public.match_respond(uuid, boolean) from public, anon;
+revoke all on function public.match_cancel(uuid)           from public, anon;
+revoke all on function public.match_end(uuid)              from public, anon;
+revoke all on function public.match_state(uuid)            from public, anon;
+revoke all on function public.match_list()                 from public, anon;
+grant execute on function public.match_challenge(uuid)        to authenticated;
+grant execute on function public.match_respond(uuid, boolean) to authenticated;
+grant execute on function public.match_cancel(uuid)           to authenticated;
+grant execute on function public.match_end(uuid)              to authenticated;
+grant execute on function public.match_state(uuid)            to authenticated;
+grant execute on function public.match_list()                 to authenticated;
+
+-- rebuild_activity's upsert must target the PARTIAL unique index (session kinds
+-- only) now that match_result rows are exempt — restate with the predicate.
+create or replace function public.rebuild_activity(uid uuid, d date, knd text)
+returns void language plpgsql security definer set search_path = public as $ra$
+declare
+  cnt int := 0; pl jsonb; best_grade text; best_disc text; best_d numeric; prior_best numeric;
+begin
+  if knd = 'lift_session' then
+    select count(*), jsonb_build_object(
+      'sets', coalesce(sum(sets), 0), 'volume', round(coalesce(sum(weight * sets * reps), 0)),
+      'exercises', count(distinct exercise), 'unit', coalesce(max(unit), 'lbs'),
+      'top_exercise', (select l2.exercise from public.lifts l2 where l2.user_id = uid and l2.date = d order by l2.weight desc nulls last, l2.exercise limit 1))
+      into cnt, pl from public.lifts where user_id = uid and date = d;
+  else
+    select c.grade, c.discipline, public.grade_d(c.discipline, c.grade) into best_grade, best_disc, best_d
+      from public.climbs c where c.user_id = uid and c.date = d and c.result <> 'Project'
+        and public.grade_d(c.discipline, c.grade) is not null
+      order by public.grade_d(c.discipline, c.grade) desc nulls last, c.id limit 1;
+    select max(public.grade_d(c.discipline, c.grade)) into prior_best
+      from public.climbs c where c.user_id = uid and c.date < d and c.result <> 'Project';
+    select count(*), jsonb_build_object(
+      'sends', count(*) filter (where result <> 'Project'), 'flashes', count(*) filter (where result = 'Flash'),
+      'attempts', count(*), 'hardest', best_grade, 'hardest_discipline', best_disc,
+      'new_hardest', (best_d is not null and (prior_best is null or best_d > prior_best)))
+      into cnt, pl from public.climbs where user_id = uid and date = d;
+  end if;
+  if cnt = 0 then
+    delete from public.activity where user_id = uid and kind = knd and occurred_on = d;
+  else
+    insert into public.activity (user_id, kind, occurred_on, payload, updated_at, created_at)
+    values (uid, knd, d, pl, now(), now())
+    on conflict (user_id, kind, occurred_on) where kind in ('lift_session','climb_session')
+    do update set payload = excluded.payload, updated_at = now();
+  end if;
+end;
+$ra$;
+
+-- The current user's match adjustment per group, so the app's own hero/rating
+-- display matches the leaderboard (which already adds it).
+create or replace function public.match_my_adjustments()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('boulder', public.match_adjustment(auth.uid(), 'boulder'),
+                            'rope', public.match_adjustment(auth.uid(), 'rope'))
+$$;
+revoke all on function public.match_my_adjustments() from public, anon;
+grant execute on function public.match_my_adjustments() to authenticated;

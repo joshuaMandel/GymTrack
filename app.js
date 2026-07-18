@@ -1173,7 +1173,10 @@
     const last = b.sessions.length ? b.sessions[b.sessions.length - 1] : null;
     return {
       group,
-      rating: b.rating,
+      // Displayed rating = pure climb replay + head-to-head match adjustment,
+      // matching the leaderboard. The per-climb engine (scoreBreakdown) is
+      // untouched; matchAdj is the additive win/loss layer.
+      rating: b.rating == null ? null : b.rating + (matchAdj[group] || 0),
       provisional: b.provisional,
       sessions: b.sessions.length,
       hasData: b.hasData,
@@ -2252,6 +2255,12 @@
   function feedLine(it) {
     const p = it.payload || {};
     const who = escapeHTML(it.display_name || 'Climber');
+    if (it.kind === 'match_result') {
+      const opp = escapeHTML(p.opponent || 'a friend');
+      const verb = p.result === 'won' ? `beat ${opp}` : p.result === 'lost' ? `lost to ${opp}` : `drew with ${opp}`;
+      const chg = p.delta ? ` · <span class="${p.delta > 0 ? 'pr-flag' : ''}" style="${p.delta < 0 ? 'color:var(--danger);font-weight:700' : ''}">${p.delta > 0 ? '+' : ''}${p.delta}</span>` : '';
+      return { ico: 'i-bolt', cls: '', main: `${who} ${verb}`, sub: `Head-to-head match${chg}` };
+    }
     if (it.kind === 'lift_session') {
       const parts = [`${p.exercises || 0} exercise${p.exercises === 1 ? '' : 's'}`];
       if (p.volume) parts.push(`${Math.round(p.volume).toLocaleString()} ${escapeHTML(p.unit || 'lbs')}`);
@@ -2320,7 +2329,7 @@
     let right = '';
     if (rel === 'friends') {
       const score = p.boulder != null ? `<span class="feed-score">${p.boulder}</span>` : (p.rope != null ? `<span class="feed-score">${p.rope}</span>` : '');
-      right = `${score}<button class="btn ghost sm" data-fact="unfriend" data-uid="${p.user_id}">Unfriend</button>`;
+      right = `${score}<button class="btn primary sm" data-mchal="${p.user_id}">Challenge</button><button class="btn ghost sm" data-fact="unfriend" data-uid="${p.user_id}">Unfriend</button>`;
     } else if (rel === 'outgoing') {
       right = `<span class="rel-chip">Requested</span><button class="btn ghost sm" data-fact="cancel" data-uid="${p.user_id}">Cancel</button>`;
     } else if (rel === 'incoming') {
@@ -2352,10 +2361,11 @@
     }
     const fl = $('#friends-list');
     if (fl) fl.innerHTML = friends.list.length ? friends.list.map((f) => personRow(f, 'friends')).join('') : '<li class="empty">No friends yet — search above to add some.</li>';
+    renderMatchesPanel();
     updateFriendsBadge();
   }
   function updateFriendsBadge() {
-    const inc = friends.requests.filter((r) => r.direction === 'incoming').length;
+    const inc = friends.requests.filter((r) => r.direction === 'incoming').length + matches.incoming.length;
     const b = $('#friends-badge'); if (b) { b.hidden = !inc; b.textContent = inc || ''; }
   }
 
@@ -2412,6 +2422,7 @@
     feedItems = [item, ...feedItems.filter((i) => i.id !== item.id && !(i.user_id === item.user_id && i.kind === item.kind && i.occurred_on === item.occurred_on))].slice(0, 50);
     feedCacheSave();
     renderFeeds();
+    if (h2hMid) refreshH2H(); // opponent logged during our match → refresh the live score
     if (!f) loadFriends(); // a brand-new friend we don't have a name/rating for yet
   }
   function startFeedPoll() { if (feedPollTimer) return; feedPollTimer = setInterval(() => { if (feedStatus !== 'live') { loadFeed(); loadFriends(); } }, 8000); }
@@ -2424,6 +2435,7 @@
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity' }, (p) => onRealtimeActivity(p.new))
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'activity' }, (p) => onRealtimeActivity(p.new))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => { loadFriends(); loadFeed(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => { loadMatches(); if (h2hMid) refreshH2H(); })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') { feedStatus = 'live'; stopFeedPoll(); }
           else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { feedStatus = 'stale'; startFeedPoll(); }
@@ -2434,9 +2446,10 @@
 
   // Called from refresh(): (re)load friends + feed and ensure a subscription.
   function initFriends() {
-    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; renderFriendsScreen(); renderFeeds(); return; }
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); return; }
     loadFriends();
     loadFeed();
+    loadMatches();
     subscribeRealtime();
   }
 
@@ -2464,6 +2477,135 @@
       } catch (err) {
         show(/taken|duplicate|23505/.test(errMsg(err)) ? 'That @username is taken.' : 'Could not save that username.', false);
       }
+    });
+  })();
+
+  /* ======================================================================
+     Head-to-head match game.
+
+     Two friends race a climbing session. Each is really playing THEIR OWN
+     level: the match score is how many points the match climbs earn in the
+     EXISTING Send Score engine (server-side, via match_state → the same replay
+     the leaderboard uses), so a V3 climber who sends above their level beats a
+     V8 coasting on easy repeats. The winner gets a chess-Elo bump, the loser a
+     loss — an adjustment layered on top of the displayed rating. Logging during
+     a match uses the exact same quick-log flow (zero extra taps); the match
+     only watches. Realtime + offline degrade exactly like the friends feed.
+     ====================================================================== */
+  let matches = { incoming: [], outgoing: [], active: null, history: [] };
+  let matchAdj = { boulder: 0, rope: 0 };
+  let h2hMid = null, h2hTimer = null;
+
+  async function loadMatches() {
+    if (!cloudOn()) { matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderMatchesPanel(); return; }
+    try {
+      const [list, adj] = await Promise.all([sb.rpc('match_list'), sb.rpc('match_my_adjustments')]);
+      const rows = list.data || [];
+      matches.incoming = rows.filter((m) => m.status === 'pending' && m.i_am === 'opponent');
+      matches.outgoing = rows.filter((m) => m.status === 'pending' && m.i_am === 'challenger');
+      matches.active = rows.find((m) => m.status === 'active') || null;
+      matches.history = rows.filter((m) => m.status === 'resolved' || m.status === 'abandoned').slice(0, 8);
+      const a = adj.data || {};
+      const changed = matchAdj.boulder !== (a.boulder || 0) || matchAdj.rope !== (a.rope || 0);
+      matchAdj = { boulder: a.boulder || 0, rope: a.rope || 0 };
+      if (changed) { renderClimberRating(); renderRatingHero(); } // keep hero/cards in step with the leaderboard
+    } catch (e) { console.warn('Matches unavailable:', e); }
+    renderMatchesPanel();
+    updateFriendsBadge();
+  }
+
+  function renderMatchesPanel() {
+    const panel = $('#matches-panel'), list = $('#matches-list');
+    if (!panel || !list) return;
+    const any = matches.incoming.length || matches.outgoing.length || matches.active || matches.history.length;
+    panel.hidden = !(cloudOn() && any);
+    let html = '';
+    if (matches.active) {
+      const m = matches.active;
+      html += `<li data-mopen="${m.id}" style="cursor:pointer">
+        <div class="feed-left"><span class="feed-ico climb"><svg class="ico"><use href="#i-bolt"/></svg></span>
+          <div><div class="feed-main">Match vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">Live now — tap to open</div></div></div>
+        <div class="feed-actions"><span class="match-badge live">LIVE</span></div></li>`;
+    }
+    matches.incoming.forEach((m) => { html += `<li>
+      <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
+        <div><div class="feed-main">${escapeHTML(m.opponent_name)} challenged you</div><div class="feed-sub">Head-to-head match</div></div></div>
+      <div class="feed-actions"><button class="btn primary sm" data-mact="accept" data-mid="${m.id}">Accept</button><button class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div></li>`; });
+    matches.outgoing.forEach((m) => { html += `<li>
+      <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
+        <div><div class="feed-main">Challenge sent to ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">Waiting to accept</div></div></div>
+      <div class="feed-actions"><button class="btn ghost sm" data-mact="cancelm" data-mid="${m.id}">Cancel</button></div></li>`; });
+    matches.history.forEach((m) => {
+      const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' ? 'draw' : (m.my_delta > 0 ? 'won' : m.my_delta < 0 ? 'lost' : 'draw'));
+      const lbl = m.status === 'abandoned' ? 'abandoned' : res;
+      html += `<li><div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
+        <div><div class="feed-main">vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${m.status === 'abandoned' ? 'no climbs logged' : `you ${res}`}</div></div></div>
+        <div class="feed-actions"><span class="match-badge ${res}">${lbl}${m.my_delta ? ` ${m.my_delta > 0 ? '+' : ''}${m.my_delta}` : ''}</span></div></li>`;
+    });
+    list.innerHTML = html || '<li class="empty">No matches yet — challenge a friend below.</li>';
+  }
+
+  async function matchChallenge(uid) { if (!cloudOn()) return; try { const { data } = await sb.rpc('match_challenge', { friend: uid }); await loadMatches(); if (data) openH2H(data); } catch (e) { alert(errMsg(e)); } }
+  async function matchAct(act, mid) {
+    if (!cloudOn()) return;
+    try {
+      if (act === 'accept') { await sb.rpc('match_respond', { mid, accept: true }); await loadMatches(); openH2H(mid); }
+      else if (act === 'decline') { await sb.rpc('match_respond', { mid, accept: false }); await loadMatches(); }
+      else if (act === 'cancelm') { await sb.rpc('match_cancel', { mid }); await loadMatches(); }
+    } catch (e) { console.warn('Match action failed:', e); loadMatches(); }
+  }
+  async function endMatch() { if (!cloudOn() || !h2hMid) return; try { await sb.rpc('match_end', { mid: h2hMid }); } catch (e) {} refreshH2H(); }
+
+  const matchModal = $('#match-modal');
+  function openH2H(mid) { h2hMid = mid; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
+  function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; loadMatches(); }
+  async function refreshH2H() {
+    if (!h2hMid || !cloudOn()) return;
+    try { const { data, error } = await sb.rpc('match_state', { mid: h2hMid }); if (error) throw error; renderH2H(data); }
+    catch (e) { console.warn('Match state unavailable:', e); }
+  }
+  function renderH2H(s) {
+    const body = $('#match-body'); if (!body || !s) return;
+    const iAmCh = s.i_am === 'challenger';
+    const me = iAmCh ? s.challenger : s.opponent, them = iAmCh ? s.opponent : s.challenger;
+    const resolved = s.status === 'resolved' || s.status === 'abandoned';
+    if (resolved && h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; }
+    const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+    const side = (p, isMe, lead) => `<div class="h2h-side ${isMe ? 'me' : ''} ${lead ? 'leading' : ''}">
+      <div class="h2h-name">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}</div>
+      <div class="h2h-score ${sc(p.score)}">${p.score > 0 ? '+' : ''}${p.score}</div>
+      <div class="h2h-base">racing level ${p.baseline != null ? p.baseline : '—'}</div>
+      <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
+    let html = '';
+    if (resolved) {
+      const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
+      html += `<div class="h2h-result ${r}">${s.status === 'abandoned' ? 'Match abandoned' : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw'}</div>`;
+      if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
+    } else if (s.status === 'pending') {
+      html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
+    } else {
+      html += `<div class="h2h-status">Live — each racing your own level. Log climbs as usual.</div>`;
+    }
+    html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
+    if (!resolved && s.status === 'active') {
+      html += `<div class="h2h-actions"><button class="btn primary" id="h2h-log">Log a climb</button><button class="btn ghost" id="h2h-end"${me.ended ? ' disabled' : ''}>${me.ended ? 'Waiting for them…' : 'End my session'}</button></div>`;
+    } else if (resolved) {
+      html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
+    }
+    body.innerHTML = html;
+    const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
+    const e = $('#h2h-end'); if (e && !me.ended) e.addEventListener('click', endMatch);
+    const d = $('#h2h-done'); if (d) d.addEventListener('click', closeH2H);
+  }
+  (function bindMatchUI() {
+    if (matchModal) {
+      $('#match-close').addEventListener('click', closeH2H);
+      matchModal.addEventListener('click', (ev) => { if (ev.target === matchModal) closeH2H(); });
+    }
+    document.addEventListener('click', (ev) => {
+      const chal = ev.target.closest('[data-mchal]'); if (chal) { ev.preventDefault(); matchChallenge(chal.dataset.mchal); return; }
+      const b = ev.target.closest('[data-mact]'); if (b) { ev.preventDefault(); matchAct(b.dataset.mact, b.dataset.mid); return; }
+      const open = ev.target.closest('[data-mopen]'); if (open) { ev.preventDefault(); openH2H(open.dataset.mopen); }
     });
   })();
 

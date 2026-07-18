@@ -1208,3 +1208,27 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .bnav-badge { position: absolute; top: 4px; right: calc(50% - 20px); min-width: 16px; height: 16px; padding: 0 4px;
   background: var(--danger); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; line-height: 1; }
+
+/* ---------- Head-to-head match ---------- */
+.h2h { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: stretch; margin: 4px 0 12px; }
+.h2h-side { background: var(--panel-2); border-radius: var(--radius-row); padding: 14px 10px; text-align: center; border: 2px solid transparent; }
+.h2h-side.leading { border-color: var(--good); }
+.h2h-side.me .h2h-name { color: var(--accent-2); }
+.h2h-name { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+.h2h-score { font-family: var(--font-disp); font-weight: 700; font-size: 40px; line-height: 1; color: var(--ink); }
+.h2h-score.pos { color: var(--good); } .h2h-score.neg { color: var(--danger); }
+.h2h-base { font-size: 11px; color: var(--muted); margin-top: 5px; }
+.h2h-elo { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.h2h-vs { align-self: center; font-family: var(--font-disp); font-weight: 700; color: var(--muted); font-size: 13px; }
+.h2h-status { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.h2h-result { text-align: center; font-family: var(--font-disp); font-weight: 700; font-size: 22px; margin: 6px 0; }
+.h2h-result.won { color: var(--good); } .h2h-result.lost { color: var(--danger); } .h2h-result.draw { color: var(--muted); }
+.h2h-elochange { text-align: center; font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+.h2h-actions { display: flex; gap: 8px; margin-top: 6px; }
+.h2h-actions .btn { flex: 1; width: auto; margin-top: 0; }
+/* match rows in the matches panel */
+.match-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.match-badge.won { background: var(--good-tint); color: var(--good); }
+.match-badge.lost { background: rgba(192,57,43,.12); color: var(--danger); }
+.match-badge.draw { background: var(--panel-2); color: var(--muted); }
+.match-badge.live { background: var(--accent-tint); color: var(--accent-text); }
