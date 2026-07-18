@@ -1230,7 +1230,7 @@
       de.textContent = ''; de.className = 'rating-delta';
       $('#rh-sub').textContent = `sessions · goal ${goal}`;
       $('#rh-session').textContent = '';
-      $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, #2e3038 0)`;
+      $('#hero-ring').style.background = `conic-gradient(var(--accent) ${pct}%, rgba(253,248,239,0.20) 0)`;
       $('#hero-pct').textContent = pct + '%';
       return;
     }
@@ -1240,15 +1240,18 @@
     const r = climberRating(pg);
     const ro = climberRating(other.key);
     $('#rh-label').textContent = `${g.label} Send Score`;
+    const hero = $('.rating-hero');
     if (!r.hasData) {
-      $('#rh-value').textContent = '—';
+      // Inviting empty state — no ghost ring or "—" that reads as broken.
+      hero.classList.add('is-empty');
+      $('#rh-label').textContent = 'Send Score';
+      $('#rh-value').textContent = '1000';
       de.textContent = ''; de.className = 'rating-delta';
-      $('#rh-sub').textContent = 'Log a climb to start your Send Score';
+      $('#rh-sub').textContent = 'Everyone starts here — log your first climb to get moving.';
       $('#rh-session').textContent = '';
-      $('#hero-ring').style.background = 'conic-gradient(var(--accent) 0%, #2e3038 0)';
-      $('#hero-pct').textContent = '—';
       return;
     }
+    hero.classList.remove('is-empty');
     $('#rh-value').textContent = r.rating;
     const d = r.lastSessionDelta;
     de.className = 'rating-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
@@ -1262,7 +1265,7 @@
       : '';
     // Ring fills toward the next 100-point milestone.
     const band = ((r.rating % 100) + 100) % 100;
-    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${band}%, #2e3038 0)`;
+    $('#hero-ring').style.background = `conic-gradient(var(--accent) ${band}%, rgba(253,248,239,0.20) 0)`;
     $('#hero-pct').textContent = Math.ceil((r.rating + 1) / 100) * 100;
   }
 
@@ -1360,8 +1363,12 @@
     'Blue': '#3b82c4', 'Purple': '#8b5cf6', 'Pink': '#ec6aa0', 'Black': '#16181d',
     'White': '#f5f2ea', 'Gray': '#9aa0a8', 'Brown': '#8a6240'
   };
+  // A colored dot for known hold colors; a hollow neutral dot otherwise, so
+  // every climb row keeps the same anatomy (no missing-dot gaps).
   const routeDot = (color) =>
-    CLIMB_COLORS[color] ? `<span class="route-dot" style="background:${CLIMB_COLORS[color]}" title="${color} route"></span>` : '';
+    CLIMB_COLORS[color]
+      ? `<span class="route-dot" style="background:${CLIMB_COLORS[color]}" title="${escapeHTML(color)} route"></span>`
+      : '<span class="route-dot route-dot-none" title="No color logged"></span>';
 
   // Build the swatch row once; tapping selects, tapping again clears.
   (function buildColorRow() {
@@ -1435,13 +1442,20 @@
   }
   editLiftForm.elements.bodyweight.addEventListener('change', applyBodyweight);
 
+  // Segmented lbs/kg control writes the hidden unit field and reflects state.
+  function setLiftUnit(u) {
+    editLiftForm.elements.unit.value = u;
+    $$('#edit-lift-form .seg-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.unit === u));
+  }
+  $$('#edit-lift-form .seg-btn').forEach((b) => b.addEventListener('click', () => setLiftUnit(b.dataset.unit)));
+
   function openAddLift() {
     editingLiftId = null;
     editLiftForm.reset();
     applyBodyweight(); // reset unchecks the box — re-enable the weight field
     editLiftForm.elements.date.value = todayISO();
     editLiftForm.elements.sets.value = 1;
-    editLiftForm.elements.unit.value = dominantUnit();
+    setLiftUnit(dominantUnit());
     // Fast path: prefill the most recent exercise and its last numbers, so
     // an ad-hoc set needs zero typing (change the exercise only if needed).
     if (state.lifts.length) {
@@ -1453,7 +1467,7 @@
         applyBodyweight();
         if (last.weight > 0) editLiftForm.elements.weight.value = last.weight;
         editLiftForm.elements.reps.value = last.reps;
-        editLiftForm.elements.unit.value = last.unit;
+        setLiftUnit(last.unit);
       }
     }
     $('#edit-lift-submit').textContent = 'Add set';
@@ -1470,7 +1484,7 @@
     if (l.weight > 0) editLiftForm.elements.weight.value = l.weight;
     editLiftForm.elements.sets.value = l.sets;
     editLiftForm.elements.reps.value = l.reps;
-    editLiftForm.elements.unit.value = l.unit;
+    setLiftUnit(l.unit);
     editLiftForm.elements.notes.value = l.notes || '';
     $('#edit-lift-submit').textContent = 'Save changes';
     $('#lift-another').hidden = true;
@@ -1662,8 +1676,11 @@
       rpt.onclick = () => quickSaveClimb(last.discipline, last.grade, last.result);
     }
 
-    // Today's climbs — tap to fix a mistake without leaving the wall
-    const today = state.climbs.filter((c) => c.date === todayISO()).slice(-3).reverse();
+    // Today's climbs in the active discipline group — tap to fix a mistake
+    const grp = ratingGroup(qsState.discipline);
+    const today = state.climbs
+      .filter((c) => c.date === todayISO() && ratingGroup(c.discipline) === grp)
+      .slice(-3).reverse();
     $('#qs-recent').innerHTML = today.length
       ? '<span class="qs-recent-label">Today</span>' + today.map((c) => `
           <button type="button" class="qs-recent-row" data-id="${escapeHTML(String(c.id))}">
@@ -1956,14 +1973,14 @@
     editLiftForm.elements.sets.value = item.sets || 1;
     const last = lastFor(item.exercise);
     if (last) {
-      editLiftForm.elements.unit.value = last.unit;
+      setLiftUnit(last.unit);
       editLiftForm.elements.bodyweight.checked = !(last.weight > 0);
       applyBodyweight();
       if (last.weight > 0) editLiftForm.elements.weight.value = last.weight;
       editLiftForm.elements.reps.value = last.reps;
     } else {
       applyBodyweight();
-      editLiftForm.elements.unit.value = dominantUnit();
+      setLiftUnit(dominantUnit());
     }
     const strip = $('#run-strip');
     strip.hidden = false;
@@ -2543,15 +2560,20 @@
     }
     const measured = Math.round(wrap.getBoundingClientRect().width);
     const W = measured >= 200 ? measured : 640;
-    const H = 200, padT = 28, padB = 10, padX = 6;
+    const H = 210, padT = 28, padB = 24, padX = 6;
     const baseY = H - padB;
     const n = points.length;
     const slot = (W - padX * 2) / n;
     const barW = Math.min(34, slot * 0.6);
+    const cx = (i) => padX + slot * i + slot / 2;
     const bars = points.map((p, i) => {
-      if (p.value <= 0) return '';
-      const h = Math.max(3, (p.value / max) * (baseY - padT));
       const x = padX + slot * i + (slot - barW) / 2;
+      // Empty weeks get a faint baseline stub so the timeline reads as
+      // continuous rather than "missing bars".
+      if (p.value <= 0) {
+        return `<rect x="${x.toFixed(1)}" y="${(baseY - 3).toFixed(1)}" width="${barW.toFixed(1)}" height="3" rx="1.5" fill="var(--hairline)"><title>Week of ${fmtDateShort(p.date)}: none</title></rect>`;
+      }
+      const h = Math.max(3, (p.value / max) * (baseY - padT));
       const y = baseY - h;
       const last = i === n - 1;
       const label = last
@@ -2559,11 +2581,29 @@
         : '';
       return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(7, barW / 2)}" fill="${last ? '#f59e2c' : '#e2d9c4'}"><title>Week of ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></rect>${label}`;
     }).join('');
+    // X-axis: first / middle / last week so a 12-week span is legible.
+    const labelIdx = n <= 1 ? [0] : [...new Set([0, Math.floor((n - 1) / 2), n - 1])];
+    const xLabels = labelIdx.map((i) =>
+      `<text class="chart-label" x="${cx(i).toFixed(1)}" y="${H - 7}" text-anchor="middle">${fmtDateShort(points[i].date)}</text>`
+    ).join('');
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly volume chart">
         <line class="chart-base" x1="0" y1="${baseY}" x2="${W}" y2="${baseY}"/>
         ${bars}
+        ${xLabels}
       </svg>`;
+  }
+
+  // Rounded gridline values ("nice numbers") spanning a data range.
+  function niceTicks(lo, hi, count) {
+    if (lo === hi) return [lo];
+    const rawStep = (hi - lo) / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 100) / 100);
+    return out;
   }
 
   function drawChart(wrap, series, fmtValue) {
@@ -2576,8 +2616,9 @@
     const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p.date)))].sort();
     const xi = new Map(dates.map((d, i) => [d, i]));
     const values = series.flatMap((s) => s.points.map((p) => p.value));
-    let min = Math.min(...values);
-    let max = Math.max(...values);
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    let min = dataMin, max = dataMax;
     if (min === max) { min -= 1; max += 1; }
     const vpad = (max - min) * 0.1;
     min -= vpad; max += vpad;
@@ -2595,7 +2636,9 @@
     const x = (i) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
     const y = (v) => padT + innerH - ((v - min) / (max - min)) * innerH;
 
-    const ticks = [min + (max - min) * 0.1, (min + max) / 2, max - (max - min) * 0.1];
+    // "Nice" rounded gridline values over the real data range (no more
+    // 1,299 / 1,165 oddities — proper 1,300 / 1,150 / 1,000 stops).
+    const ticks = niceTicks(dataMin, dataMax, 3).filter((t) => t >= min && t <= max);
     const yTicks = ticks.map((t) =>
       `<line class="chart-axis" x1="${padL}" y1="${y(t).toFixed(1)}" x2="${W - padR}" y2="${y(t).toFixed(1)}"/>
        <text class="chart-label" x="${padL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end">${fmtValue(t)}</text>`
@@ -2619,8 +2662,30 @@
         `<circle cx="${x(xi.get(p.date)).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="8" fill="transparent"><title>${escapeHTML(s.label)} — ${fmtDateShort(p.date)}: ${fmtValue(p.value)}</title></circle>`
       ).join('');
       const end = pts[pts.length - 1];
-      const endDot = `<circle cx="${x(xi.get(end.date)).toFixed(1)}" cy="${y(end.value).toFixed(1)}" r="5" fill="${color}"/>`;
-      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${hovers}${endDot}`;
+      const ex = x(xi.get(end.date)), ey = y(end.value);
+      // A one-point series has no line to anchor the dot — give it a ringed
+      // marker and an inline value label so it reads as data, not a stray dot.
+      if (pts.length === 1) {
+        const lx = Math.min(ex + 10, W - padR - 34);
+        return `<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="6" fill="${color}"/>
+          <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="10" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.4"/>
+          <text class="chart-point-label" x="${lx.toFixed(1)}" y="${(ey - 10).toFixed(1)}" fill="${color}">${fmtValue(end.value)}</text>
+          <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="12" fill="transparent"><title>${escapeHTML(end.label)} — ${fmtDateShort(end.date)}: ${fmtValue(end.value)}</title></circle>`;
+      }
+      const endDot = `<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="5" fill="${color}"/>`;
+      // A soft area fill under the line adds depth (single-series only —
+      // stacked fills would muddy a multi-line chart).
+      let area = '';
+      if (series.length === 1) {
+        const fx = x(xi.get(pts[0].date));
+        const fillId = 'cfill' + si;
+        area = `<defs><linearGradient id="${fillId}" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stop-color="${color}" stop-opacity="0.16"/>
+            <stop offset="1" stop-color="${color}" stop-opacity="0"/>
+          </linearGradient></defs>
+          <path d="${path} L${ex.toFixed(1)},${(padT + innerH).toFixed(1)} L${fx.toFixed(1)},${(padT + innerH).toFixed(1)} Z" fill="url(#${fillId})" stroke="none"/>`;
+      }
+      return `${area}<path d="${path}" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${hovers}${endDot}`;
     }).join('');
 
     const legend = series.length > 1
@@ -2939,12 +3004,12 @@
 
   const ACHIEVEMENTS = [
     { id: 'first', name: 'First Entry', desc: 'Log your first set or climb', icon: 'star', earned: (s) => s.sessions >= 1 },
-    { id: 'double', name: 'Double Day', desc: 'Lift and climb on the same day', icon: 'star', earned: (s) => s.doubleDay },
-    { id: 's10', name: 'Regular', desc: '10 sessions', icon: 'flame', earned: (s) => s.sessions >= 10, progress: (s) => `${s.sessions}/10 sessions` },
-    { id: 's50', name: 'Committed', desc: '50 sessions', icon: 'flame', earned: (s) => s.sessions >= 50, progress: (s) => `${s.sessions}/50 sessions` },
+    { id: 'double', name: 'Double Day', desc: 'Lift and climb on the same day', icon: 'bolt', earned: (s) => s.doubleDay },
+    { id: 's10', name: 'Regular', desc: '10 sessions', icon: 'calendar', earned: (s) => s.sessions >= 10, progress: (s) => `${s.sessions}/10 sessions` },
+    { id: 's50', name: 'Committed', desc: '50 sessions', icon: 'medal', earned: (s) => s.sessions >= 50, progress: (s) => `${s.sessions}/50 sessions` },
     { id: 's100', name: 'Century Club', desc: '100 sessions', icon: 'trophy', earned: (s) => s.sessions >= 100, progress: (s) => `${s.sessions}/100 sessions` },
     { id: 'streak7', name: 'One Week Strong', desc: '7-day streak', icon: 'flame', earned: (s) => s.longest >= 7, progress: (s) => `best ${s.longest}/7 days` },
-    { id: 'streak30', name: 'Unstoppable', desc: '30-day streak', icon: 'flame', earned: (s) => s.longest >= 30, progress: (s) => `best ${s.longest}/30 days` },
+    { id: 'streak30', name: 'Unstoppable', desc: '30-day streak', icon: 'bolt', earned: (s) => s.longest >= 30, progress: (s) => `best ${s.longest}/30 days` },
     { id: 'v100k', name: '100k Club', desc: '100,000 lifted, lifetime', icon: 'barbell', earned: (s) => s.volume >= 100000, progress: (s) => `${fmtCompact(s.volume)}/100K ${s.unit}` },
     { id: 'v1m', name: 'Million Mover', desc: '1,000,000 lifted, lifetime', icon: 'medal', earned: (s) => s.volume >= 1000000, progress: (s) => `${fmtCompact(s.volume)}/1M ${s.unit}` },
     { id: 'send1', name: 'First Send', desc: 'Top out your first climb', icon: 'mountain', earned: (s) => s.sends >= 1 },
