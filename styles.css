@@ -1271,3 +1271,21 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .match-badge.lost { background: rgba(192,57,43,.12); color: var(--danger); }
 .match-badge.draw { background: var(--panel-2); color: var(--muted); }
 .match-badge.live { background: var(--accent-tint); color: var(--accent-text); }
+
+/* Match creation sheet */
+.mc-field { margin: 14px 0; }
+.mc-label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; }
+#mc-discipline, #mc-style { display: flex; width: 100%; }
+#mc-discipline .seg-btn, #mc-style .seg-btn { flex: 1; }
+#mc-length { gap: 7px; }
+#mc-length .grade-pill { cursor: pointer; }
+#mc-length .grade-pill.is-active { background: var(--ink); color: var(--cream); border-color: var(--ink); }
+.mc-summary { font-size: 13px; color: var(--muted); margin: 12px 0 2px; min-height: 18px; }
+/* Head-to-head rules banner + best-of-N progress */
+.h2h-rules { display: flex; width: fit-content; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 700; color: var(--accent-2); margin: 0 auto 10px; }
+.h2h-rules .ico { width: 14px; height: 14px; }
+.h2h-progs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+.h2h-progress { margin-top: 4px; }
+.h2h-prog-bar { height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.h2h-prog-bar span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .3s ease; }
+.h2h-prog-lbl { margin-top: 3px; font-weight: 600; }

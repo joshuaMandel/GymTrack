@@ -2526,20 +2526,21 @@
     const any = matches.incoming.length || matches.outgoing.length || matches.active || matches.history.length;
     panel.hidden = !(cloudOn() && any);
     let html = '';
+    const rules = (m) => escapeHTML(m.rules_label || 'Any climbing');
     if (matches.active) {
       const m = matches.active;
       html += `<li data-mopen="${m.id}" style="cursor:pointer">
         <div class="feed-left"><span class="feed-ico climb"><svg class="ico"><use href="#i-bolt"/></svg></span>
-          <div><div class="feed-main">Match vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">Live now — tap to open</div></div></div>
+          <div><div class="feed-main">Match vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${rules(m)} · tap to open</div></div></div>
         <div class="feed-actions"><span class="match-badge live">LIVE</span></div></li>`;
     }
     matches.incoming.forEach((m) => { html += `<li>
       <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
-        <div><div class="feed-main">${escapeHTML(m.opponent_name)} challenged you</div><div class="feed-sub">Head-to-head match</div></div></div>
+        <div><div class="feed-main">${escapeHTML(m.opponent_name)} challenged you</div><div class="feed-sub">${rules(m)} · winner takes elo</div></div></div>
       <div class="feed-actions"><button class="btn primary sm" data-mact="accept" data-mid="${m.id}">Accept</button><button class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div></li>`; });
     matches.outgoing.forEach((m) => { html += `<li>
       <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
-        <div><div class="feed-main">Challenge sent to ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">Waiting to accept</div></div></div>
+        <div><div class="feed-main">Challenge sent to ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${rules(m)} · waiting to accept</div></div></div>
       <div class="feed-actions"><button class="btn ghost sm" data-mact="cancelm" data-mid="${m.id}">Cancel</button></div></li>`; });
     matches.history.forEach((m) => {
       const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' ? 'draw' : (m.my_delta > 0 ? 'won' : m.my_delta < 0 ? 'lost' : 'draw'));
@@ -2551,7 +2552,68 @@
     list.innerHTML = html || '<li class="empty">No matches yet — challenge a friend below.</li>';
   }
 
-  async function matchChallenge(uid) { if (!cloudOn()) return; try { const { data } = await sb.rpc('match_challenge', { friend: uid }); await loadMatches(); if (data) openH2H(data); } catch (e) { alert(errMsg(e)); } }
+  // ----- Match creation: pick the ruleset, then send the challenge -----
+  let mcTarget = null; // { uid, name }
+  const mcState = { discipline: 'boulder', style: 'lead', length: 3 };
+  const mcModal = $('#match-create-modal');
+  // Map the pickers to the backend discipline: bouldering, or the rope style.
+  function mcMappedDiscipline() { return mcState.discipline === 'boulder' ? 'boulder' : mcState.style; }
+  function matchChallenge(uid) {
+    if (!cloudOn()) return;
+    const f = (friends.list || []).find((x) => x.user_id === uid);
+    openMatchCreate(uid, (f && f.display_name) || 'your friend');
+  }
+  function openMatchCreate(uid, name) {
+    mcTarget = { uid, name };
+    mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3;
+    const nm = $('#mc-name'); if (nm) nm.textContent = name;
+    const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
+    renderMcPickers();
+    if (mcModal) mcModal.hidden = false;
+  }
+  function closeMatchCreate() { if (mcModal) mcModal.hidden = true; mcTarget = null; }
+  function renderMcPickers() {
+    $$('#mc-discipline .seg-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.disc === mcState.discipline));
+    $$('#mc-style .seg-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.style === mcState.style));
+    $$('#mc-length .grade-pill').forEach((b) => {
+      const v = b.dataset.n === '' ? null : parseInt(b.dataset.n, 10);
+      b.classList.toggle('is-active', v === mcState.length);
+    });
+    const styleField = $('#mc-style-field'); if (styleField) styleField.hidden = mcState.discipline !== 'routes';
+    // Live plain-language summary of exactly what the opponent will agree to.
+    const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
+    const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
+      : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
+    const lenLabel = mcState.length == null ? 'an open session — every climb counts' : `your best ${mcState.length} ${noun}`;
+    const sum = $('#mc-summary');
+    if (sum) sum.textContent = `${discLabel} · ${lenLabel}.`;
+  }
+  async function sendMatchChallenge() {
+    if (!cloudOn() || !mcTarget) return;
+    const st = $('#mc-status'); const btn = $('#mc-send');
+    if (btn) btn.disabled = true;
+    try {
+      const { data, error } = await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length });
+      if (error) throw error;
+      closeMatchCreate();
+      await loadMatches();
+      if (data) openH2H(data);
+    } catch (e) {
+      if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = /already in progress/i.test(errMsg(e)) ? 'You already have a match going with them.' : errMsg(e); }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+  (function bindMatchCreate() {
+    if (!mcModal) return;
+    $('#mc-close').addEventListener('click', closeMatchCreate);
+    $('#mc-cancel').addEventListener('click', closeMatchCreate);
+    $('#mc-send').addEventListener('click', sendMatchChallenge);
+    mcModal.addEventListener('click', (ev) => { if (ev.target === mcModal) closeMatchCreate(); });
+    $('#mc-discipline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-disc]'); if (!b) return; mcState.discipline = b.dataset.disc; renderMcPickers(); });
+    $('#mc-style').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; mcState.style = b.dataset.style; renderMcPickers(); });
+    $('#mc-length').addEventListener('click', (ev) => { const b = ev.target.closest('[data-n]'); if (!b) return; mcState.length = b.dataset.n === '' ? null : parseInt(b.dataset.n, 10); renderMcPickers(); });
+  })();
   async function matchAct(act, mid) {
     if (!cloudOn()) return;
     try {
@@ -2582,7 +2644,18 @@
       <div class="h2h-score ${sc(p.score)}">${p.score > 0 ? '+' : ''}${p.score}</div>
       <div class="h2h-base">racing level ${p.baseline != null ? p.baseline : '—'}</div>
       <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
-    let html = '';
+    const rules = s.rules || {};
+    const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
+    // Rules banner — always visible so the agreed ruleset is unambiguous.
+    let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}</span></div>` : '';
+    // Best-of-N progress: "4 of 6 problems logged" per side, or a plain count for
+    // an open session. counted is null on legacy (pre-ruleset) matches.
+    if (!resolved && s.status === 'active' && me.counted != null) {
+      const prog = (p) => rules.best_n
+        ? `<div class="h2h-progress"><div class="h2h-prog-bar"><span style="width:${Math.min(100, Math.round(100 * Math.min(p.counted, rules.best_n) / rules.best_n))}%"></span></div><div class="h2h-prog-lbl">${Math.min(p.counted, rules.best_n)} of ${rules.best_n} ${noun}</div></div>`
+        : `<div class="h2h-progress"><div class="h2h-prog-lbl">${p.counted} ${noun} logged</div></div>`;
+      html += `<div class="h2h-progs"><div>${escapeHTML(me.name)} (you)${prog(me)}</div><div>${escapeHTML(them.name)}${prog(them)}</div></div>`;
+    }
     if (resolved) {
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
       html += `<div class="h2h-result ${r}">${s.status === 'abandoned' ? 'Match abandoned' : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw'}</div>`;
@@ -2590,7 +2663,7 @@
     } else if (s.status === 'pending') {
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
     } else {
-      html += `<div class="h2h-status">Live — each racing your own level. Log climbs as usual.</div>`;
+      html += `<div class="h2h-status">Live — only ${escapeHTML((rules.discipline === 'boulder' ? 'bouldering' : rules.style_label ? rules.style_label.split(' · ')[0].toLowerCase() : 'matching'))} climbs count. Log as usual.</div>`;
     }
     html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
     if (!resolved && s.status === 'active') {

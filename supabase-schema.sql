@@ -116,6 +116,20 @@ drop function if exists public.climb_send_scores(text);
 drop function if exists public.climb_send_scores_impl(text);
 drop function if exists public.climb_ss_session(int[], numeric[], text[], text[], text[], numeric); -- retired points model
 
+-- ---------- Shared Send Score core: ONE Elo step ----------
+-- The single source of truth for a per-climb rating update. Both the
+-- leaderboard replay (climb_send_scores_impl) and the match subset scorer
+-- (match rulesets) call this, so a discipline-filtered or best-of-N match is
+-- scored by the EXACT same math as the leaderboard — never a second formula.
+-- route_r is the climb's target rating (base + discipline offset + grade step
+-- + flash edge); did_send is false only for a Project. SPREAD = 200.
+create or replace function public.ss_step(r numeric, k numeric, route_r numeric, did_send boolean)
+returns numeric language sql immutable as $$
+  select r + k * ((case when did_send then 1 else 0 end) - 1 / (1 + power(10, (route_r - r) / 200.0)));
+$$;
+revoke all on function public.ss_step(numeric, numeric, numeric, boolean) from public, anon;
+grant execute on function public.ss_step(numeric, numeric, numeric, boolean) to authenticated;
+
 -- The replay itself: emits every user in history order (RETURN NEXT can't
 -- sort). Internal only — the public wrapper below orders and limits it.
 create function public.climb_send_scores_impl(grp text default 'boulder')
@@ -225,9 +239,9 @@ begin
     end if;
 
     -- ----- the climb: one Elo update (flash adds FLASH_EDGE to routeR) -----
+    -- Same math as before, now via the shared ss_step core (SPREAD=200 there).
     route_r := BASE + disc_offset + STEP * dvals[rec.pos] + (case when rec.res = 'Flash' then FLASH_EDGE else 0 end);
-    e := 1 / (1 + power(10, (route_r - R) / SPREAD));
-    R := R + k_now * ((case when rec.res <> 'Project' then 1 else 0 end) - e);
+    R := public.ss_step(R, k_now, route_r, rec.res <> 'Project');
     if rec.res <> 'Project' and (hardest_pos is null or rec.pos > hardest_pos) then
       hardest_pos := rec.pos;
     end if;
@@ -1013,6 +1027,17 @@ alter table public.matches add constraint matches_status_chk check (status in ('
 create index if not exists matches_ch_idx on public.matches (challenger, status);
 create index if not exists matches_op_idx on public.matches (opponent, status);
 
+-- Ruleset (configured by the challenger at creation; agreed to on accept; never
+-- changes after). discipline null = a legacy match created before rulesets — it
+-- keeps the original auto-derived-group behavior. best_n null = open / session-
+-- length (all matching climbs count); otherwise best-of-N counts your N hardest.
+alter table public.matches add column if not exists discipline text;   -- 'boulder'|'lead'|'toprope'|'agnostic'
+alter table public.matches add column if not exists best_n integer;    -- null = open session length
+alter table public.matches drop constraint if exists matches_discipline_chk;
+alter table public.matches add constraint matches_discipline_chk check (discipline is null or discipline in ('boulder','lead','toprope','agnostic'));
+alter table public.matches drop constraint if exists matches_best_n_chk;
+alter table public.matches add constraint matches_best_n_chk check (best_n is null or (best_n between 1 and 50));
+
 alter table public.matches enable row level security;
 -- Only the two participants may read a match. Writes go only through the
 -- SECURITY DEFINER RPCs below (no write policy = default deny), so a
@@ -1072,6 +1097,113 @@ returns integer language sql stable security definer set search_path = public as
 $$;
 revoke all on function public.impl_rating(uuid, text) from public, anon, authenticated;
 
+-- ---------- Match ruleset mapping ----------
+-- The rating group (boulder/rope) a match discipline scores in.
+create or replace function public.match_group(disc text)
+returns text language sql immutable as $$
+  select case when disc = 'boulder' then 'boulder' else 'rope' end
+$$;
+-- The set of climb.discipline values that COUNT toward a match discipline.
+-- Trad is deliberately excluded from matches (it still logs as normal session
+-- data); lead = Sport, top rope = Top Rope, agnostic = either roped style.
+create or replace function public.match_disciplines(disc text)
+returns text[] language sql immutable as $$
+  select case disc
+    when 'boulder'  then array['Bouldering']
+    when 'lead'     then array['Sport']
+    when 'toprope'  then array['Top Rope']
+    when 'agnostic' then array['Sport','Top Rope']
+    else null end
+$$;
+
+-- Human-readable ruleset label for the challenge + head-to-head screens.
+create or replace function public.match_rules_label(disc text, best_n int)
+returns text language sql immutable as $$
+  select case when disc is null then 'Any climbing'
+    else (case disc when 'boulder' then 'Bouldering' when 'lead' then 'Lead'
+                    when 'toprope' then 'Top rope' when 'agnostic' then 'Routes (any)' else disc end)
+       || ' · ' || (case when best_n is null then 'open session'
+                         else 'best ' || best_n || (case when disc = 'boulder' then ' problems' else ' routes' end) end)
+  end
+$$;
+
+-- How many climbs a player has logged in the match window that COUNT toward the
+-- match (match its discipline settings) — drives the "4 of 6 logged" progress.
+create or replace function public.match_counted(mid uuid, uid uuid)
+returns integer language sql stable security definer set search_path = public as $$
+  select count(*)::int from public.climbs c, public.matches m
+  where m.id = mid and c.user_id = uid and c.created_at >= m.window_start
+    and m.discipline is not null and c.discipline = any(public.match_disciplines(m.discipline))
+    and public.grade_d(c.discipline, c.grade) is not null
+$$;
+revoke all on function public.match_counted(uuid, uuid) from public, anon, authenticated;
+
+-- Ruleset match score: replay the EXISTING Send Score Elo (shared ss_step) over
+-- only the climbs that count. Open (best_n null) = all matching climbs, exactly
+-- like a normal session filtered to the discipline. Best-of-N = your N hardest
+-- sends (projects never improve a best-of-N, so they are not selected). Baseline
+-- is the group snapshot at accept (unchanged handicap); if the player had no
+-- prior climbs in the group, seed from their first matching climb like the
+-- engine does. Returns the rounded rating delta — same units as match_score.
+create or replace function public.match_subset_score(uid uuid, grp text, discs text[], best_n int, wstart timestamptz, snapshot int)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+declare
+  base_snap int := snapshot; r numeric; s_idx int; k numeric; cur_date date := null;
+  rec record; fg text; fd text;
+begin
+  if discs is null then return 0; end if;
+  if base_snap is null then
+    -- No prior rating in this group: seed from the first matching climb (a send
+    -- if there is one, else the first climb) — the engine's own seeding rule.
+    select c.grade, c.discipline into fg, fd from public.climbs c
+      where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
+        and public.grade_d(c.discipline, c.grade) is not null and c.result <> 'Project'
+      order by c.date, c.id limit 1;
+    if fg is null then
+      select c.grade, c.discipline into fg, fd from public.climbs c
+        where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
+          and public.grade_d(c.discipline, c.grade) is not null
+        order by c.date, c.id limit 1;
+    end if;
+    if fg is null then return 0; end if;
+    base_snap := round(1000 + (case when fd = 'Bouldering' then 0 else 300 end) + 100 * public.grade_d(fd, fg));
+  end if;
+  r := base_snap;
+  -- Session index at the window start (group sessions across all disciplines in
+  -- the group), so K matches what the engine would use for these climbs.
+  select coalesce(count(distinct c.date), 0) into s_idx from public.climbs c
+    where c.user_id = uid and c.created_at < wstart
+      and (case when grp = 'boulder' then c.discipline = 'Bouldering' else c.discipline <> 'Bouldering' end)
+      and public.grade_d(c.discipline, c.grade) is not null;
+  -- Select the counting climbs, replay them in the engine's chronological order.
+  for rec in
+    select x.cdate, x.res, x.route_r from (
+      select c.date as cdate, c.id as cid, c.result as res,
+        1000 + (case when c.discipline = 'Bouldering' then 0 else 300 end)
+             + 100 * public.grade_d(c.discipline, c.grade)
+             + (case when c.result = 'Flash' then 30 else 0 end) as route_r,
+        row_number() over (order by (c.result <> 'Project') desc,
+          (1000 + (case when c.discipline='Bouldering' then 0 else 300 end) + 100*public.grade_d(c.discipline,c.grade)) desc,
+          c.date, c.id) as rnk
+      from public.climbs c
+      where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
+        and public.grade_d(c.discipline, c.grade) is not null
+    ) x
+    where best_n is null                              -- open: every matching climb counts
+       or (x.res <> 'Project' and x.rnk <= best_n)    -- best-of-N: your N hardest sends
+    order by x.cdate, x.cid
+  loop
+    if rec.cdate is distinct from cur_date then
+      if cur_date is not null then s_idx := s_idx + 1; end if;
+      cur_date := rec.cdate;
+      k := case when s_idx < 5 then 40 else 16 end;
+    end if;
+    r := public.ss_step(r, k, rec.route_r, rec.res <> 'Project');
+  end loop;
+  return round(r) - base_snap;
+end $$;
+revoke all on function public.match_subset_score(uuid, text, text[], int, timestamptz, int) from public, anon, authenticated;
+
 -- A player's handicapped match score = how far their match-window climbs moved
 -- their rating (the EXISTING engine's session delta), summed across disciplines.
 -- Baseline is the rating snapshot taken at accept; for a brand-new discipline
@@ -1082,6 +1214,15 @@ declare m record; s numeric := 0; g text; cur int; snap int; seedg numeric; fg t
 begin
   select * into m from public.matches where id = mid;
   if not found then return 0; end if;
+  -- Ruleset match: score only the counting climbs via the shared Elo core,
+  -- against the configured discipline's group snapshot (existing baseline).
+  if m.discipline is not null then
+    g := public.match_group(m.discipline);
+    snap := case when uid = m.challenger then (case g when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end)
+                 else (case g when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) end;
+    return public.match_subset_score(uid, g, public.match_disciplines(m.discipline), m.best_n, m.window_start, snap);
+  end if;
+  -- Legacy match (created before rulesets): original whole-group behavior.
   foreach g in array array['boulder','rope'] loop
     cur := public.impl_rating(uid, g);
     snap := case when uid = m.challenger then (case g when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end)
@@ -1129,17 +1270,32 @@ declare m record; chs numeric; ops numeric; g text; ra int; rb int; ea numeric; 
 begin
   select * into m from public.matches where id = mid for update;
   if not found or m.status <> 'active' then return; end if;
-  select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
-    into chb, chr from public.climbs where user_id = m.challenger and created_at >= m.window_start;
-  select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
-    into opb, opr from public.climbs where user_id = m.opponent and created_at >= m.window_start;
-  if coalesce(chb,0)+coalesce(chr,0)+coalesce(opb,0)+coalesce(opr,0) = 0 then
-    update public.matches set status = 'abandoned', resolved_at = now(), ch_score = 0, op_score = 0 where id = mid;
-    return;
+  if m.discipline is not null then
+    -- Ruleset match: only climbs matching the discipline count; the group is the
+    -- one configured at creation, not auto-derived. Abandon if neither player
+    -- logged a single counting climb (non-matching climbs still recorded, just
+    -- irrelevant to the match).
+    g := public.match_group(m.discipline);
+    chb := public.match_counted(mid, m.challenger);
+    opb := public.match_counted(mid, m.opponent);
+    if coalesce(chb,0) + coalesce(opb,0) = 0 then
+      update public.matches set status = 'abandoned', resolved_at = now(), ch_score = 0, op_score = 0, grp = g where id = mid;
+      return;
+    end if;
+  else
+    -- Legacy match: original auto-derived dominant group over all window climbs.
+    select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
+      into chb, chr from public.climbs where user_id = m.challenger and created_at >= m.window_start;
+    select count(*) filter (where discipline = 'Bouldering'), count(*) filter (where discipline <> 'Bouldering')
+      into opb, opr from public.climbs where user_id = m.opponent and created_at >= m.window_start;
+    if coalesce(chb,0)+coalesce(chr,0)+coalesce(opb,0)+coalesce(opr,0) = 0 then
+      update public.matches set status = 'abandoned', resolved_at = now(), ch_score = 0, op_score = 0 where id = mid;
+      return;
+    end if;
+    g := case when (coalesce(chb,0)+coalesce(opb,0)) >= (coalesce(chr,0)+coalesce(opr,0)) then 'boulder' else 'rope' end;
   end if;
   chs := public.match_score(mid, m.challenger);
   ops := public.match_score(mid, m.opponent);
-  g := case when (coalesce(chb,0)+coalesce(opb,0)) >= (coalesce(chr,0)+coalesce(opr,0)) then 'boulder' else 'rope' end;
   -- Match scores are integer rating deltas. Even climbing exactly at your level
   -- nudges the rating up a few points, so two equivalent sessions land a couple
   -- points apart from noise, not skill. A ≤4-point gap is a virtual tie — this
@@ -1163,12 +1319,20 @@ end $$;
 revoke all on function public.match_resolve(uuid) from public, anon, authenticated;
 
 -- ---------- Match lifecycle RPCs (participant + friendship checked) ----------
-create or replace function public.match_challenge(friend uuid)
+-- discipline: 'boulder'|'lead'|'toprope'|'agnostic'. best_n: null = open session
+-- length, else best-of-N (1..50). Defaults keep the old 1-arg call working
+-- (legacy null ruleset) for older harnesses; the app always sends a ruleset.
+drop function if exists public.match_challenge(uuid);
+create or replace function public.match_challenge(friend uuid, discipline text default null, best_n integer default null)
 returns uuid language plpgsql volatile security definer set search_path = public as $$
 declare me uuid := auth.uid(); mid uuid; a uuid := least(auth.uid(), friend); b uuid := greatest(auth.uid(), friend);
 begin
   if me is null then raise exception 'not authenticated'; end if;
   if friend = me then raise exception 'cannot challenge yourself'; end if;
+  if discipline is not null and discipline not in ('boulder','lead','toprope','agnostic') then
+    raise exception 'invalid discipline';
+  end if;
+  if best_n is not null and (best_n < 1 or best_n > 50) then raise exception 'invalid match length'; end if;
   if not exists (select 1 from public.friendships f where f.status='accepted' and f.user_a=a and f.user_b=b) then
     raise exception 'can only challenge friends';
   end if;
@@ -1176,7 +1340,8 @@ begin
       and ((m.challenger=me and m.opponent=friend) or (m.challenger=friend and m.opponent=me))) then
     raise exception 'a match with this friend is already in progress';
   end if;
-  insert into public.matches (challenger, opponent, status) values (me, friend, 'pending') returning id into mid;
+  insert into public.matches (challenger, opponent, status, discipline, best_n)
+    values (me, friend, 'pending', discipline, best_n) returning id into mid;
   return mid;
 end $$;
 
@@ -1238,22 +1403,27 @@ begin
     'id', m.id, 'status', m.status, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
     'winner', m.winner, 'group', m.grp,
+    'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
+      'style_label', public.match_rules_label(m.discipline, m.best_n)),
     'challenger', jsonb_build_object('name', public.user_display(m.challenger),
       'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
       'elo', coalesce(public.climb_display_rating(m.challenger, coalesce(m.grp,'boulder')), public.climb_display_rating(m.challenger, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0) else public.match_score(mid, m.challenger) end, 1),
+      'counted', case when m.discipline is null then null else public.match_counted(mid, m.challenger) end,
       'ended', m.ch_ended, 'delta', m.ch_delta),
     'opponent', jsonb_build_object('name', public.user_display(m.opponent),
       'baseline', coalesce(m.op_snap_boulder, m.op_snap_rope),
       'elo', coalesce(public.climb_display_rating(m.opponent, coalesce(m.grp,'boulder')), public.climb_display_rating(m.opponent, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0) else public.match_score(mid, m.opponent) end, 1),
+      'counted', case when m.discipline is null then null else public.match_counted(mid, m.opponent) end,
       'ended', m.op_ended, 'delta', m.op_delta)
   );
 end $$;
 
--- My matches: pending/active (to act on) and resolved (history).
+-- My matches: pending/active (to act on) and resolved (history), with ruleset.
+drop function if exists public.match_list();
 create or replace function public.match_list()
-returns table (id uuid, status text, i_am text, opponent uuid, opponent_name text, winner text, my_delta integer, my_score numeric, opp_score numeric, created_at timestamptz)
+returns table (id uuid, status text, i_am text, opponent uuid, opponent_name text, winner text, my_delta integer, my_score numeric, opp_score numeric, discipline text, best_n integer, rules_label text, created_at timestamptz)
 language sql stable security definer set search_path = public as $$
   select m.id, m.status,
     case when m.challenger = auth.uid() then 'challenger' else 'opponent' end,
@@ -1263,19 +1433,20 @@ language sql stable security definer set search_path = public as $$
     case when m.challenger = auth.uid() then m.ch_delta else m.op_delta end,
     case when m.challenger = auth.uid() then m.ch_score else m.op_score end,
     case when m.challenger = auth.uid() then m.op_score else m.ch_score end,
+    m.discipline, m.best_n, public.match_rules_label(m.discipline, m.best_n),
     m.created_at
   from public.matches m
   where m.challenger = auth.uid() or m.opponent = auth.uid()
   order by m.created_at desc
 $$;
 
-revoke all on function public.match_challenge(uuid)        from public, anon;
+revoke all on function public.match_challenge(uuid, text, integer) from public, anon;
 revoke all on function public.match_respond(uuid, boolean) from public, anon;
 revoke all on function public.match_cancel(uuid)           from public, anon;
 revoke all on function public.match_end(uuid)              from public, anon;
 revoke all on function public.match_state(uuid)            from public, anon;
 revoke all on function public.match_list()                 from public, anon;
-grant execute on function public.match_challenge(uuid)        to authenticated;
+grant execute on function public.match_challenge(uuid, text, integer) to authenticated;
 grant execute on function public.match_respond(uuid, boolean) to authenticated;
 grant execute on function public.match_cancel(uuid)           to authenticated;
 grant execute on function public.match_end(uuid)              to authenticated;
