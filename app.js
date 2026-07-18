@@ -1075,7 +1075,7 @@
      Send Score — a cumulative points total, computed client-side.
 
      SENDS earn points that grow EXPONENTIALLY with the route's absolute
-     difficulty (×1.5 per V-grade), so one climb near your limit outscores a
+     difficulty (×2 per V-grade — each grade ≈ double), so one climb near your limit outscores a
      whole session of easy laps, and the gap between grades widens as they
      get harder — matching the real effort jump from V7→V8 vs V1→V2.
 
@@ -1094,7 +1094,7 @@
      the SQL leaderboard replay agree on the same sequence. KEEP THE CONSTANTS
      AND grade→D MAPS IN SYNC with supabase-schema.sql (climb_send_scores_impl).
      ====================================================================== */
-  const SS_P0 = 5, SS_GROWTH = 1.5;               // send points: 5·1.5^D at D0 (V0 / 5.10c)
+  const SS_P0 = 5, SS_GROWTH = 2.0;               // send points: 5·2^D — each grade ≈ double (D0 = V0 / 5.10c)
   const SS_PEN_FLOOR = 1, SS_PEN_CEIL = 10, SS_PEN_MID = 3, SS_PEN_WIDTH = 1.4; // fail-penalty logistic
   const SS_SESSION_CAP = 24;                       // max a single session's fails can subtract
 

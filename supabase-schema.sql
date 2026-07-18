@@ -94,7 +94,7 @@ create policy "own routines" on public.routines
 -- algorithm the app runs client-side (scoreBreakdown in app.js) so your own
 -- hero number and your leaderboard number always agree. KEEP THE CONSTANTS
 -- AND grade→D MAPS IN SYNC with app.js:
---   • Send points  = max(1, round(5 · 1.5^D))   — exponential in grade D
+--   • Send points  = max(1, round(5 · 2^D))     — exponential in grade D (each grade ≈ double)
 --       (boulder: VB=-1, V0=0 … V17=17; roped: 5.10c≈D0, standard V-equiv).
 --   • Fail penalty = round( (1 + 9/(1+e^(-(Δ-3)/1.4))) , 0.1 ),  Δ = avgD−failD
 --       (harder-than-average fail → ~1 pt; the further below average, the
@@ -128,7 +128,7 @@ immutable
 set search_path = public
 as $sess$
 declare
-  P0 constant numeric := 5;   GROWTH constant numeric := 1.5;
+  P0 constant numeric := 5;   GROWTH constant numeric := 2.0;
   PEN_FLOOR constant numeric := 1; PEN_CEIL constant numeric := 10;
   PEN_MID constant numeric := 3;  PEN_WIDTH constant numeric := 1.4;
   n int := coalesce(array_length(b_pos, 1), 0);
