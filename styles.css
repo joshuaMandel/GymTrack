@@ -116,9 +116,11 @@ body.auth-gated .footer { display: none !important; }
 .gate-card form { text-align: left; }
 
 /* ---------- One-tap social sign-in ---------- */
-.social-auth { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+/* Google's branded button maxes out at 400px (their rule), so the whole
+   social column is capped there and centered — both buttons stay equal
+   width and aligned instead of the Google one floating short and left. */
+.social-auth { display: flex; flex-direction: column; gap: 10px; margin: 0 auto 4px; width: 100%; max-width: 400px; }
 .google-btn-mount { display: flex; justify-content: center; min-height: 40px; }
-.google-btn-mount > div { width: 100% !important; }
 /* Apple's guidelines: solid black button, white logo + label, full width to
    match the Google button. Kept legible in both themes (always black/white). */
 .gate-card .apple-btn {
@@ -1223,6 +1225,17 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 /* Friend's Send Score under the time-ago in feed rows — block, so it stacks
    on its own line instead of running into the timestamp ("just now1195"). */
 .feed-score { display: block; text-align: right; margin-top: 3px; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--accent-2); }
+/* Inline variant for the "@handle · 1320" sub-line on person rows */
+.feed-score.inl { display: inline; margin-top: 0; text-align: inherit; }
+/* Flex text columns must be allowed to shrink (min-width:auto blocks it) or
+   long names/handles render on top of the action buttons on narrow phones. */
+.feed .feed-left > div { min-width: 0; }
+/* Person rows: keep name + handle on one line each, ellipsized when tight */
+#friends-list .feed-main, #friends-list .feed-sub,
+#friend-requests-list .feed-main, #friend-requests-list .feed-sub,
+#friend-search-results .feed-main, #friend-search-results .feed-sub {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .pr-flag { color: var(--good); font-weight: 700; }
 .feed-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .feed-actions .btn.sm { padding: 6px 12px; font-size: 13px; min-height: 36px; }

@@ -2323,13 +2323,19 @@
   }
 
   // A person row (search result, request, or friend), with the right actions.
+  // The @handle and Send Score live on a sub-line under the name — the actions
+  // column is flex-shrink:0, so anything inline with the name gets overlapped
+  // on narrow phones (score used to render on top of the handle).
   function personRow(p, rel) {
     const name = escapeHTML(p.display_name || 'Climber');
-    const handle = p.username ? ` <span class="feed-handle">@${escapeHTML(p.username)}</span>` : '';
+    const score = rel === 'friends' ? (p.boulder != null ? p.boulder : p.rope) : null;
+    const subBits = [];
+    if (p.username) subBits.push(`<span class="feed-handle">@${escapeHTML(p.username)}</span>`);
+    if (score != null) subBits.push(`<span class="feed-score inl">${score}</span>`);
+    const sub = subBits.length ? `<div class="feed-sub">${subBits.join(' · ')}</div>` : '';
     let right = '';
     if (rel === 'friends') {
-      const score = p.boulder != null ? `<span class="feed-score">${p.boulder}</span>` : (p.rope != null ? `<span class="feed-score">${p.rope}</span>` : '');
-      right = `${score}<button class="btn primary sm" data-mchal="${p.user_id}">Challenge</button><button class="btn ghost sm" data-fact="unfriend" data-uid="${p.user_id}">Unfriend</button>`;
+      right = `<button class="btn primary sm" data-mchal="${p.user_id}">Challenge</button><button class="btn ghost sm" data-fact="unfriend" data-uid="${p.user_id}">Unfriend</button>`;
     } else if (rel === 'outgoing') {
       right = `<span class="rel-chip">Requested</span><button class="btn ghost sm" data-fact="cancel" data-uid="${p.user_id}">Cancel</button>`;
     } else if (rel === 'incoming') {
@@ -2342,7 +2348,7 @@
     return `<li>
       <div class="feed-left">
         <span class="feed-ico"><svg class="ico"><use href="#i-user"/></svg></span>
-        <div><div class="feed-main">${name}${handle}</div></div>
+        <div><div class="feed-main">${name}</div>${sub}</div>
       </div>
       <div class="feed-actions">${right}</div>
     </li>`;
@@ -3448,9 +3454,12 @@
     if (mount) {
       mount.hidden = false;
       mount.innerHTML = '';
+      // Width must be given in px (GIS caps it at 400): match the mount so the
+      // button fills the centered social column edge-to-edge on any screen.
       google.accounts.id.renderButton(mount, {
         type: 'standard', theme: 'outline', size: 'large',
-        text: 'continue_with', shape: 'pill', logo_alignment: 'left', width: 300
+        text: 'continue_with', shape: 'pill', logo_alignment: 'left',
+        width: Math.min(400, Math.max(200, mount.clientWidth || 300))
       });
     }
     googleReady = true;
