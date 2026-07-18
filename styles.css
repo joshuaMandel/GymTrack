@@ -1220,7 +1220,9 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 .username-row .btn, .feed-actions .btn { width: auto; flex: 0 0 auto; margin-top: 0; }
 #friend-search { width: 100%; margin: 6px 0 4px; }
 .feed-stale { font-size: 11px; color: var(--accent-text); background: var(--accent-tint); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
-.feed-score { display: inline-block; margin-top: 3px; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--accent-2); }
+/* Friend's Send Score under the time-ago in feed rows — block, so it stacks
+   on its own line instead of running into the timestamp ("just now1195"). */
+.feed-score { display: block; text-align: right; margin-top: 3px; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--accent-2); }
 .pr-flag { color: var(--good); font-weight: 700; }
 .feed-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .feed-actions .btn.sm { padding: 6px 12px; font-size: 13px; min-height: 36px; }

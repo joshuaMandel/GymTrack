@@ -32,6 +32,6 @@ window.SUPABASE_CONFIG = {
   anonKey: "sb_publishable_tkjgr8WxOXz41eeHApgcyQ_QrjjSfsz",
 
   // Public client IDs for one-tap social sign-in. Blank = button hidden.
-  googleClientId: "YOUR-GOOGLE-WEB-CLIENT-ID.apps.googleusercontent.com",
+  googleClientId: "86859188163-hjnff8g9tmo0358av69l0n9cb1c2bh9k.apps.googleusercontent.com",
   appleServicesId: "YOUR-APPLE-SERVICES-ID"
 };
