@@ -3524,6 +3524,15 @@
   const USERNAME_PROMPTED_KEY = 'gymtrack.username_prompted';
   function usernamePrompted(uid) { try { return localStorage.getItem(USERNAME_PROMPTED_KEY) === uid; } catch (e) { return false; } }
   function markUsernamePrompted(uid) { try { localStorage.setItem(USERNAME_PROMPTED_KEY, uid); } catch (e) { /* ignore */ } }
+  // A friendly display-name guess from the email local-part ("audrey.langum"
+  // → "Audrey Langum") when a provider gave us no name (email sign-up).
+  function suggestName() {
+    const cur = currentDisplayName();
+    if (cur) return cur;
+    const email = (session && session.user && session.user.email) || '';
+    const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+    return local.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
   function suggestUsername() {
     const src = (currentDisplayName() || (session && session.user && session.user.email) || '').toString();
     let base = src.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -3541,17 +3550,28 @@
     if (!uname) {
       try { const { data } = await sb.from('profiles').select('username').eq('id', uid).maybeSingle(); uname = data && data.username; } catch (e) { /* ignore */ }
     }
-    if (uname) { markUsernamePrompted(uid); return; }
+    if (uname) {
+      // Already has a username. Don't re-prompt for it — but a returning user
+      // who never set a display name still gets the (separate) name nudge.
+      markUsernamePrompted(uid);
+      maybePromptName();
+      return;
+    }
     openUsernameModal();
   }
   function openUsernameModal() {
     const modal = $('#username-modal'); if (!modal) return;
+    // This IS the first-run onboarding, so the separate "go to Profile to set a
+    // name" nudge must not also fire and yank the screen out from under it.
+    namePrompted = true;
+    const nameEl = $('#username-modal-name');
     const input = $('#username-modal-input');
     const status = $('#username-modal-status');
     if (status) { status.hidden = true; status.textContent = ''; }
+    if (nameEl) nameEl.value = suggestName();
     if (input) input.value = suggestUsername();
     modal.hidden = false;
-    setTimeout(() => { if (input) { input.focus(); input.select(); } }, 60);
+    setTimeout(() => { const f = nameEl && !nameEl.value ? nameEl : input; if (f) { f.focus(); f.select(); } }, 60);
   }
   function closeUsernameModal() {
     const modal = $('#username-modal'); if (modal) modal.hidden = true;
@@ -3564,20 +3584,28 @@
     if (form) form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!cloudOn()) return closeUsernameModal();
+      const nameEl = $('#username-modal-name');
       const input = $('#username-modal-input');
       const status = $('#username-modal-status');
+      const name = (nameEl && nameEl.value || '').trim();
       const handle = (input.value || '').trim().toLowerCase();
-      if (!/^[a-z0-9_]{3,20}$/.test(handle)) {
-        if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = '3–20 characters: letters, numbers, or underscore.'; }
-        return;
-      }
+      const err = (msg) => { if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = msg; } };
+      if (!/^[a-z0-9_]{3,20}$/.test(handle)) return err('Username: 3–20 characters — letters, numbers, or underscore.');
+      const save = $('#username-modal-save'); if (save) save.disabled = true;
       try {
-        const { error } = await sb.rpc('friend_set_username', { handle, dname: currentDisplayName() || null });
+        // Set the display name locally first so the header/Profile update
+        // instantly, then claim the username (its dname mirrors the name into
+        // the friends directory — one round-trip, same as the Profile save).
+        if (name) await saveSettings({ display_name: name });
+        const { error } = await sb.rpc('friend_set_username', { handle, dname: name || currentDisplayName() || null });
         if (error) throw error;
         closeUsernameModal();
+        renderAccount(); renderHome(); renderProfile();
         loadFriends();
-      } catch (err) {
-        if (status) { status.hidden = false; status.className = 'auth-status err'; status.textContent = /taken|duplicate|unique/i.test(errMsg(err)) ? 'That username is taken — try another.' : errMsg(err); }
+      } catch (e2) {
+        err(/taken|duplicate|unique|23505/i.test(errMsg(e2)) ? 'That username is taken — try another.' : ('Could not save: ' + errMsg(e2)));
+      } finally {
+        if (save) save.disabled = false;
       }
     });
   })();
@@ -3946,13 +3974,15 @@
           cleanAuthHash(); // tokens are consumed by now; drop them from the URL
           setPendingAuthEmail(null); // signed in — the outstanding code is moot
           await maybeMigrate();
-          maybePromptName();
+          // Onboarding is driven by maybePromptUsername after refresh (below):
+          // a single first-run modal for name + @username. It falls back to the
+          // Profile name nudge for users who already have a username but no name.
         }
         renderAccount();
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
           await refresh();
         }
-        if (event === 'SIGNED_IN') maybePromptUsername(); // fresh sign-in → offer @username once
+        if (event === 'SIGNED_IN') maybePromptUsername(); // fresh sign-in → one onboarding step
       });
 
       // getSession() awaits client initialization, which includes consuming
