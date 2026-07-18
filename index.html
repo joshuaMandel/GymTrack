@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-16e" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-16f" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -291,7 +291,7 @@
     <div class="modal wn-modal" role="dialog" aria-modal="true" aria-labelledby="score-title">
       <button class="modal-close" id="score-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
       <h2 id="score-title">How the Send Score works</h2>
-      <p class="muted small">One number for how you're climbing — like a chess rating. Everyone starts at 1000, and every climb you log moves it a little.</p>
+      <p class="muted small">One running number for how you're climbing. You start at zero and bank points for every climb you send — the harder the climb, the bigger the payout.</p>
 
       <h3 class="score-sub">First, the words climbers use</h3>
       <div class="wn-list">
@@ -316,24 +316,20 @@
       <h3 class="score-sub">How the number moves</h3>
       <div class="wn-list">
         <div class="wn-row">
-          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-pencil"/></svg></span>
-          <div><b>Every climb is scored against a prediction</b><span>From the gap between your score and the climb's grade, the app predicts your chance of sending. Beat the prediction and your score rises; fall short and it dips — exactly like winning or losing a chess game.</span></div>
-        </div>
-        <div class="wn-row">
           <span class="wn-ico t-navy"><svg class="ico"><use href="#i-plus"/></svg></span>
-          <div><b>Hard sends pay big, easy ones don't</b><span>Send above your level and you jump. Cruise things you're expected to send and you barely move — you can't inflate the score with easy laps.</span></div>
+          <div><b>Every send banks points</b><span>Send a climb and you add points to your total — and they stack up over time. Your score is everything you've ever sent, added together, so it only grows as you keep climbing.</span></div>
         </div>
         <div class="wn-row">
-          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-mountain"/></svg></span>
-          <div><b>Falling is nearly free</b><span>Fail a project and you lose almost nothing, because you weren't expected to send it. Trying hard climbs never wrecks your score.</span></div>
+          <span class="wn-ico t-orange"><svg class="ico"><use href="#i-trophy"/></svg></span>
+          <div><b>Harder pays exponentially more</b><span>Each grade up is worth roughly half again as much as the one below. A V0 is a handful of points; a V8 is worth more than a whole session of easy laps. One breakthrough send outweighs dozens of warm-ups — you can't grind the number up with easy climbs.</span></div>
         </div>
         <div class="wn-row">
-          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-star"/></svg></span>
-          <div><b>Style and volume count</b><span>Flashes earn a bonus; needing lots of attempts trims the reward slightly. More climbs in a day means more chances to move — but each send surprises the score a little less as it rises.</span></div>
+          <span class="wn-ico t-navy"><svg class="ico"><use href="#i-mountain"/></svg></span>
+          <div><b>Trying hard is nearly free</b><span>Projecting something above your average costs 1–2 points at most — trying hard climbs is never punished. Only failing climbs well below your usual level trims a bit, and the total can never drop below zero.</span></div>
         </div>
         <div class="wn-row">
           <span class="wn-ico t-orange"><svg class="ico"><use href="#i-flame"/></svg></span>
-          <div><b>Finding your level</b><span>Your first 5 sessions are marked "Provisional" and swing harder while the score finds where you belong. The ▲/▼ beside a score is the change from that climber's latest session.</span></div>
+          <div><b>One rough day barely dents it</b><span>A session's fails are capped, so a bad day can't wipe out weeks of progress. The ▲/▼ beside a score is how many points that climber's latest session added or took away.</span></div>
         </div>
       </div>
     </div>
@@ -505,7 +501,7 @@
               </label>
             </div>
           </div>
-          <p class="muted small">Ranked by Send Score — everyone starts at 1000, and every session moves it.</p>
+          <p class="muted small">Ranked by Send Score — points banked for every climb sent, growing steeply with grade.</p>
           <ul class="feed" id="leaderboard-list"></ul>
         </div>
       </div>
@@ -608,7 +604,7 @@
             </label>
           </div>
         </div>
-        <p class="muted small">Ranked by Send Score — everyone starts at 1000, and every session moves it.</p>
+        <p class="muted small">Ranked by Send Score — points banked for every climb sent, growing steeply with grade.</p>
         <ul class="feed" id="leaderboard-list-climb"></ul>
       </div>
 
@@ -757,6 +753,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=2026-07-16e"></script>
+  <script src="app.js?v=2026-07-16f"></script>
 </body>
 </html>
