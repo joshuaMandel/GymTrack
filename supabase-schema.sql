@@ -90,21 +90,21 @@ create policy "own routines" on public.routines
 -- climb_user_history below) each climber's dates, grades, results, and
 -- attempts. Locations, notes, and hold colors are NEVER shared.
 --
--- It replays every climber's history with the SAME cumulative-points
--- algorithm the app runs client-side (scoreBreakdown in app.js) so your own
--- hero number and your leaderboard number always agree. KEEP THE CONSTANTS
--- AND grade→D MAPS IN SYNC with app.js:
---   • Send points  = max(1, round(5 · 2^D))     — exponential in grade D (each grade ≈ double)
---       (boulder: VB=-1, V0=0 … V17=17; roped: 5.10c≈D0, standard V-equiv).
---   • Fail penalty = round( (1 + 9/(1+e^(-(Δ-3)/1.4))) , 0.1 ),  Δ = avgD−failD
---       (harder-than-average fail → ~1 pt; the further below average, the
---        more it costs; strictly monotonic and bounded).
---   • Per session: total = max(0, total + Σsend − min(Σpenalty, 24)).
---       Penalty waived if the same climb (grade+color) was sent that
---       session; each distinct failed climb penalised once; avg send D is
---       taken as of the session start; total floored at 0 (never negative);
---       a single session's fails subtract at most 24, so one rough day can't
---       erase weeks. Ties within a date replay in id order on both sides.
+-- It replays every climber's history with the SAME converging Elo rating the
+-- app runs client-side (scoreBreakdown in app.js) so your own hero number and
+-- your leaderboard number always agree. KEEP THE CONSTANTS AND grade→D MAPS
+-- IN SYNC with app.js (SS_BASE, SS_STEP, SS_SPREAD, SS_K_*, SS_FLASH_EDGE):
+--   • routeRating = 1000 + 100·D   (boulder VB=-1 … V17=17; roped 5.10c≈D0).
+--   • Each climb updates the rating like a chess match against the route:
+--       E = 1 / (1 + 10^((routeR − R)/200));   R += K·(didSend − E)
+--     so the rating CONVERGES to the climber's level and volume can't inflate
+--     it (easy sends have E≈1, barely moving R). Failing a route ABOVE your
+--     level barely moves R (E small); failing AT your level costs about what a
+--     send there earns; failing BELOW costs more. A flash adds +30 to routeR.
+--   • R is seeded at the climber's first send grade (else first climb) so a
+--     new climber starts near their level. K = 40 for the first 5 sessions
+--     (provisional, fast convergence) then 16 (stable). Ties within a date
+--     replay in id order on both sides.
 
 -- 'Onsight' was retired from the UI (July 2026): existing rows become
 -- flashes. Idempotent — after the first apply this matches zero rows.
@@ -112,61 +112,7 @@ update public.climbs set result = 'Flash' where result = 'Onsight';
 drop function if exists public.climb_leaderboard(integer, text); -- replaced by Send Score standings
 drop function if exists public.climb_send_scores(text);
 drop function if exists public.climb_send_scores_impl(text);
-drop function if exists public.climb_ss_session(int[], numeric[], text[], text[], text[], numeric);
-
--- Pure per-session scorer: given one session's climbs (as parallel arrays)
--- and the climber's average send D as of the session start (null if no
--- sends yet), returns the session's send points, raw fail penalty (uncapped),
--- and the sends' count / difficulty-sum / hardest position. Constants here
--- MUST match app.js (SS_P0, SS_GROWTH, SS_PEN_*).
-create function public.climb_ss_session(
-  b_pos int[], b_d numeric[], b_grade text[], b_color text[], b_result text[], avg_d numeric,
-  out send_pts numeric, out raw_pen numeric, out sends_n int, out sends_dsum numeric, out sess_hardest int
-)
-language plpgsql
-immutable
-set search_path = public
-as $sess$
-declare
-  P0 constant numeric := 5;   GROWTH constant numeric := 2.0;
-  PEN_FLOOR constant numeric := 1; PEN_CEIL constant numeric := 10;
-  PEN_MID constant numeric := 3;  PEN_WIDTH constant numeric := 1.4;
-  n int := coalesce(array_length(b_pos, 1), 0);
-  i int; k text; a numeric; delta numeric; d numeric;
-  sent_keys text[] := '{}';
-  seen_fail text[] := '{}';
-begin
-  send_pts := 0; raw_pen := 0; sends_n := 0; sends_dsum := 0; sess_hardest := null;
-  -- pre-scan: which climbs (grade+color) were SENT this session
-  for i in 1..n loop
-    if b_result[i] <> 'Project' then
-      sent_keys := sent_keys || (b_grade[i] || '|' || b_color[i]);
-    end if;
-  end loop;
-  for i in 1..n loop
-    d := b_d[i];
-    if b_result[i] <> 'Project' then
-      send_pts := send_pts + greatest(1, round(P0 * power(GROWTH, d)));
-      sends_n := sends_n + 1;
-      sends_dsum := sends_dsum + d;
-      if sess_hardest is null or b_pos[i] > sess_hardest then sess_hardest := b_pos[i]; end if;
-    else
-      k := b_grade[i] || '|' || b_color[i];
-      -- waive if the same climb was sent this session; penalise each distinct
-      -- failed climb once (repeat attempts don't stack)
-      if (k = any(sent_keys)) or (k = any(seen_fail)) then
-        continue;
-      end if;
-      seen_fail := seen_fail || k;
-      a := coalesce(avg_d, d); -- no history yet → treat as at-average (minimal cost)
-      delta := a - d;
-      raw_pen := raw_pen + round((PEN_FLOOR + (PEN_CEIL - PEN_FLOOR) / (1 + exp(-(delta - PEN_MID) / PEN_WIDTH))) * 10) / 10.0;
-    end if;
-  end loop;
-end
-$sess$;
-
-revoke all on function public.climb_ss_session(int[], numeric[], text[], text[], text[], numeric) from public, anon, authenticated;
+drop function if exists public.climb_ss_session(int[], numeric[], text[], text[], text[], numeric); -- retired points model
 
 -- The replay itself: emits every user in history order (RETURN NEXT can't
 -- sort). Internal only — the public wrapper below orders and limits it.
@@ -177,6 +123,7 @@ returns table (
   is_me boolean,
   score integer,
   sessions integer,
+  provisional boolean,
   last_delta integer,
   hardest text
 )
@@ -188,27 +135,23 @@ as $fn$
 declare
   scale text[];
   dvals numeric[];
-  SESSION_CAP constant numeric := 24;
+  BASE constant numeric := 1000; STEP constant numeric := 100; SPREAD constant numeric := 200;
+  K_PROV constant numeric := 40; K_EST constant numeric := 16; PROV_SESSIONS constant int := 5;
+  FLASH_EDGE constant numeric := 30;
   rec record;
   cur_uid uuid := null;
   cur_date date := null;
   -- running per-user state
-  total numeric := 0;
-  send_count int := 0;
-  send_dsum numeric := 0;
+  R numeric := 0;
+  s_idx int := 0;                 -- session index (drives K and provisional)
   n_sessions int := 0;
+  sess_start_rounded numeric := 0;
   last_sess_delta numeric := 0;
   hardest_pos int := null;
-  -- current session buffer (parallel arrays)
-  b_grade text[] := '{}';
-  b_color text[] := '{}';
-  b_result text[] := '{}';
-  b_pos int[] := '{}';
-  b_d numeric[] := '{}';
-  -- flush scratch
-  avg_d numeric;
-  before numeric;
-  s record;
+  k_now numeric := K_PROV;
+  seed_grade text;
+  route_r numeric;
+  e numeric;
 begin
   if grp = 'boulder' then
     scale := array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17'];
@@ -221,71 +164,80 @@ begin
   for rec in
     select c.user_id as uid, c.date as cdate,
            array_position(scale, c.grade) as pos,
-           c.grade as grade, coalesce(c.color, '') as color, c.result as res
+           c.result as res
     from public.climbs c
     where (case when grp = 'boulder' then c.discipline = 'Bouldering'
                 else c.discipline <> 'Bouldering' end)
       and array_position(scale, c.grade) is not null
     order by c.user_id, c.date, c.id -- id breaks same-day ties, matching the app
   loop
-    if cur_uid is null then
-      cur_uid := rec.uid; cur_date := rec.cdate;
-    elsif (rec.uid is distinct from cur_uid) or (rec.cdate is distinct from cur_date) then
-      -- flush the buffered session under the current running state
-      avg_d := case when send_count > 0 then send_dsum / send_count else null end;
-      select * into s from public.climb_ss_session(b_pos, b_d, b_grade, b_color, b_result, avg_d);
-      before := total;
-      total := greatest(0, total + s.send_pts - least(s.raw_pen, SESSION_CAP));
-      last_sess_delta := total - before;
-      n_sessions := n_sessions + 1;
-      send_count := send_count + s.sends_n;
-      send_dsum := send_dsum + s.sends_dsum;
-      if s.sess_hardest is not null and (hardest_pos is null or s.sess_hardest > hardest_pos) then
-        hardest_pos := s.sess_hardest;
-      end if;
-      if rec.uid is distinct from cur_uid then
-        -- emit the user whose history just finished, then reset per-user state
+    -- ----- user boundary: close previous user's last session, emit, reset -----
+    if rec.uid is distinct from cur_uid then
+      if cur_uid is not null then
+        n_sessions := n_sessions + 1;
+        last_sess_delta := round(R) - sess_start_rounded;
         user_id := cur_uid;
         select coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Anonymous climber')
           into display_name from auth.users u where u.id = cur_uid;
         is_me := cur_uid = auth.uid();
-        score := round(total);
+        score := round(R);
         sessions := n_sessions;
+        provisional := n_sessions < PROV_SESSIONS;
         last_delta := round(last_sess_delta);
         hardest := case when hardest_pos is null then null else scale[hardest_pos] end;
         return next;
-        total := 0; send_count := 0; send_dsum := 0; n_sessions := 0;
-        last_sess_delta := 0; hardest_pos := null;
-        cur_uid := rec.uid;
+      end if;
+      cur_uid := rec.uid;
+      -- seed R at the first SEND's grade (else the first climb's) in this group
+      select c2.grade into seed_grade from public.climbs c2
+        where c2.user_id = cur_uid
+          and (case when grp = 'boulder' then c2.discipline = 'Bouldering' else c2.discipline <> 'Bouldering' end)
+          and array_position(scale, c2.grade) is not null and c2.result <> 'Project'
+        order by c2.date, c2.id limit 1;
+      if seed_grade is null then
+        select c2.grade into seed_grade from public.climbs c2
+          where c2.user_id = cur_uid
+            and (case when grp = 'boulder' then c2.discipline = 'Bouldering' else c2.discipline <> 'Bouldering' end)
+            and array_position(scale, c2.grade) is not null
+          order by c2.date, c2.id limit 1;
+      end if;
+      R := BASE + STEP * dvals[array_position(scale, seed_grade)];
+      s_idx := 0; n_sessions := 0; hardest_pos := null; last_sess_delta := 0;
+      cur_date := null;
+    end if;
+
+    -- ----- session boundary: close the prior session, start a new one -----
+    if rec.cdate is distinct from cur_date then
+      if cur_date is not null then
+        n_sessions := n_sessions + 1;
+        last_sess_delta := round(R) - sess_start_rounded;
+        s_idx := s_idx + 1;
       end if;
       cur_date := rec.cdate;
-      b_grade := '{}'; b_color := '{}'; b_result := '{}'; b_pos := '{}'; b_d := '{}';
+      sess_start_rounded := round(R);
+      k_now := case when s_idx < PROV_SESSIONS then K_PROV else K_EST end;
     end if;
 
-    b_grade := b_grade || rec.grade;
-    b_color := b_color || rec.color;
-    b_result := b_result || rec.res;
-    b_pos := b_pos || rec.pos;
-    b_d := b_d || dvals[rec.pos];
+    -- ----- the climb: one Elo update (flash adds FLASH_EDGE to routeR) -----
+    route_r := BASE + STEP * dvals[rec.pos] + (case when rec.res = 'Flash' then FLASH_EDGE else 0 end);
+    e := 1 / (1 + power(10, (route_r - R) / SPREAD));
+    R := R + k_now * ((case when rec.res <> 'Project' then 1 else 0 end) - e);
+    if rec.res <> 'Project' and (hardest_pos is null or rec.pos > hardest_pos) then
+      hardest_pos := rec.pos;
+    end if;
   end loop;
 
-  -- flush + emit the final buffered session / user
+  -- ----- close + emit the final user's last session -----
   if cur_uid is not null then
-    avg_d := case when send_count > 0 then send_dsum / send_count else null end;
-    select * into s from public.climb_ss_session(b_pos, b_d, b_grade, b_color, b_result, avg_d);
-    before := total;
-    total := greatest(0, total + s.send_pts - least(s.raw_pen, SESSION_CAP));
-    last_sess_delta := total - before;
     n_sessions := n_sessions + 1;
-    if s.sess_hardest is not null and (hardest_pos is null or s.sess_hardest > hardest_pos) then
-      hardest_pos := s.sess_hardest;
-    end if;
+    last_sess_delta := round(R) - sess_start_rounded;
     user_id := cur_uid;
     select coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''), 'Anonymous climber')
       into display_name from auth.users u where u.id = cur_uid;
     is_me := cur_uid = auth.uid();
-    score := round(total);
+    score := round(R);
     sessions := n_sessions;
+    provisional := n_sessions < PROV_SESSIONS;
     last_delta := round(last_sess_delta);
     hardest := case when hardest_pos is null then null else scale[hardest_pos] end;
     return next;
@@ -304,6 +256,7 @@ returns table (
   is_me boolean,
   score integer,
   sessions integer,
+  provisional boolean,
   last_delta integer,
   hardest text
 )

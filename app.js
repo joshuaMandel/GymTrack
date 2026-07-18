@@ -1072,56 +1072,48 @@
   }
 
   /* ======================================================================
-     Send Score — a cumulative points total, computed client-side.
+     Send Score — a converging chess-style Elo rating, computed client-side.
 
-     SENDS earn points that grow EXPONENTIALLY with the route's absolute
-     difficulty (×2 per V-grade — each grade ≈ double), so one climb near your limit outscores a
-     whole session of easy laps, and the gap between grades widens as they
-     get harder — matching the real effort jump from V7→V8 vs V1→V2.
+     Your rating is a number on a chess-like scale: a beginner on V0s sits
+     near 1000, and each V-grade is +100. Every climb is a "match" against
+     the route's difficulty rating:
+         E = expected send chance = 1 / (1 + 10^((routeR − R)/SS_SPREAD))
+         R += K · (didSend − E)
+     The rating CONVERGES to your current sending level and does NOT inflate
+     with volume — sending easy laps (E≈1) barely moves you, so you can't farm
+     it. The expected-outcome math also gives the fail behaviour for free:
+       • fail a route ABOVE your level → E small → tiny drop (trying hard ≈ free)
+       • fail a route AT your level    → E≈0.5  → drop ≈ the gain a send earns
+       • fail a route BELOW your level → E→1    → bigger drop (you were expected to)
+     K is large while provisional (first SS_PROV_SESSIONS sessions) so a new
+     climber converges fast, then small so an established rating is stable. A
+     flash counts as sending a slightly harder route.
 
-     PROJECTS (fails) cost a small penalty that depends on how far BELOW your
-     AVERAGE send the failed grade is:
-       • harder than your average  → ~1–2 pts (trying hard is never punished)
-       • at/below your average     → grows smoothly the further below you go,
-                                      capped so a fluke fall costs little.
-     The penalty is strictly monotonic (an easier fail always costs more than
-     a harder one) and bounded; a whole rough session subtracts at most
-     SS_SESSION_CAP, so one bad day can never erase weeks of progress, and
-     the total is floored at 0 (never negative).
-
-     Two independent totals — Bouldering (V) and Roped (YDS) — since the
+     Two independent ratings — Bouldering (V) and Roped (YDS) — since the
      scales differ. Ties within a date replay in id order so every device and
      the SQL leaderboard replay agree on the same sequence. KEEP THE CONSTANTS
      AND grade→D MAPS IN SYNC with supabase-schema.sql (climb_send_scores_impl).
      ====================================================================== */
-  const SS_P0 = 5, SS_GROWTH = 2.0;               // send points: 5·2^D — each grade ≈ double (D0 = V0 / 5.10c)
-  const SS_PEN_FLOOR = 1, SS_PEN_CEIL = 10, SS_PEN_MID = 3, SS_PEN_WIDTH = 1.4; // fail-penalty logistic
-  const SS_SESSION_CAP = 24;                       // max a single session's fails can subtract
+  const SS_BASE = 1000, SS_STEP = 100, SS_SPREAD = 200;   // scale: rating = 1000 + 100·D
+  const SS_K_PROV = 40, SS_K_EST = 16, SS_PROV_SESSIONS = 5; // sensitivity: fast then stable
+  const SS_FLASH_EDGE = 30;                                // a flash ≈ sending +0.3 grade
 
   const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
 
   // Grade → difficulty index D (V-scale units; 5.10c ≈ V0 ≈ D0). Roped uses a
   // standard boulder-equivalent conversion so a V5 boulder and a ~5.12d route
-  // are worth similar points.
+  // land at a similar rating.
   const V_D = {}; V_GRADES.forEach((g, i) => { V_D[g] = i - 1; }); // VB=-1, V0=0 … V17=17
   const YDS_D_LIST = [-4, -3.5, -3, -2.5, -2, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.7, 4.3, 5, 6, 6.7, 7.3, 8, 9, 9.7, 10.3, 11, 12, 13, 14, 15];
   const YDS_D = {}; YDS_GRADES.forEach((g, i) => { YDS_D[g] = YDS_D_LIST[i]; });
   const gradeD = (discipline, grade) => (discipline === 'Bouldering' ? V_D[grade] : YDS_D[grade]);
 
-  const sendPoints = (discipline, grade) => {
-    const d = gradeD(discipline, grade);
-    return d === undefined ? 0 : Math.max(1, Math.round(SS_P0 * Math.pow(SS_GROWTH, d)));
-  };
-  // Penalty as a function of (your average send D − the failed grade's D).
-  const failPenalty = (avgD, failD) => {
-    const delta = avgD - failD;
-    const p = SS_PEN_FLOOR + (SS_PEN_CEIL - SS_PEN_FLOOR) / (1 + Math.exp(-(delta - SS_PEN_MID) / SS_PEN_WIDTH));
-    return Math.round(p * 10) / 10;
-  };
-  const climbKey = (c) => `${c.grade}|${c.color || ''}`; // identifies "the same climb" in a session
+  const routeRating = (discipline, grade) => SS_BASE + SS_STEP * gradeD(discipline, grade);
+  const sendExpected = (R, routeR) => 1 / (1 + Math.pow(10, (routeR - R) / SS_SPREAD));
 
   // THE scoring replay over an explicit climb list, grouped into sessions
-  // (dates). Returns per-session detail with each climb's exact ± points.
+  // (dates). Returns the converged rating plus per-session detail with each
+  // climb's exact ± rating move.
   function scoreBreakdown(allClimbs, group) {
     const climbs = allClimbs
       .filter((c) => ratingGroup(c.discipline) === group && gradeD(c.discipline, c.grade) !== undefined)
@@ -1129,51 +1121,45 @@
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1
         : String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
 
-    let total = 0, sendCount = 0, sendDSum = 0;
+    if (!climbs.length) return { group, sessions: [], rating: null, provisional: true, hasData: false };
+
+    // Seed at the first SEND's grade (else the first climb's) so a climber
+    // starts near their level, not a long warm-up from a fixed number.
+    const firstSend = climbs.find((c) => isSend(c.result)) || climbs[0];
+    let R = routeRating(firstSend.discipline, firstSend.grade);
+
     const sessions = [];
-    let i = 0;
+    let sIdx = 0, i = 0, hardestRank = -1, hardestDisc = null;
     while (i < climbs.length) {
       const date = climbs[i].date;
       const sesh = [];
       while (i < climbs.length && climbs[i].date === date) { sesh.push(climbs[i]); i++; }
-
-      const avgD = sendCount ? sendDSum / sendCount : null; // average send as of the session start
-      const sentKeys = new Set(sesh.filter((c) => isSend(c.result)).map(climbKey));
-      const before = total;
+      const K = sIdx < SS_PROV_SESSIONS ? SS_K_PROV : SS_K_EST;
+      const startRounded = Math.round(R);
       const detail = [];
-      const seenFail = new Set();
-      let sendPts = 0, rawPen = 0, sends = 0, hardestRank = -1, hardestDisc = null;
+      let sends = 0;
       for (const c of sesh) {
-        const d = gradeD(c.discipline, c.grade);
-        if (isSend(c.result)) {
-          const pts = sendPoints(c.discipline, c.grade);
-          sendPts += pts; sends++;
-          sendCount++; sendDSum += d;
+        const sent = isSend(c.result);
+        const routeR = routeRating(c.discipline, c.grade) + (c.result === 'Flash' ? SS_FLASH_EDGE : 0);
+        // Per-climb Δ is the change in the ROUNDED running rating, so per-climb
+        // moves always sum exactly to the session's shown change (telescoping).
+        const prevRounded = Math.round(R);
+        R += K * ((sent ? 1 : 0) - sendExpected(R, routeR));
+        if (sent) {
+          sends++;
           const rk = gradeRank(c.discipline, c.grade);
           if (rk > hardestRank) { hardestRank = rk; hardestDisc = c.discipline; }
-          detail.push({ id: c.id, group, _send: true, raw: pts, climb: c });
-        } else {
-          // Fail: waived if the same climb was sent this session; each distinct
-          // failed climb is penalised once (extra attempts don't stack).
-          const k = climbKey(c);
-          if (sentKeys.has(k) || seenFail.has(k)) { detail.push({ id: c.id, group, raw: 0, climb: c }); continue; }
-          seenFail.add(k);
-          const pen = failPenalty(avgD === null ? d : avgD, d); // no history yet → treat as at-average
-          rawPen += pen;
-          detail.push({ id: c.id, group, raw: -pen, climb: c });
         }
+        detail.push({ id: c.id, group, delta: Math.round(R) - prevRounded, climb: c });
       }
-      // Cap the session's total penalty; scale each fail's shown cost to match.
-      const penScale = rawPen > SS_SESSION_CAP ? SS_SESSION_CAP / rawPen : 1;
-      detail.forEach((x) => { x.delta = x._send ? x.raw : Math.round(x.raw * penScale * 10) / 10; delete x.raw; delete x._send; });
-      total = Math.max(0, total + sendPts - Math.min(rawPen, SS_SESSION_CAP)); // never negative
+      sIdx++;
       sessions.push({
-        date, delta: Math.round(total - before), end: Math.round(total),
+        date, delta: Math.round(R) - startRounded, end: Math.round(R),
         count: detail.length, sends, climbs: detail,
         hardest: hardestRank >= 0 ? (hardestDisc === 'Bouldering' ? V_GRADES[hardestRank] : YDS_GRADES[hardestRank]) : null
       });
     }
-    return { group, sessions, rating: Math.round(total), hasData: sessions.length > 0 };
+    return { group, sessions, rating: Math.round(R), provisional: sIdx < SS_PROV_SESSIONS, hasData: true };
   }
 
   // The headline view of the replay (hero, cards, charts).
@@ -1183,6 +1169,7 @@
     return {
       group,
       rating: b.rating,
+      provisional: b.provisional,
       sessions: b.sessions.length,
       hasData: b.hasData,
       history: b.sessions.map((x) => ({ date: x.date, value: x.end })),
@@ -1204,9 +1191,9 @@
       if (!r.hasData) return '';
       const d = r.lastSessionDelta;
       const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
-      const sub = `${g.scale} · ${r.sessions} session${r.sessions === 1 ? '' : 's'}`;
+      const sub = `${g.scale} · ${r.sessions} session${r.sessions === 1 ? '' : 's'}${r.provisional ? ' · provisional' : ''}`;
       return `
-        <div class="rating-card ${g.key}" title="Your Send Score — points for every send, growing steeply with grade; a rough day barely dents it.">
+        <div class="rating-card ${g.key}" title="Your Send Score — a climbing rating like a chess Elo. It rises when you send above your level and settles at your current level; trying hard projects barely moves it.">
           <span class="rating-label">${g.label} Send Score</span>
           <span class="rating-value">${r.rating}${delta}</span>
           <span class="rating-sub">${sub}</span>
@@ -1232,7 +1219,10 @@
     const r = climberRating(group);
     if (!r.hasData) return null;
     const cut = daysAgoISO(days);
-    let baseline = 0; // the score accumulates from zero
+    // Baseline = rating as of the most recent session before the cutoff; if
+    // every session is more recent (a new climber), fall back to where the
+    // rating first landed rather than zero.
+    let baseline = r.history.length ? r.history[0].value : r.rating;
     for (const p of r.history) { if (p.date < cut) baseline = p.value; else break; }
     return { now: r.rating, change: Math.round(r.rating - baseline) };
   }
@@ -1267,9 +1257,9 @@
       // Inviting empty state — no ghost ring or "—" that reads as broken.
       hero.classList.add('is-empty');
       $('#rh-label').textContent = 'Send Score';
-      $('#rh-value').textContent = '0';
+      $('#rh-value').textContent = SS_BASE;
       de.textContent = ''; de.className = 'rating-delta';
-      $('#rh-sub').textContent = 'Send your first climb to start banking points.';
+      $('#rh-sub').textContent = 'Log a climb to set your rating.';
       $('#rh-session').textContent = '';
       return;
     }
@@ -1278,7 +1268,7 @@
     const d = r.lastSessionDelta;
     de.className = 'rating-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
     de.textContent = d ? `${d > 0 ? '▲' : '▼'} ${Math.abs(d)}` : '';
-    const parts = [`${g.scale} · ${r.sessions} session${r.sessions === 1 ? '' : 's'}`];
+    const parts = [`${g.scale} · ${r.sessions} session${r.sessions === 1 ? '' : 's'}${r.provisional ? ' · provisional' : ''}`];
     if (ro.hasData) parts.push(`${other.label} ${ro.rating}`);
     $('#rh-sub').textContent = parts.join(' · ');
     const ls = r.lastSession;
@@ -2075,7 +2065,7 @@
     rcEl.classList.remove('up', 'down');
     if (rc) {
       rcEl.textContent = `${rc.change >= 0 ? '+' : ''}${rc.change}`;
-      rcEl.classList.add(rc.change > 0 ? 'up' : rc.change < 0 ? 'down' : '');
+      if (rc.change !== 0) rcEl.classList.add(rc.change > 0 ? 'up' : 'down');
       const label = RATING_GROUPS.find((x) => x.key === pg).label;
       rcSub.textContent = `${label} · now ${rc.now}`;
     } else {
@@ -2178,7 +2168,8 @@
             const delta = d ? `<span class="rating-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>` : '';
             const sub = [
               `${r.sessions} session${r.sessions === 1 ? '' : 's'}`,
-              r.hardest ? `hardest ${escapeHTML(r.hardest)}` : ''
+              r.hardest ? `hardest ${escapeHTML(r.hardest)}` : '',
+              r.provisional ? 'provisional' : ''
             ].filter(Boolean).join(' · ');
             return `
             <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
