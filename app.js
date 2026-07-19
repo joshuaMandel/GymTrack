@@ -1750,6 +1750,13 @@
       // my own climb won't come back over realtime — refresh the live match views
       if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
       if (h2hMid) refreshH2H();
+      // A live match? Fire the stick-figure moment — AFTER the save, never in its
+      // path. It plays top-of-screen and takes no taps below it, so the next
+      // climb can be logged immediately. Matches only; plain sessions stay quiet.
+      if (matches.active) playMatchAnim({
+        type: result === 'Project' ? 'fail' : 'send',
+        grade, discipline, magnitude: maMagnitude(discipline, grade)
+      });
     });
   }
 
@@ -1766,6 +1773,155 @@
     populateEditGradeSelect();
     if (qsState.grade) editClimbForm.elements.grade.value = qsState.grade;
   });
+
+  /* ======================================================================
+     Match animations — a stick-figure "moment" (send / fail / receive) that
+     plays ONLY during a live match, AFTER the climb is saved. SVG + CSS only;
+     it never blocks logging (top-of-screen card, taps pass to the sheet below),
+     is skippable (tap the card), collapses an offline backlog into a summary,
+     and honors reduced-motion. Layer on top — it touches no scoring or the
+     fast-log path. Markup/timings pair with the ".ma-*" rules in styles.css.
+     ====================================================================== */
+  let maTimers = [];
+  const maClear = () => { maTimers.forEach(clearTimeout); maTimers = []; };
+  function maReduced() {
+    if (typeof window.__REDUCED !== 'undefined') return !!window.__REDUCED; // test hook
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+  }
+  const maGroup = (disc) => (disc === 'Bouldering' ? 'boulder' : 'rope');
+  const maDiscOf = (grade) => (/^v/i.test(grade || '') ? 'Bouldering' : 'Sport');
+  // How hard was it, relative to YOUR level → 1..3 (existing data, no new scoring).
+  function maMagnitude(disc, grade) {
+    try {
+      const base = SS_BASE + (disc === 'Bouldering' ? 0 : SS_ROPE_OFFSET);
+      const R = (climberRating(maGroup(disc)) || {}).rating || base;
+      const delta = routeRating(disc, grade) - R;
+      return delta >= 60 ? 3 : delta >= -40 ? 2 : 1;
+    } catch (e) { return 2; }
+  }
+  // Bright, celebratory — deliberately NOT the wall-hold colors (orange/navy),
+  // so the confetti pops against them instead of reading as holds falling off.
+  const MA_CONFETTI = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
+  // Distinct stick-figure poses (swapped over the body timeline so each beat
+  // reads): reaching-climb, arms-up top-out, airborne flail, dazed splat.
+  const MA_POSES = {
+    climb: '<g class="pose pose-climb"><circle class="hd" cx="23" cy="12" r="5"/><path class="ln" d="M23 17 L22 34"/><path class="ln" d="M23 20 L14 8"/><path class="ln" d="M23 22 L31 18"/><path class="ln" d="M22 34 L14 43"/><path class="ln" d="M22 34 L28 49"/></g>',
+    top: '<g class="pose pose-top"><circle class="hd" cx="23" cy="11" r="5"/><path class="ln" d="M23 16 L23 35"/><path class="ln" d="M23 19 L13 7"/><path class="ln" d="M23 19 L33 7"/><path class="ln" d="M23 35 L18 50"/><path class="ln" d="M23 35 L28 50"/></g>',
+    fall: '<g class="pose pose-fall"><circle class="hd" cx="23" cy="15" r="5"/><path class="ln" d="M23 20 L23 34"/><path class="ln" d="M23 23 L11 17"/><path class="ln" d="M23 23 L35 17"/><path class="ln" d="M23 34 L12 45"/><path class="ln" d="M23 34 L34 45"/></g>',
+    splat: '<g class="pose pose-splat"><circle class="hd" cx="13" cy="42" r="5"/><path class="ln" d="M18 43 L35 46"/><path class="ln" d="M23 44 L18 35"/><path class="ln" d="M28 45 L32 37"/><path class="ln" d="M35 46 L42 41"/><path class="ln" d="M35 46 L41 51"/></g>'
+  };
+  function maFigure(disc, kind) {
+    const rope = maGroup(disc) === 'rope' ? ' rope' : '';
+    const poses = kind === 'send' ? MA_POSES.climb + MA_POSES.top
+      : kind === 'fail' ? MA_POSES.climb + MA_POSES.fall + MA_POSES.splat
+        : kind === 'recv-fail' ? MA_POSES.splat : MA_POSES.top;
+    return `<div class="ma-figure${rope}"><svg class="ma-climber" viewBox="0 0 46 58" aria-hidden="true">${poses}</svg></div>`;
+  }
+  function maHolds() {
+    const pos = [[18, 24, ''], [70, 34, 'b'], [30, 62, 'b'], [86, 72, ''], [50, 98, ''], [16, 90, 'b'], [90, 104, '']];
+    return pos.map((p) => `<span class="ma-hold ${p[2]}" style="left:${p[0]}px;top:${p[1]}px"></span>`).join('');
+  }
+  // The one entry point. opts: { type:'send'|'fail'|'receive', grade, discipline,
+  // magnitude, variant:'send'|'fail' (receive), summary, count, from }.
+  function playMatchAnim(opts) {
+    const host = $('#match-anim'); if (!host) return;
+    maClear();
+    const reduced = maReduced();
+    const recv = opts.type === 'receive';
+    const fail = opts.type === 'fail' || (recv && opts.variant === 'fail');
+    const disc = opts.discipline || (recv ? maDiscOf(opts.grade) : 'Bouldering');
+    const mag = opts.magnitude || 2;
+    const gradeHTML = opts.grade ? ` <span class="ma-grade">${escapeHTML(opts.grade)}</span>` : '';
+
+    let title, tail = '';
+    if (opts.summary) { title = `${opts.count} sends`; tail = opts.grade ? `hardest${gradeHTML}` : ''; }
+    else if (recv) { title = fail ? 'came off' : 'sent'; tail = gradeHTML; }
+    else if (fail) { title = 'Whipped!'; tail = gradeHTML; }
+    else { title = mag >= 3 ? 'Big send!' : 'Sent!'; tail = gradeHTML; }
+
+    let cls = 'ma-card ' + (fail ? 'ma-fail' : 'ma-send');
+    if (recv) cls += ' ma-receive ' + (fail ? 'recv-fail' : 'recv-send');
+    else cls += ` ma-mag-${mag}`;
+
+    let stageHTML;
+    if (reduced || opts.summary) {
+      cls += ' ma-reduced';
+      const mark = opts.summary ? '➔' : (fail ? '✕' : '✓');
+      stageHTML = `<div class="ma-stage"><span class="ma-mark">${mark}</span></div>`;
+    } else {
+      const kind = recv ? ('recv-' + (fail ? 'fail' : 'send')) : (fail ? 'fail' : 'send');
+      let fx;
+      if (fail) {
+        // a dust puff on impact, dazed stars orbiting the fallen head, then a
+        // red X stamped over the splat a beat later
+        fx = '<span class="ma-dust"></span><span class="ma-star" style="left:10%;top:56%">⭐</span><span class="ma-star" style="left:22%;top:42%;animation-delay:1.36s">✦</span><span class="ma-star" style="left:33%;top:56%;animation-delay:1.48s">⭐</span><span class="ma-star" style="left:20%;top:64%;animation-delay:1.6s">✨</span><div class="ma-x">✕</div>';
+      } else {
+        const n = recv ? 8 : (mag === 3 ? 28 : mag === 2 ? 16 : 8);
+        let conf = mag >= 3 && !recv ? '<span class="ma-flash"></span>' : '';
+        for (let i = 0; i < n; i++) {
+          const dx = Math.round(Math.random() * 170 - 85), dy = Math.round(-(Math.random() * 72 + 22));
+          const delay = (recv ? 0.3 : 0.9) + (i % 6) * 0.028;
+          conf += `<span class="ma-confetti" style="--dx:${dx}px;--dy:${dy}px;background:${MA_CONFETTI[i % MA_CONFETTI.length]};animation-delay:${delay}s"></span>`;
+        }
+        fx = conf;
+      }
+      stageHTML = `<div class="ma-stage">${maHolds()}${maFigure(disc, kind)}<div class="ma-fx">${fx}</div></div>`;
+    }
+    const fromHTML = recv ? `<span class="ma-from">${escapeHTML(opts.from || 'Opponent')}</span>` : '';
+    host.innerHTML = `<div class="${cls}" role="status">${fromHTML}${stageHTML}<div class="ma-label"><b>${escapeHTML(title)}</b>${tail}</div></div>`;
+    host.hidden = false; host.setAttribute('aria-hidden', 'false');
+    const card = host.firstElementChild;
+    const dismiss = () => { maClear(); host.hidden = true; host.innerHTML = ''; host.setAttribute('aria-hidden', 'true'); };
+    card.addEventListener('click', dismiss); // tap to skip
+
+    if (recv || reduced || opts.summary) {
+      const dur = recv ? 2300 : 1500;
+      if (recv) maTimers.push(setTimeout(() => card.classList.add('ma-recv-out'), dur - 400));
+      maTimers.push(setTimeout(dismiss, dur));
+    } else {
+      // send/fail: after the climb + top-out / crash, whisk the whole card off
+      // toward the opponent (the "fired a message" swoosh).
+      const swooshAt = fail ? 2050 : 1500;
+      const dur = fail ? 2750 : 2250;
+      maTimers.push(setTimeout(() => card.classList.add('ma-swooshing'), swooshAt));
+      maTimers.push(setTimeout(dismiss, dur));
+    }
+  }
+
+  // Receive detection off the opponent's climb_session activity (existing data):
+  // a per-day session summary carrying { sends, attempts, hardest }. We baseline
+  // at match start and animate the DELTA — +1 send → a send moment; an extra
+  // attempt with no new send → a fall; a jump of ≥2 (an offline backlog arriving
+  // at once) collapses into a single summary, never a stack of animations.
+  let maSeen = { matchId: null, sends: 0, attempts: 0 };
+  const maToday = (i) => i.user_id && i.kind === 'climb_session' && i.occurred_on === todayISO();
+  function maSetBaseline(active) {
+    // A match is a today event, so only today's session counts as the opponent's
+    // starting point (0 if they haven't climbed yet today).
+    const it = feedItems.find((i) => i.user_id === active.opponent && maToday(i));
+    const p = (it && it.payload) || {};
+    maSeen = { matchId: active.id, sends: p.sends || 0, attempts: p.attempts || 0 };
+  }
+  function maReceive(item) {
+    const a = matches.active;
+    if (!a || !item || item.user_id !== a.opponent || !maToday(item)) return;
+    if (maSeen.matchId !== a.id) { maSetBaseline(a); return; } // first sighting → baseline only
+    const p = item.payload || {};
+    const s = p.sends || 0, at = p.attempts || 0;
+    const dS = s - maSeen.sends, dA = at - maSeen.attempts;
+    maSeen.sends = s; maSeen.attempts = at;
+    if (dS <= 0 && dA <= 0) return;
+    if (dS >= 2) playMatchAnim({ type: 'receive', summary: true, count: dS, grade: p.hardest, from: a.opponent_name });
+    else if (dS === 1) playMatchAnim({ type: 'receive', variant: 'send', grade: p.hardest, from: a.opponent_name });
+    else if (dA >= 1) playMatchAnim({ type: 'receive', variant: 'fail', grade: p.hardest || null, from: a.opponent_name });
+  }
+  // Also catch a backlog that arrives via a feed refresh on reconnect (not a
+  // single realtime event) — idempotent: no delta → nothing plays.
+  function maScanReceive() {
+    const a = matches.active; if (!a) { maSeen.matchId = null; return; }
+    const it = feedItems.find((i) => i.user_id === a.opponent && maToday(i));
+    if (it) maReceive(it);
+  }
 
   /* ======================================================================
      Routines — saved training days, runnable as a guided session.
@@ -2326,6 +2482,7 @@
       if (feedStatus === 'stale') feedStatus = feedChannel ? 'live' : 'idle';
       stopFeedPoll();
       renderFeeds();
+      maScanReceive(); // a reconnect may bring the opponent's backlog → collapse it
     } catch (e) {
       // Offline or dropped: keep the cached items on screen, show the stale
       // badge, and poll until we recover. Logging is untouched by any of this.
@@ -2445,6 +2602,10 @@
     renderFeeds();
     if (h2hMid) refreshH2H(); // opponent logged during our match → refresh the live score
     if (matches.active) refreshMatchDock(); // and the docked bar's live score
+    // Incoming result from THE match opponent → play the "message arrived" moment.
+    if (matches.active && row.user_id === matches.active.opponent && item.kind === 'climb_session') {
+      maReceive(item);
+    }
     if (!f) loadFriends(); // a brand-new friend we don't have a name/rating for yet
   }
   function startFeedPoll() { if (feedPollTimer) return; feedPollTimer = setInterval(() => { if (feedStatus !== 'live') { loadFeed(); loadFriends(); } }, 8000); }
@@ -2527,6 +2688,10 @@
       matches.incoming = rows.filter((m) => m.status === 'pending' && m.i_am === 'opponent');
       matches.outgoing = rows.filter((m) => m.status === 'pending' && m.i_am === 'challenger');
       matches.active = rows.find((m) => m.status === 'active') || null;
+      // Baseline the opponent's send/attempt counts when a match becomes active,
+      // so the FIRST result they log lands as a delta (a receive moment).
+      if (matches.active) { if (maSeen.matchId !== matches.active.id) maSetBaseline(matches.active); }
+      else maSeen.matchId = null;
       matches.history = rows.filter((m) => m.status === 'resolved' || m.status === 'abandoned').slice(0, 8);
       const a = adj.data || {};
       const changed = matchAdj.boulder !== (a.boulder || 0) || matchAdj.rope !== (a.rope || 0);
