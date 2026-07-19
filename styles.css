@@ -1409,3 +1409,167 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .h2h-prog-bar { height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
 .h2h-prog-bar span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .3s ease; }
 .h2h-prog-lbl { margin-top: 3px; font-weight: 600; }
+
+/* ============================================================================
+   Match animations — a stick-figure "moment" fired only during a live match,
+   after the climb is already saved. SVG + CSS keyframes (no library, no canvas,
+   nothing runs when idle). Top-center card; only the card takes taps (skip);
+   the bottom quick-sheet / FAB are never covered, so logging is never blocked.
+   The figure swaps between distinct poses (climb → top-out, or climb → fall →
+   splat) over a single body timeline, so each action beat actually reads.
+   ========================================================================== */
+.match-anim {
+  position: fixed; top: calc(58px + env(safe-area-inset-top, 0px)); left: 0; right: 0;
+  display: flex; justify-content: center; z-index: 65; pointer-events: none;
+}
+.ma-card {
+  pointer-events: auto; cursor: pointer;
+  width: 212px; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: 0 10px 30px rgba(22, 24, 29, 0.16);
+  padding: 12px 12px 10px; text-align: center;
+  animation: ma-pop 0.24s cubic-bezier(.2,1.3,.5,1) both;
+  will-change: transform, opacity;
+}
+.ma-card.ma-swooshing { animation: ma-swoosh 0.6s cubic-bezier(.5,-0.2,.85,.35) forwards; }
+/* the climbing wall: a soft panel with a lip at the top the climber tops out over */
+.ma-stage {
+  position: relative; height: 132px; margin: 0 auto 8px; width: 132px;
+  border-radius: 10px; overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 18%, rgba(245,158,44,0.10), transparent 40%),
+    linear-gradient(180deg, var(--panel-2) 0%, #efe7d6 100%);
+}
+.ma-stage::before { /* the top-out lip */
+  content: ""; position: absolute; left: 0; right: 0; top: 10px; height: 6px;
+  background: var(--ink); opacity: 0.10; border-radius: 4px;
+}
+.ma-hold { position: absolute; width: 11px; height: 9px; border-radius: 6px 8px 5px 9px;
+  background: var(--accent); box-shadow: inset 0 -1px 0 rgba(0,0,0,0.15); transform: rotate(8deg); }
+.ma-hold.b { background: var(--accent-2); }
+.ma-figure { position: absolute; left: 50%; bottom: 4px; width: 66px; height: 84px;
+  margin-left: -33px; transform-origin: 50% 92%; will-change: transform;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.18)); }
+.ma-climber { width: 66px; height: 84px; display: block; overflow: visible; }
+.ma-climber .pose { opacity: 0; }
+.ma-climber .hd { fill: var(--accent-2); stroke: #fff; stroke-width: 1.4; }
+.ma-figure.rope .ma-climber .hd { fill: var(--accent); }
+.ma-climber .ln { fill: none; stroke: var(--ink); stroke-width: 4.3; stroke-linecap: round; stroke-linejoin: round; }
+
+/* SEND: climb the wall → top out (arms up + a little hop) → card whisks away */
+.ma-send .ma-figure { animation: ma-send-body 1.45s cubic-bezier(.4,.15,.5,1) both; }
+.ma-send .pose-climb { animation: ma-show-climb 1.45s steps(1) both; }
+.ma-send .pose-top   { animation: ma-show-top 1.45s steps(1) both; }
+.ma-send .ma-hold    { animation: ma-scroll 1.0s linear both; }
+
+/* FAIL: climb partway → whip off the wall → splat + dazed stars + red X stamp */
+.ma-fail .ma-figure { animation: ma-fail-body 1.9s cubic-bezier(.5,.05,.6,1) both; }
+.ma-fail .pose-climb { animation: ma-fshow-climb 1.9s steps(1) both; }
+.ma-fail .pose-fall  { animation: ma-fshow-fall 1.9s steps(1) both; }
+.ma-fail .pose-splat { animation: ma-fshow-splat 1.9s steps(1) both; }
+.ma-fail .ma-hold    { animation: ma-scroll-half 0.6s linear both; }
+.ma-fail .ma-stage   { animation: ma-thud 0.34s ease-out 1.15s both; }
+
+/* effects layer */
+.ma-fx { position: absolute; inset: 0; pointer-events: none; }
+.ma-confetti { position: absolute; left: 50%; top: 20%; width: 11px; height: 11px; border-radius: 2px;
+  opacity: 0; animation: ma-burst 0.95s cubic-bezier(.2,.6,.4,1) 0.9s both; }
+.ma-confetti:nth-child(3n) { border-radius: 50%; }
+/* a bright GOLD flash ring behind the confetti on a big (above-level) send */
+.ma-flash { position: absolute; left: 50%; top: 26%; width: 20px; height: 20px; margin: -10px 0 0 -10px;
+  border-radius: 50%; border: 3px solid #ffd23f; opacity: 0; animation: ma-flash 0.6s ease-out 0.9s both; }
+/* a dust puff kicked up where the fallen climber lands */
+.ma-dust { position: absolute; left: 34%; top: 62%; width: 50px; height: 24px; margin-left: -25px;
+  border-radius: 50%; background: radial-gradient(circle, rgba(120,110,95,0.7), transparent 68%);
+  opacity: 0; animation: ma-dust 0.6s ease-out 1.24s both; }
+.ma-star { position: absolute; font-size: 19px; opacity: 0;
+  animation: ma-orbit 0.85s ease-in-out 1.24s 2 both; }
+.ma-x { position: absolute; right: 12px; top: 30px;
+  font-family: var(--font-disp); font-weight: 800; font-size: 54px; color: var(--danger);
+  opacity: 0; transform: scale(1.7) rotate(-12deg); animation: ma-stamp 0.4s cubic-bezier(.2,1.4,.4,1) 1.62s both; }
+.ma-label { font-family: var(--font-disp); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.ma-label b { display: block; font-size: 17px; }
+.ma-send .ma-label { color: var(--good); }
+.ma-fail .ma-label { color: var(--danger); }
+.ma-label .ma-grade { color: var(--ink); }
+.ma-card.ma-mag-3 { box-shadow: 0 0 0 2px var(--good), 0 12px 34px rgba(46,160,90,0.30); }
+.ma-mag-3 .ma-label b { font-size: 20px; }
+
+/* RECEIVE: an incoming "message" — slides in, holds a beat, slides out */
+.ma-card.ma-receive { width: 198px; animation: ma-incoming 0.5s cubic-bezier(.18,1.5,.5,1) both; }
+.ma-card.ma-receive.ma-recv-out { animation: ma-recv-out 0.4s ease-in forwards; }
+.ma-receive .ma-stage { height: 100px; width: 100px; }
+.ma-receive .ma-figure { width: 52px; height: 66px; margin-left: -26px; bottom: 8px; }
+.ma-receive .ma-climber { width: 52px; height: 66px; }
+.ma-receive .pose-top { opacity: 1; }
+.ma-receive .pose-splat { opacity: 1; }
+.ma-receive.recv-send .pose-top { animation: ma-bob 0.5s ease-in-out 0.35s 3 both; }
+.ma-receive.recv-fail .pose-splat { animation: ma-recv-wobble 0.5s ease-in-out 0.35s 2 both; }
+.ma-receive .ma-from { display: block; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.ma-receive .ma-label b { display: inline; font-size: 15px; } /* "sent V5" reads on one line under BOB */
+
+@keyframes ma-pop { from { opacity: 0; transform: translateY(-10px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes ma-swoosh { to { opacity: 0; transform: translate(52vw, -22vh) rotate(16deg) scale(0.26); } }
+/* send: climb up the wall, small anticipation crouch, then a top-out hop */
+@keyframes ma-send-body {
+  0%   { transform: translateY(50px) scaleY(.96); }
+  20%  { transform: translateY(38px) scaleY(1.02); }
+  42%  { transform: translateY(22px) scaleY(.98); }
+  62%  { transform: translateY(6px) scaleY(1.02); }
+  70%  { transform: translateY(2px) scaleY(.86); }   /* crouch */
+  84%  { transform: translateY(-16px) scaleY(1.1); } /* hop! */
+  100% { transform: translateY(0) scaleY(1); }
+}
+@keyframes ma-show-climb { 0%,63% { opacity: 1; } 64%,100% { opacity: 0; } }
+@keyframes ma-show-top   { 0%,63% { opacity: 0; } 64%,100% { opacity: 1; } }
+@keyframes ma-flash { 0% { opacity: .85; transform: scale(.3); } 100% { opacity: 0; transform: scale(6.5); } }
+/* fail: climb a bit, pop off the wall in an arc, tumble, land splat (in view) */
+@keyframes ma-fail-body {
+  0%   { transform: translateY(48px) rotate(0deg); }
+  22%  { transform: translateY(24px) rotate(-6deg); }  /* climbing */
+  30%  { transform: translateY(14px) rotate(-20deg); } /* leans off, slipping */
+  40%  { transform: translateY(-16px) rotate(110deg); } /* pops OFF the wall, airborne */
+  50%  { transform: translateY(-30px) rotate(195deg); } /* INVERTED APEX, up in the air */
+  60%  { transform: translateY(-4px) rotate(285deg); }  /* head-first plunge */
+  67%  { transform: translateY(33px) rotate(360deg) scaleY(.55) scaleX(1.34); } /* SPLAT squash */
+  75%  { transform: translateY(27px) rotate(360deg) scaleY(1.07); } /* bounce */
+  100% { transform: translateY(33px) rotate(360deg); }
+}
+@keyframes ma-dust { 0% { opacity: 0; transform: scale(.3); } 25% { opacity: .9; } 100% { opacity: 0; transform: scale(1.7) translateY(-3px); } }
+@keyframes ma-fshow-climb { 0%,28% { opacity: 1; } 29%,100% { opacity: 0; } }
+@keyframes ma-fshow-fall  { 0%,28% { opacity: 0; } 29%,63% { opacity: 1; } 64%,100% { opacity: 0; } }
+@keyframes ma-fshow-splat { 0%,63% { opacity: 0; } 64%,100% { opacity: 1; } }
+@keyframes ma-thud { 0% { transform: translateY(0); } 40% { transform: translateY(4px); } 100% { transform: translateY(0); } }
+@keyframes ma-scroll { from { transform: translateY(-46px); } to { transform: translateY(2px); } }
+@keyframes ma-scroll-half { from { transform: translateY(-26px); } to { transform: translateY(1px); } }
+@keyframes ma-burst {
+  0%   { opacity: 0; transform: translate(0,0) scale(.4); }
+  12%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx,0), var(--dy,-46px)) rotate(240deg) scale(1); }
+}
+@keyframes ma-orbit { 0% { opacity: 0; transform: translateX(-18px) rotate(0deg) scale(.6); } 50% { opacity: 1; transform: translateX(0) translateY(-8px) rotate(180deg) scale(1); } 100% { opacity: 0; transform: translateX(18px) rotate(360deg) scale(.6); } }
+@keyframes ma-stamp { 0% { opacity: 0; transform: scale(1.9) rotate(-17deg); } 55% { opacity: 1; transform: scale(.86) rotate(-9deg); } 100% { opacity: 1; transform: scale(1) rotate(-9deg); } }
+@keyframes ma-incoming { 0% { opacity: 0; transform: translateX(64px) scale(.82); } 55% { opacity: 1; transform: translateX(-7px) scale(1.04); } 78% { transform: translateX(2px) scale(.99); } 100% { transform: none; } }
+@keyframes ma-recv-out { to { opacity: 0; transform: translateX(-18px) translateY(-8px) scale(.9); } }
+@keyframes ma-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@keyframes ma-recv-wobble { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-8deg); } }
+@keyframes ma-fade { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* Reduced motion: no climbing sequence — just a calm card with the result mark
+   and the grade. Applied via the app's own flag and the OS setting. */
+.ma-card.ma-reduced, .ma-card.ma-reduced.ma-receive { animation: ma-fade 0.22s ease-out both; }
+.ma-card.ma-reduced .ma-stage { background: none; height: auto; width: auto; margin-bottom: 6px; }
+.ma-card.ma-reduced .ma-stage::before { display: none; }
+.ma-card.ma-reduced .ma-figure, .ma-card.ma-reduced .ma-fx, .ma-card.ma-reduced .ma-hold { display: none; }
+.ma-card.ma-reduced .ma-mark { font-family: var(--font-disp); font-weight: 800; font-size: 46px; line-height: 1; }
+.ma-card.ma-reduced.ma-send .ma-mark { color: var(--good); }
+.ma-card.ma-reduced.ma-fail .ma-mark { color: var(--danger); }
+.ma-card.ma-reduced.ma-swooshing { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ma-card, .ma-card.ma-receive { animation: ma-fade 0.2s ease-out both; }
+  .ma-card.ma-swooshing { animation: none; }
+  .ma-figure, .ma-hold, .ma-confetti, .ma-star, .ma-x { animation: none !important; }
+  .ma-stage { background: none; height: auto; width: auto; }
+  .ma-stage::before { display: none; }
+  .ma-figure, .ma-fx { display: none; }
+}
