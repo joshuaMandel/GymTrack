@@ -368,12 +368,12 @@ body:not(.lifting-on) #log-lift { display: none !important; }
 }
 .rating-hero.is-empty .hero-ring { display: none; } /* no ghost ring when there's no data */
 .rating-hero.is-empty .hero-value { opacity: 0.5; }
-/* With no ring, center the empty-state copy and trim the block's height so the
-   dark band reads as a compact, intentional empty state — not a heavy void that
+/* With no ring, keep the empty-state a compact centered strip (short, and the
+   copy capped to a readable column) so the dark band isn't a tall void that
    out-weighs the CTA below it. */
-.rating-hero.is-empty { justify-content: center; text-align: center; padding-top: 18px; padding-bottom: 18px; }
+.rating-hero.is-empty { justify-content: center; text-align: center; padding-top: 14px; padding-bottom: 14px; }
 .rating-hero.is-empty .rh-main { align-items: center; }
-.rating-hero.is-empty .hero-value { font-size: 40px; }
+.rating-hero.is-empty .hero-value { font-size: 34px; }
 .hero-ring::before {
   content: "";
   position: absolute;
@@ -753,6 +753,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 }
 .rating-card.boulder { border-left-color: var(--accent-2); }
 .rating-card.rope { border-left-color: var(--accent); }
+.rating-card.is-empty { align-items: center; text-align: center; }
 .rating-card.is-empty .rating-value { opacity: 0.5; }
 .rating-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .rating-value { font-family: var(--font-disp); font-size: 30px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 8px; }
@@ -1231,6 +1232,10 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
   padding: 16px 20px;
 }
 .hub-card.hub-active { cursor: pointer; border-color: var(--accent-2); box-shadow: 0 6px 18px rgba(31, 58, 95, 0.10); }
+/* Keep the live scoreboard and its actions as one related cluster rather than
+   stranding them at opposite edges of a wide card. */
+.hub-card.hub-active { justify-content: center; gap: 32px; }
+.hub-card.hub-active .hub-body { flex: 0 1 auto; }
 .hub-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .hub-cta-zone { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
 .hub-cta-zone .btn { width: auto; min-width: 150px; margin: 0; white-space: nowrap; }
