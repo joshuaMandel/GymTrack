@@ -2769,18 +2769,27 @@
     if (file.size > 25 * 1024 * 1024) { profileStatus('That image is too large (over 25 MB).', false); return; }
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => { URL.revokeObjectURL(url); openCrop(img); };
+    // Keep the object URL alive for the whole crop session — the visible
+    // preview (#crop-img) points at it, and iOS Safari strictly invalidates a
+    // revoked blob: URL (desktop Chrome tolerates it from cache), so revoking
+    // before the preview loads leaves a broken image. closeCrop() revokes it.
+    img.onload = () => openCrop(img, url);
     img.onerror = () => { URL.revokeObjectURL(url); profileStatus('Couldn’t read that image — try another.', false); };
     img.src = url;
   }
-  function openCrop(img) {
+  function closeCrop() {
+    $('#avatar-crop-modal').hidden = true;
+    if (crop && crop.url) URL.revokeObjectURL(crop.url);
+    crop = null;
+  }
+  function openCrop(img, url) {
     const modal = $('#avatar-crop-modal'); modal.hidden = false;
     $('#avatar-crop-status').hidden = true;
     const frameEl = $('#crop-frame');
     const F = frameEl.getBoundingClientRect().width || 260;
     const base = F / Math.min(img.naturalWidth, img.naturalHeight); // cover
-    crop = { img, base, F, z: 1, k: base, ox: 0, oy: 0 };
-    const ie = $('#crop-img'); ie.src = img.src;
+    crop = { img, url, base, F, z: 1, k: base, ox: 0, oy: 0 };
+    const ie = $('#crop-img'); ie.src = url;
     $('#crop-zoom').value = '1';
     centerCrop(); applyCrop();
   }
@@ -2845,7 +2854,7 @@
       const { data: nv, error } = await sb.rpc('avatar_set');
       if (error) throw error;
       myAvatarV = nv || (myAvatarV + 1); avatarVer.set(uid, myAvatarV);
-      $('#avatar-crop-modal').hidden = true; crop = null;
+      closeCrop();
       renderAccount(); renderProfile(); profileStatus('Profile picture updated ✓', true);
     } catch (e) {
       st.textContent = avatarOffline() ? 'You went offline — try again when connected.' : (errMsg(e) || 'Upload failed.');
@@ -2867,8 +2876,8 @@
     av.addEventListener('click', onAvatarTap);
     $('#avatar-remove').addEventListener('click', removeAvatar);
     $('#avatar-file').addEventListener('change', onAvatarFile);
-    $('#avatar-crop-cancel').addEventListener('click', () => { $('#avatar-crop-modal').hidden = true; crop = null; });
-    $('#avatar-crop-modal').addEventListener('click', (e) => { if (e.target.id === 'avatar-crop-modal') { $('#avatar-crop-modal').hidden = true; crop = null; } });
+    $('#avatar-crop-cancel').addEventListener('click', closeCrop);
+    $('#avatar-crop-modal').addEventListener('click', (e) => { if (e.target.id === 'avatar-crop-modal') closeCrop(); });
     $('#avatar-crop-save').addEventListener('click', saveCrop);
     $('#crop-zoom').addEventListener('input', (e) => { if (crop) setZoom(parseFloat(e.target.value)); });
     // drag + wheel-zoom + two-finger pinch on the frame
