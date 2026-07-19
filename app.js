@@ -697,6 +697,7 @@
     window.scrollTo(0, 0); // each page opens from its top
     redrawActiveCharts();  // charts drawn while hidden re-fit to real width
     if (view === 'friends') { renderFriendsScreen(); loadFriends(); loadFeed(); } // freshest data on entry
+    if (typeof renderMatchDock === 'function') renderMatchDock(); // dock only on Home + Climbing
   }
   $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
@@ -1736,6 +1737,9 @@
       qsState.grade = grade;
       saveQs();
       renderQuickLog(); // sheet stays open — refresh the Today list
+      // my own climb won't come back over realtime — refresh the live match views
+      if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
+      if (h2hMid) refreshH2H();
     });
   }
 
@@ -2429,6 +2433,7 @@
     feedCacheSave();
     renderFeeds();
     if (h2hMid) refreshH2H(); // opponent logged during our match → refresh the live score
+    if (matches.active) refreshMatchDock(); // and the docked bar's live score
     if (!f) loadFriends(); // a brand-new friend we don't have a name/rating for yet
   }
   function startFeedPoll() { if (feedPollTimer) return; feedPollTimer = setInterval(() => { if (feedStatus !== 'live') { loadFeed(); loadFriends(); } }, 8000); }
@@ -2452,7 +2457,7 @@
 
   // Called from refresh(): (re)load friends + feed and ensure a subscription.
   function initFriends() {
-    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); return; }
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchDock(); return; }
     loadFriends();
     loadFeed();
     loadMatches();
@@ -2517,6 +2522,7 @@
       if (changed) { renderClimberRating(); renderRatingHero(); } // keep hero/cards in step with the leaderboard
     } catch (e) { console.warn('Matches unavailable:', e); }
     renderMatchesPanel();
+    renderMatchDock(); // match started/ended → show or dismiss the dock
     updateFriendsBadge();
   }
 
@@ -2676,6 +2682,97 @@
     const e = $('#h2h-end'); if (e && !me.ended) e.addEventListener('click', endMatch);
     const d = $('#h2h-done'); if (d) d.addEventListener('click', closeH2H);
   }
+
+  /* ---------------- Persistent active-match dock ----------------
+     A docked bar (music-player style) shown on Home + Rock Climbing while a
+     match is live. Same realtime + ~3s poll as the head-to-head; degrades to a
+     cached "offline" state and recovers on its own. Logging from it is the exact
+     same quick sheet as everywhere else (zero extra taps). It sits above the
+     bottom dock and adds bottom padding, so it never covers a screen's actions. */
+  const matchDock = $('#match-dock');
+  let mdTimer = null, mdState = null, mdStale = false, mdEndedHideAt = 0, mdHideTimer = null;
+  function dockableView() {
+    const v = document.querySelector('.view.is-active');
+    return !!v && (v.id === 'view-dashboard' || v.id === 'view-climbing');
+  }
+  function stopDockPoll() { if (mdTimer) { clearInterval(mdTimer); mdTimer = null; } }
+  function startDockPoll() { if (!mdTimer) mdTimer = setInterval(refreshMatchDock, 3000); }
+  function renderMatchDock() {
+    if (!matchDock) return;
+    const active = matches.active;
+    const resolvedRecently = mdState && (mdState.status === 'resolved' || mdState.status === 'abandoned') && Date.now() < mdEndedHideAt;
+    const show = cloudOn() && dockableView() && (active || resolvedRecently);
+    if (!show) {
+      matchDock.hidden = true;
+      document.body.classList.remove('has-match-dock');
+      stopDockPoll();
+      if (!active && !resolvedRecently) mdState = null; // no match at all → truly gone
+      return;
+    }
+    matchDock.hidden = false;
+    document.body.classList.add('has-match-dock');
+    if (active) {
+      startDockPoll();
+      if (!mdState || (mdState.id !== active.id)) { mdState = null; refreshMatchDock(); }
+    }
+    paintMatchDock();
+  }
+  async function refreshMatchDock() {
+    const active = matches.active;
+    if (!cloudOn() || (!active && !mdState)) return;
+    const mid = active ? active.id : (mdState && mdState.id);
+    if (!mid) return;
+    try {
+      const { data, error } = await sb.rpc('match_state', { mid });
+      if (error) throw error;
+      mdStale = false; mdState = data;
+      if (data && (data.status === 'resolved' || data.status === 'abandoned')) {
+        // Brief result state, then dismiss cleanly (never a frozen stale bar).
+        if (!mdEndedHideAt) { mdEndedHideAt = Date.now() + 5000; if (mdHideTimer) clearTimeout(mdHideTimer); mdHideTimer = setTimeout(() => { mdEndedHideAt = 0; mdState = null; stopDockPoll(); loadMatches(); renderMatchDock(); }, 5200); }
+        stopDockPoll();
+      } else { mdEndedHideAt = 0; }
+    } catch (e) {
+      mdStale = true; // keep the last-known state on screen, flag it offline
+    }
+    renderMatchDock();
+  }
+  function fmtRemaining(iso) {
+    if (!iso) return '';
+    const ms = new Date(iso) - new Date();
+    if (ms <= 0) return 'ending…';
+    const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  }
+  function paintMatchDock() {
+    const c = $('#md-content'), logBtn = $('#md-log');
+    if (!c || !mdState) return;
+    const s = mdState, iAmCh = s.i_am === 'challenger';
+    const me = iAmCh ? s.challenger : s.opponent, them = iAmCh ? s.opponent : s.challenger;
+    const resolved = s.status === 'resolved' || s.status === 'abandoned';
+    const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+    if (resolved) {
+      const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
+      matchDock.classList.add('resolved');
+      if (logBtn) logBtn.hidden = true;
+      c.innerHTML = `<span class="md-ico ${r}"><svg class="ico"><use href="#i-bolt"/></svg></span>
+        <span class="md-body"><span class="md-line1"><b>${r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : s.status === 'abandoned' ? 'Match abandoned' : 'Draw'}</b></span>
+        <span class="md-line2">vs ${escapeHTML(them.name)}${me.delta ? ` · ${me.delta > 0 ? '+' : ''}${me.delta} Send Score` : ''}</span></span>`;
+      return;
+    }
+    matchDock.classList.remove('resolved');
+    if (logBtn) logBtn.hidden = false;
+    const rules = s.rules || {};
+    const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
+    const prog = (rules.best_n && me.counted != null) ? `${Math.min(me.counted, rules.best_n)} of ${rules.best_n} ${noun}`
+      : (me.counted != null ? `${me.counted} ${noun}` : '');
+    const meta = [prog, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
+    c.innerHTML = `<span class="md-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
+      <span class="md-body">
+        <span class="md-line1"><b class="${sc(me.score)}">${me.score > 0 ? '+' : ''}${me.score}</b><span class="md-vs">vs</span><b class="${sc(them.score)}">${them.score > 0 ? '+' : ''}${them.score}</b> <span class="md-them">${escapeHTML(them.name)}</span></span>
+        <span class="md-line2">${escapeHTML(meta)}${mdStale ? ' <span class="md-stale">· offline</span>' : ''}</span>
+      </span>`;
+  }
+
   (function bindMatchUI() {
     if (matchModal) {
       $('#match-close').addEventListener('click', closeH2H);
@@ -2686,6 +2783,9 @@
       const b = ev.target.closest('[data-mact]'); if (b) { ev.preventDefault(); matchAct(b.dataset.mact, b.dataset.mid); return; }
       const open = ev.target.closest('[data-mopen]'); if (open) { ev.preventDefault(); openH2H(open.dataset.mopen); }
     });
+    // The persistent dock: tap the bar → head-to-head; Log → the usual quick sheet.
+    const mo = $('#md-open'); if (mo) mo.addEventListener('click', () => { if (matches.active) openH2H(matches.active.id); });
+    const ml = $('#md-log'); if (ml) ml.addEventListener('click', () => openQuickLog());
   })();
 
   /* ----- Climber summary modal: what a leaderboard entry actually did.
