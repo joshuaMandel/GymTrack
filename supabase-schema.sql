@@ -1424,12 +1424,14 @@ begin
     'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
       'style_label', public.match_rules_label(m.discipline, m.best_n)),
     'challenger', jsonb_build_object('name', public.user_display(m.challenger),
+      'uid', m.challenger, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.challenger), 0),
       'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
       'elo', coalesce(public.climb_display_rating(m.challenger, coalesce(m.grp,'boulder')), public.climb_display_rating(m.challenger, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0) else public.match_score(mid, m.challenger) end, 1),
       'counted', case when m.discipline is null then null else public.match_counted(mid, m.challenger) end,
       'ended', m.ch_ended, 'delta', m.ch_delta),
     'opponent', jsonb_build_object('name', public.user_display(m.opponent),
+      'uid', m.opponent, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.opponent), 0),
       'baseline', coalesce(m.op_snap_boulder, m.op_snap_rope),
       'elo', coalesce(public.climb_display_rating(m.opponent, coalesce(m.grp,'boulder')), public.climb_display_rating(m.opponent, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0) else public.match_score(mid, m.opponent) end, 1),
@@ -1656,3 +1658,69 @@ begin
 end $$;
 revoke all on function public.admin_deletion_list(integer) from public, anon;
 grant execute on function public.admin_deletion_list(integer) to authenticated;
+
+-- ============================================================================
+-- Profile pictures. The image bytes live in Supabase Storage (bucket
+-- "avatars", public read); the profile row stores only a version counter
+-- (avatar_v: 0 = default initials avatar, >0 = has a picture and doubles as a
+-- cache-buster). Two fixed object paths per user — {uid}/thumb.webp and
+-- {uid}/full.webp — so replacing a picture overwrites in place (the old blob is
+-- gone) and removing deletes both. Owner-only writes are enforced by the
+-- storage policies below; avatar_set/avatar_clear only ever touch your own row.
+-- ============================================================================
+alter table public.profiles add column if not exists avatar_v integer not null default 0;
+
+-- Version lookup for a set of users, so any surface can upgrade its default
+-- avatars to photos in one round-trip (public info; authenticated only).
+create or replace function public.avatars_for(uids uuid[])
+returns table (id uuid, v integer)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.avatar_v from public.profiles p where p.id = any(uids)
+$$;
+revoke all on function public.avatars_for(uuid[]) from public, anon;
+grant execute on function public.avatars_for(uuid[]) to authenticated;
+
+-- Bump my picture version (called after a successful upload). Upserts my
+-- profile so a user can have a picture before claiming a @username. Own row only.
+create or replace function public.avatar_set()
+returns integer language plpgsql security definer set search_path = public as $$
+declare nv integer;
+begin
+  insert into public.profiles (id, avatar_v) values (auth.uid(), 1)
+    on conflict (id) do update set avatar_v = public.profiles.avatar_v + 1, updated_at = now()
+    returning avatar_v into nv;
+  return nv;
+end $$;
+revoke all on function public.avatar_set() from public, anon;
+grant execute on function public.avatar_set() to authenticated;
+
+-- Revert to the default avatar (called after deleting the storage objects).
+create or replace function public.avatar_clear()
+returns void language sql security definer set search_path = public as $$
+  update public.profiles set avatar_v = 0, updated_at = now() where id = auth.uid();
+$$;
+revoke all on function public.avatar_clear() from public, anon;
+grant execute on function public.avatar_clear() to authenticated;
+
+-- Storage bucket + owner-only policies. Guarded so this schema still applies on
+-- a plain Postgres test cluster (no storage schema) — it runs only on real
+-- Supabase. Public read; a hard 256 KB server-side size cap and an image-only
+-- mime allowlist back up the client checks; writes restricted to your own
+-- {uid}/… folder so you can only change your own picture.
+do $$
+begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('avatars', 'avatars', true, 262144, array['image/webp','image/jpeg','image/png'])
+    on conflict (id) do update set public = true, file_size_limit = 262144,
+      allowed_mime_types = array['image/webp','image/jpeg','image/png'];
+    execute 'drop policy if exists "avatars public read" on storage.objects';
+    execute 'create policy "avatars public read" on storage.objects for select using (bucket_id = ''avatars'')';
+    execute 'drop policy if exists "avatars owner insert" on storage.objects';
+    execute 'create policy "avatars owner insert" on storage.objects for insert to authenticated with check (bucket_id = ''avatars'' and (storage.foldername(name))[1] = auth.uid()::text)';
+    execute 'drop policy if exists "avatars owner update" on storage.objects';
+    execute 'create policy "avatars owner update" on storage.objects for update to authenticated using (bucket_id = ''avatars'' and (storage.foldername(name))[1] = auth.uid()::text)';
+    execute 'drop policy if exists "avatars owner delete" on storage.objects';
+    execute 'create policy "avatars owner delete" on storage.objects for delete to authenticated using (bucket_id = ''avatars'' and (storage.foldername(name))[1] = auth.uid()::text)';
+  end if;
+end $$;
