@@ -697,13 +697,14 @@
     const which = size === 'lg' ? 'full' : 'thumb';
     const color = avatarColorFor(uid);
     const ini = escapeHTML(avatarInitial(name));
-    // Render a known photo already-visible ('on'): on a full re-render (e.g. the
-    // head-to-head's ~3s poll) a fresh img must NOT restart the opacity fade, or
-    // the default circle flashes underneath every refresh. The first-appearance
-    // fade is kept for the sweep-upgrade path (upgradeAvatarDom), which handles
-    // avatars whose version wasn't known at render time.
+    // Render a known photo already-visible ('on') and EAGER: on a full re-render
+    // (e.g. the head-to-head's ~3s poll) a fresh img must not restart the opacity
+    // fade, and lazy/async-decode would leave a blank frame on iOS Safari even for
+    // a cached image — either way the default circle flashes underneath. The
+    // first-appearance fade (and lazy loading) is kept for the sweep-upgrade path
+    // (upgradeAvatarDom), which handles avatars whose version wasn't known yet.
     const img = ver > 0
-      ? `<img class="av-img on" src="${avatarPicUrl(uid, which, ver)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
+      ? `<img class="av-img on" src="${avatarPicUrl(uid, which, ver)}" alt="" decoding="sync" onerror="this.remove()">`
       : '';
     return `<span class="av av-${size || 'sm'}" style="background:${color}" data-uid="${uid || ''}" data-avsize="${size || 'sm'}"><span class="av-ini">${ini}</span>${img}</span>`;
   }
@@ -3064,7 +3065,7 @@
      ====================================================================== */
   let matches = { incoming: [], outgoing: [], active: null, history: [] };
   let matchAdj = { boulder: 0, rope: 0 };
-  let h2hMid = null, h2hTimer = null;
+  let h2hMid = null, h2hTimer = null, h2hLastHtml = null;
 
   async function loadMatches() {
     if (!cloudOn()) { matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderMatchesPanel(); return; }
@@ -3222,7 +3223,7 @@
   async function endMatch() { if (!cloudOn() || !h2hMid) return; try { await sb.rpc('match_end', { mid: h2hMid }); } catch (e) {} refreshH2H(); }
 
   const matchModal = $('#match-modal');
-  function openH2H(mid) { h2hMid = mid; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
+  function openH2H(mid) { h2hMid = mid; h2hLastHtml = null; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
   function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; loadMatches(); }
   async function refreshH2H() {
     if (!h2hMid || !cloudOn()) return;
@@ -3277,6 +3278,13 @@
     } else if (resolved) {
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
     }
+    // The 3s poll usually returns an unchanged state. Rewriting identical HTML
+    // would recreate the avatar <img> elements, and (on iOS Safari especially)
+    // a fresh img shows a blank frame before it paints — flashing the default
+    // circle underneath every poll. Skip the write when nothing changed; the
+    // existing DOM (and its listeners) stays live.
+    if (html === h2hLastHtml) return;
+    h2hLastHtml = html;
     body.innerHTML = html;
     sweepAvatars();
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
@@ -3415,7 +3423,7 @@
   function renderMatchHub() {
     const els = [$('#match-hub-dash'), $('#match-hub-climb')].filter(Boolean);
     if (!els.length) return;
-    if (!CONFIGURED || !cloudOn()) { els.forEach((e) => { e.hidden = true; e.innerHTML = ''; }); renderMatchDock(); return; }
+    if (!CONFIGURED || !cloudOn()) { els.forEach((e) => { e.hidden = true; e.innerHTML = ''; e.__hubHtml = ''; }); renderMatchDock(); return; }
     let html = '';
     if (!matchesLoaded) {
       html = `<div class="hub-card hub-skel" aria-hidden="true"><span class="skel skel-ico"></span><span class="skel-lines"><span class="skel skel-line"></span><span class="skel skel-line short"></span></span><span class="skel skel-btn"></span></div>`;
@@ -3481,7 +3489,9 @@
         <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubchallenge>Challenge a friend</button></div>
       </div>`;
     }
-    els.forEach((e) => { e.hidden = false; e.innerHTML = html; });
+    // The dock's 3s poll re-renders the hub too; skip the write when the card
+    // hasn't changed so its avatar imgs keep their painted pixels (no flash).
+    els.forEach((e) => { e.hidden = false; if (e.__hubHtml !== html) { e.innerHTML = html; e.__hubHtml = html; } });
     sweepAvatars();
     // The hub owns the single dark primary on the climbing screen (Challenge /
     // Log-in-match). Demote the header "Log a climb" pill to an outline so it
