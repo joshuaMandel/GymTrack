@@ -1195,7 +1195,7 @@
   // The rating cards shown on the climbing page and profile.
   function renderClimberRating() {
     const hidden = !!getSettings().hide_rating;
-    const html = hidden ? '' : RATING_GROUPS.map((g) => {
+    let html = hidden ? '' : RATING_GROUPS.map((g) => {
       const r = climberRating(g.key);
       if (!r.hasData) return '';
       const d = r.lastSessionDelta;
@@ -1208,6 +1208,16 @@
           <span class="rating-sub">${sub}</span>
         </div>`;
     }).join('');
+    // No sends yet → still lead the screen with an empty Send Score card so the
+    // score→match order and the new-user anchor match the Home hero.
+    if (!hidden && !html) {
+      html = `
+        <div class="rating-card is-empty">
+          <span class="rating-label">Send Score</span>
+          <span class="rating-value">1000</span>
+          <span class="rating-sub">Log a climb to set your rating.</span>
+        </div>`;
+    }
     ['#climb-rating', '#profile-rating'].forEach((sel) => {
       const el = $(sel);
       if (!el) return;
@@ -2393,6 +2403,7 @@
     } catch (e) { console.warn('Friends unavailable:', e); }
     renderFriendsScreen();
     renderFeeds(); // ratings may have arrived
+    renderMatchHub(); // the hub's idle CTA depends on whether you have friends
   }
 
   async function friendAct(fact, targetUid) {
@@ -2457,7 +2468,8 @@
 
   // Called from refresh(): (re)load friends + feed and ensure a subscription.
   function initFriends() {
-    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchDock(); return; }
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; matchesLoaded = false; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchHub(); renderMatchDock(); return; }
+    if (!matchesLoaded) renderMatchHub(); // first load → hub skeleton until matches arrive
     loadFriends();
     loadFeed();
     loadMatches();
@@ -2521,7 +2533,9 @@
       matchAdj = { boulder: a.boulder || 0, rope: a.rope || 0 };
       if (changed) { renderClimberRating(); renderRatingHero(); } // keep hero/cards in step with the leaderboard
     } catch (e) { console.warn('Matches unavailable:', e); }
+    matchesLoaded = true; // even on error: the hub falls back to its idle state
     renderMatchesPanel();
+    renderMatchHub();  // hub first — its card gates the dock
     renderMatchDock(); // match started/ended → show or dismiss the dock
     updateFriendsBadge();
   }
@@ -2570,10 +2584,26 @@
     openMatchCreate(uid, (f && f.display_name) || 'your friend');
   }
   function openMatchCreate(uid, name) {
-    mcTarget = { uid, name };
+    mcTarget = uid ? { uid, name } : null;
     mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3;
-    const nm = $('#mc-name'); if (nm) nm.textContent = name;
     const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
+    // Opened from the hub CTA (no friend chosen yet): show the opponent picker.
+    // With exactly one friend, preselect them — the sheet is then identical to
+    // the friends-list path.
+    const ff = $('#mc-friend-field');
+    if (!mcTarget && friends.list.length === 1) {
+      const f = friends.list[0];
+      mcTarget = { uid: f.user_id, name: f.display_name || 'your friend' };
+    }
+    if (ff) {
+      ff.hidden = !!(uid || friends.list.length <= 1);
+      const box = $('#mc-friends');
+      if (box && !ff.hidden) {
+        box.innerHTML = friends.list.map((f) =>
+          `<button type="button" class="grade-pill${mcTarget && mcTarget.uid === f.user_id ? ' is-active' : ''}" data-fuid="${f.user_id}">${escapeHTML(f.display_name || 'Climber')}</button>`).join('');
+      }
+    }
+    const nm = $('#mc-name'); if (nm) nm.textContent = mcTarget ? mcTarget.name : 'a friend';
     renderMcPickers();
     if (mcModal) mcModal.hidden = false;
   }
@@ -2595,8 +2625,9 @@
     if (sum) sum.textContent = `${discLabel} · ${lenLabel}.`;
   }
   async function sendMatchChallenge() {
-    if (!cloudOn() || !mcTarget) return;
     const st = $('#mc-status'); const btn = $('#mc-send');
+    if (!cloudOn()) return;
+    if (!mcTarget) { if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = 'Pick who to challenge first.'; } return; }
     if (btn) btn.disabled = true;
     try {
       const { data, error } = await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length });
@@ -2619,6 +2650,15 @@
     $('#mc-discipline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-disc]'); if (!b) return; mcState.discipline = b.dataset.disc; renderMcPickers(); });
     $('#mc-style').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; mcState.style = b.dataset.style; renderMcPickers(); });
     $('#mc-length').addEventListener('click', (ev) => { const b = ev.target.closest('[data-n]'); if (!b) return; mcState.length = b.dataset.n === '' ? null : parseInt(b.dataset.n, 10); renderMcPickers(); });
+    const mf = $('#mc-friends');
+    if (mf) mf.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-fuid]'); if (!b) return;
+      const f = friends.list.find((x) => x.user_id === b.dataset.fuid); if (!f) return;
+      mcTarget = { uid: f.user_id, name: f.display_name || 'your friend' };
+      const nm = $('#mc-name'); if (nm) nm.textContent = mcTarget.name;
+      $$('#mc-friends .grade-pill').forEach((p) => p.classList.toggle('is-active', p.dataset.fuid === b.dataset.fuid));
+      const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
+    });
   })();
   async function matchAct(act, mid) {
     if (!cloudOn()) return;
@@ -2697,31 +2737,53 @@
   }
   function stopDockPoll() { if (mdTimer) { clearInterval(mdTimer); mdTimer = null; } }
   function startDockPoll() { if (!mdTimer) mdTimer = setInterval(refreshMatchDock, 3000); }
+  // The hub's live-match card (top of Home/Climbing) is the primary display;
+  // the dock is its companion, appearing only once the card scrolls out of
+  // view — like a mini-player — so the match stays visible while you browse.
+  function hubCardOnScreen() {
+    const v = document.querySelector('.view.is-active');
+    if (!v) return false;
+    const card = v.querySelector('.match-hub:not([hidden]) .hub-active');
+    if (!card) return false;
+    const r = card.getBoundingClientRect();
+    return r.bottom > 70 && r.top < window.innerHeight - 50;
+  }
   function renderMatchDock() {
     if (!matchDock) return;
     const active = matches.active;
     const resolvedRecently = mdState && (mdState.status === 'resolved' || mdState.status === 'abandoned') && Date.now() < mdEndedHideAt;
-    const show = cloudOn() && dockableView() && (active || resolvedRecently);
+    const anyLive = cloudOn() && dockableView() && (active || resolvedRecently);
+    // Polling runs whenever a match is live on a dockable view — the hub card
+    // needs fresh state even while the dock itself is hidden.
+    if (anyLive && active) {
+      startDockPoll();
+      if (!mdState || (mdState.id !== active.id)) { mdState = null; refreshMatchDock(); }
+    }
+    if (!anyLive) {
+      stopDockPoll();
+      if (!active && mdState && mdState.status === 'active' && !mdFetching) {
+        refreshMatchDock(); // match ended elsewhere — fetch the final result once
+      } else if (!active && !resolvedRecently) {
+        mdState = null; // no match at all → truly gone
+      }
+    }
+    const show = anyLive && !hubCardOnScreen();
     if (!show) {
       matchDock.hidden = true;
       document.body.classList.remove('has-match-dock');
-      stopDockPoll();
-      if (!active && !resolvedRecently) mdState = null; // no match at all → truly gone
       return;
     }
     matchDock.hidden = false;
     document.body.classList.add('has-match-dock');
-    if (active) {
-      startDockPoll();
-      if (!mdState || (mdState.id !== active.id)) { mdState = null; refreshMatchDock(); }
-    }
     paintMatchDock();
   }
+  let mdFetching = false;
   async function refreshMatchDock() {
     const active = matches.active;
-    if (!cloudOn() || (!active && !mdState)) return;
+    if (!cloudOn() || (!active && !mdState) || mdFetching) return;
     const mid = active ? active.id : (mdState && mdState.id);
     if (!mid) return;
+    mdFetching = true;
     try {
       const { data, error } = await sb.rpc('match_state', { mid });
       if (error) throw error;
@@ -2733,9 +2795,18 @@
       } else { mdEndedHideAt = 0; }
     } catch (e) {
       mdStale = true; // keep the last-known state on screen, flag it offline
+    } finally {
+      mdFetching = false;
     }
+    renderMatchHub(); // hub card first (it may hide/show the dock)
     renderMatchDock();
   }
+  // Dock appears/disappears as the hub card scrolls out of / into view.
+  let mdScrollT = null;
+  window.addEventListener('scroll', () => {
+    if (mdScrollT || !matches.active) return;
+    mdScrollT = setTimeout(() => { mdScrollT = null; renderMatchDock(); }, 120);
+  }, { passive: true });
   function fmtRemaining(iso) {
     if (!iso) return '';
     const ms = new Date(iso) - new Date();
@@ -2773,6 +2844,91 @@
       </span>`;
   }
 
+  /* ---------------- Match hub ----------------
+     Matches are the heart of the app, so the top of Home (and Climbing) always
+     says something about them: the live match when one is on, an incoming or
+     outgoing challenge, or — idle — a primary "Challenge a friend" action with
+     a recent-results strip. New users with no friends get pointed to Friends.
+     A skeleton renders while the first match fetch is in flight. */
+  let matchesLoaded = false;
+  function renderMatchHub() {
+    const els = [$('#match-hub-dash'), $('#match-hub-climb')].filter(Boolean);
+    if (!els.length) return;
+    if (!CONFIGURED || !cloudOn()) { els.forEach((e) => { e.hidden = true; e.innerHTML = ''; }); renderMatchDock(); return; }
+    let html = '';
+    if (!matchesLoaded) {
+      html = `<div class="hub-card hub-skel" aria-hidden="true"><span class="skel skel-ico"></span><span class="skel-lines"><span class="skel skel-line"></span><span class="skel skel-line short"></span></span><span class="skel skel-btn"></span></div>`;
+    } else if (matches.active) {
+      const a = matches.active;
+      const s = mdState && mdState.id === a.id && mdState.status === 'active' ? mdState : null;
+      const iAmCh = s && s.i_am === 'challenger';
+      const me = s ? (iAmCh ? s.challenger : s.opponent) : null;
+      const them = s ? (iAmCh ? s.opponent : s.challenger) : null;
+      const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+      const rules = (s && s.rules && s.rules.style_label) || a.rules_label || 'Head-to-head';
+      const noun = ((s && s.rules && s.rules.discipline) || a.discipline) === 'boulder' ? 'problems' : 'routes';
+      const bn = (s && s.rules && s.rules.best_n) != null ? s.rules.best_n : a.best_n;
+      const prog = me && me.counted != null ? (bn ? `${Math.min(me.counted, bn)} of ${bn} ${noun}` : `${me.counted} ${noun}`) : '';
+      const meta = [prog, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
+      const youScore = s ? `<b class="${sc(me.score)}">${me.score > 0 ? '+' : ''}${me.score}</b>` : '<b>—</b>';
+      const themName = s ? escapeHTML(them.name) : escapeHTML(a.opponent_name);
+      const themScore = s ? `<b class="${sc(them.score)}">${them.score > 0 ? '+' : ''}${them.score}</b>` : '<b>—</b>';
+      const logLabel = noun === 'problems' ? 'Log a problem' : 'Log a route';
+      // Body = live head + a tight You–vs–opponent scoreboard; action zone on the
+      // right (desktop) / below (mobile). Content fills the card like the hero.
+      html = `<div class="hub-card hub-active" data-mopen="${a.id}" role="button" tabindex="0">
+        <div class="hub-body">
+          <div class="hub-live-head"><span class="match-badge live">LIVE</span><span class="hub-rules">${escapeHTML(rules)}</span>${mdStale ? '<span class="feed-stale">offline — last known</span>' : ''}</div>
+          <div class="hub-scores">
+            <span class="hub-side you"><span class="hub-nm">You</span>${youScore}</span>
+            <span class="hub-mid"><span class="hub-vs">vs</span><span class="hub-prog">${escapeHTML(meta)}</span></span>
+            <span class="hub-side"><span class="hub-nm">${themName}</span>${themScore}</span>
+          </div>
+        </div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary sm" data-hublog>${logLabel}</button><button type="button" class="btn ghost sm" data-mopen="${a.id}">Open match</button></div>
+      </div>`;
+    } else if (matches.incoming.length) {
+      const m = matches.incoming[0];
+      html = `<div class="hub-card hub-idle">
+        <div class="hub-body"><div class="hub-idle-title">${escapeHTML(m.opponent_name)} challenged you</div>
+        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · winner takes elo</div></div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary" data-mact="accept" data-mid="${m.id}">Accept</button><button type="button" class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div>
+      </div>`;
+    } else if (matches.outgoing.length) {
+      const m = matches.outgoing[0];
+      html = `<div class="hub-card hub-idle">
+        <div class="hub-body"><div class="hub-idle-title">Challenge sent to ${escapeHTML(m.opponent_name)}</div>
+        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · waiting for them to accept</div></div>
+        <div class="hub-cta-zone"><button type="button" class="btn ghost sm" data-mact="cancelm" data-mid="${m.id}">Cancel</button></div>
+      </div>`;
+    } else if (!friends.list.length) {
+      html = `<div class="hub-card hub-idle">
+        <div class="hub-body"><div class="hub-idle-title">Ready for a head-to-head?</div>
+        <div class="hub-idle-sub">Add a friend, then race a session — each of you plays your own level, so anyone can win.</div></div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubfriends>Find friends</button></div>
+      </div>`;
+    } else {
+      const chips = matches.history.slice(0, 4).map((m) => {
+        const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' ? 'draw' : (m.my_delta > 0 ? 'won' : m.my_delta < 0 ? 'lost' : 'draw'));
+        const lbl = res === 'won' ? 'W' : res === 'lost' ? 'L' : 'D';
+        return `<button type="button" class="hub-chip ${res}" data-mopen="${m.id}"><b>${lbl}</b> ${escapeHTML(m.opponent_name)}${m.my_delta ? ` <span>${m.my_delta > 0 ? '+' : ''}${m.my_delta}</span>` : ''}</button>`;
+      }).join('');
+      html = `<div class="hub-card hub-idle">
+        <div class="hub-body"><div class="hub-idle-title">No match on</div>
+        <div class="hub-idle-sub">${matches.history.length ? 'Recent results — tap one to revisit it.' : 'Race a friend at your own levels. Winner takes elo.'}</div>
+        ${chips ? `<div class="hub-chips">${chips}</div>` : ''}</div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubchallenge>Challenge a friend</button></div>
+      </div>`;
+    }
+    els.forEach((e) => { e.hidden = false; e.innerHTML = html; });
+    // The hub owns the single dark primary on the climbing screen (Challenge /
+    // Log-in-match). Demote the header "Log a climb" pill to an outline so it
+    // doesn't compete — logging stays one tap via it and the FAB.
+    const cab = $('#climb-add-btn');
+    if (cab) cab.classList.add('is-secondary');
+    renderMatchDock(); // hub card visibility gates the dock
+  }
+
   (function bindMatchUI() {
     if (matchModal) {
       $('#match-close').addEventListener('click', closeH2H);
@@ -2781,6 +2937,11 @@
     document.addEventListener('click', (ev) => {
       const chal = ev.target.closest('[data-mchal]'); if (chal) { ev.preventDefault(); matchChallenge(chal.dataset.mchal); return; }
       const b = ev.target.closest('[data-mact]'); if (b) { ev.preventDefault(); matchAct(b.dataset.mact, b.dataset.mid); return; }
+      // Hub actions — checked before [data-mopen] so buttons inside the live
+      // card don't also open the head-to-head.
+      const hl = ev.target.closest('[data-hublog]'); if (hl) { ev.preventDefault(); openQuickLog(); return; }
+      const hc = ev.target.closest('[data-hubchallenge]'); if (hc) { ev.preventDefault(); openMatchCreate(null); return; }
+      const hf = ev.target.closest('[data-hubfriends]'); if (hf) { ev.preventDefault(); showView('friends'); return; }
       const open = ev.target.closest('[data-mopen]'); if (open) { ev.preventDefault(); openH2H(open.dataset.mopen); }
     });
     // The persistent dock: tap the bar → head-to-head; Log → the usual quick sheet.
