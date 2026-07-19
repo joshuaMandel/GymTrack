@@ -676,13 +676,22 @@
   }
   const avatarInitial = (name) => (String(name || '').trim()[0] || '?').toUpperCase();
   const avatarStorageBase = () => `${(cfg.url || '').replace(/\/$/, '')}/storage/v1/object/public/avatars`;
-  const avatarPicUrl = (uid, which, v) => `${avatarStorageBase()}/${uid}/${which}.webp?v=${v || 1}`;
+  function avatarPicUrl(uid, which, v) {
+    // Resolve through the storage client so the public URL matches the backend;
+    // ?v busts the browser cache on replace (fixed object paths). data: URLs
+    // (test stub) already change on replace, so they skip the query.
+    try {
+      const u = sb.storage.from('avatars').getPublicUrl(`${uid}/${which}.webp`).data.publicUrl;
+      return u.startsWith('data:') ? u : `${u}?v=${v || 1}`;
+    } catch (e) { return `${avatarStorageBase()}/${uid}/${which}.webp?v=${v || 1}`; }
+  }
   // In-memory version cache so a surface that doesn't carry avatar_v (e.g. a
   // realtime feed row) can still render the right picture once we've seen it.
   const avatarVer = new Map();
   function noteAvatar(uid, v) { if (uid != null && v != null) avatarVer.set(uid, v); }
   function avatarVersion(uid, v) { if (v != null) { noteAvatar(uid, v); return v; } return avatarVer.get(uid) || 0; }
-  // size: 'sm' (lists) | 'md' (cards/matches) | 'lg' (profile hero)
+  // size: 'sm' (lists) | 'md' (cards/matches) | 'lg' (profile hero). data-uid lets
+  // sweepAvatars() upgrade a default to a photo once we learn its version.
   function avatarHTML(uid, name, size, v) {
     const ver = avatarVersion(uid, v);
     const which = size === 'lg' ? 'full' : 'thumb';
@@ -691,7 +700,48 @@
     const img = ver > 0
       ? `<img class="av-img" src="${avatarPicUrl(uid, which, ver)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('on')" onerror="this.remove()">`
       : '';
-    return `<span class="av av-${size || 'sm'}" style="background:${color}"><span class="av-ini">${ini}</span>${img}</span>`;
+    return `<span class="av av-${size || 'sm'}" style="background:${color}" data-uid="${uid || ''}" data-avsize="${size || 'sm'}"><span class="av-ini">${ini}</span>${img}</span>`;
+  }
+  // Upgrade default circles to photos (and back) from the version cache — no
+  // layout shift, the photo fades in. Called after a fetch or a local change.
+  function upgradeAvatarDom() {
+    document.querySelectorAll('.av[data-uid]').forEach((span) => {
+      const uid = span.getAttribute('data-uid'); if (!uid) return;
+      const v = avatarVer.get(uid) || 0;
+      const existing = span.querySelector('.av-img');
+      if (v > 0 && !existing) {
+        const which = span.getAttribute('data-avsize') === 'lg' ? 'full' : 'thumb';
+        const img = document.createElement('img');
+        img.className = 'av-img'; img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+        img.onload = () => img.classList.add('on'); img.onerror = () => img.remove();
+        img.src = avatarPicUrl(uid, which, v);
+        span.appendChild(img);
+      } else if (v === 0 && existing) {
+        existing.remove(); // picture was removed → back to the initial
+      }
+    });
+  }
+  // Learn the picture versions of everyone currently on screen (one round-trip
+  // for the unknowns), then upgrade their avatars. Cached, so scrolling back
+  // doesn't refetch; offline → no fetch, defaults stay.
+  let avatarSweepT = null;
+  function sweepAvatars() {
+    if (avatarSweepT) return; // coalesce bursts of renders into one sweep
+    avatarSweepT = setTimeout(async () => {
+      avatarSweepT = null;
+      const uids = [...new Set([...document.querySelectorAll('.av[data-uid]')].map((s) => s.getAttribute('data-uid')).filter(Boolean))];
+      // Re-check users we've only ever seen as default (v 0/unknown) so a newly
+      // uploaded picture appears; users WITH a picture stay cached (their image
+      // is browser-cached, so scrolling never refetches it).
+      const need = uids.filter((u) => !(avatarVer.get(u) > 0));
+      if (cloudOn() && need.length) {
+        try {
+          const { data, error } = await sb.rpc('avatars_for', { uids: need });
+          if (!error) { (data || []).forEach((r) => avatarVer.set(r.id, r.v)); need.forEach((u) => { if (!avatarVer.has(u)) avatarVer.set(u, 0); }); }
+        } catch (e) { /* offline — keep defaults */ }
+      }
+      upgradeAvatarDom();
+    }, 30);
   }
 
   // Extract a human-readable message from a Supabase / fetch error object
@@ -738,7 +788,8 @@
     redrawActiveCharts();  // charts drawn while hidden re-fit to real width
     if (view === 'friends') { renderFriendsScreen(); loadFriends(); loadFeed(); } // freshest data on entry
     if (view === 'admin') renderAdmin();
-    if (typeof renderMatchDock === 'function') renderMatchDock(); // dock only on Home + Climbing
+    if (typeof renderMatchDock === "function") renderMatchDock(); // dock only on Home + Climbing
+    sweepAvatars();
   }
   $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
@@ -2410,6 +2461,7 @@
           li.addEventListener('click', () => openLbSummary(rows[i]));
         });
       });
+      sweepAvatars();
     } catch (e) {
       // Function not installed yet, or transient failure — hide quietly.
       console.warn('Leaderboard unavailable:', e);
@@ -2506,6 +2558,7 @@
     if (climb) climb.hidden = !show;
     renderFeedInto($('#friends-feed'), feedItems);
     renderFeedInto($('#friends-feed-climb'), feedItems.filter((i) => i.kind === 'climb_session'));
+    sweepAvatars();
     const stale = feedStatus === 'stale';
     ['#friends-feed-stale', '#friends-feed-climb-stale'].forEach((s) => { const e = $(s); if (e) e.hidden = !stale; });
   }
@@ -2582,6 +2635,7 @@
     if (fl) fl.innerHTML = friends.list.length ? friends.list.map((f) => personRow(f, 'friends')).join('') : '<li class="empty">No friends yet — search above to add some.</li>';
     renderMatchesPanel();
     updateFriendsBadge();
+    sweepAvatars();
   }
   function updateFriendsBadge() {
     const inc = friends.requests.filter((r) => r.direction === 'incoming').length + matches.incoming.length;
@@ -2677,8 +2731,159 @@
     loadFeed();
     loadMatches();
     loadAdminFlag();
+    loadMyAvatar();
     subscribeRealtime();
   }
+  async function loadMyAvatar() {
+    if (!cloudOn()) { myAvatarV = 0; return; }
+    try {
+      const { data } = await sb.rpc('avatars_for', { uids: [myUid()] });
+      const r = (data || []).find((x) => x.id === myUid());
+      myAvatarV = r ? r.v : 0; avatarVer.set(myUid(), myAvatarV);
+      renderAccount(); if ($('#view-profile') && $('#view-profile').classList.contains('is-active')) renderProfile();
+    } catch (e) { /* offline — header keeps the default/cached */ }
+  }
+
+  /* ======================================================================
+     Profile-picture editor: tap the avatar → pick → square crop → resize +
+     compress to two WebP sizes → upload to Storage → bump version. Remove
+     deletes both objects and reverts to the default. Uploads need a connection.
+     ====================================================================== */
+  const AV_THUMB = 96, AV_FULL = 400, AV_MAX_BYTES = 150 * 1024;
+  const avatarOffline = () => !!window.__OFFLINE || navigator.onLine === false;
+  let crop = null; // { img, k, base, ox, oy, F }
+  function profileStatus(msg, ok) {
+    const s = $('#profile-status'); if (!s) return;
+    s.textContent = msg || ''; s.hidden = !msg; s.className = 'auth-status' + (ok === false ? ' err' : '');
+  }
+  function onAvatarTap() {
+    if (!cloudOn()) { profileStatus('Sign in to add a profile picture.', false); return; }
+    if (avatarOffline()) { profileStatus('You’re offline — connect to change your picture. Your current one still shows.', false); return; }
+    profileStatus('');
+    $('#avatar-file').click();
+  }
+  function onAvatarFile(e) {
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { profileStatus('That file isn’t a supported image (JPEG, PNG, or WebP).', false); return; }
+    if (file.size > 25 * 1024 * 1024) { profileStatus('That image is too large (over 25 MB).', false); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); openCrop(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); profileStatus('Couldn’t read that image — try another.', false); };
+    img.src = url;
+  }
+  function openCrop(img) {
+    const modal = $('#avatar-crop-modal'); modal.hidden = false;
+    $('#avatar-crop-status').hidden = true;
+    const frameEl = $('#crop-frame');
+    const F = frameEl.getBoundingClientRect().width || 260;
+    const base = F / Math.min(img.naturalWidth, img.naturalHeight); // cover
+    crop = { img, base, F, z: 1, k: base, ox: 0, oy: 0 };
+    const ie = $('#crop-img'); ie.src = img.src;
+    $('#crop-zoom').value = '1';
+    centerCrop(); applyCrop();
+  }
+  function centerCrop() { crop.k = crop.base * crop.z; crop.ox = (crop.F - crop.img.naturalWidth * crop.k) / 2; crop.oy = (crop.F - crop.img.naturalHeight * crop.k) / 2; }
+  function clampCrop() {
+    const wk = crop.img.naturalWidth * crop.k, hk = crop.img.naturalHeight * crop.k;
+    crop.ox = Math.min(0, Math.max(crop.F - wk, crop.ox));
+    crop.oy = Math.min(0, Math.max(crop.F - hk, crop.oy));
+  }
+  function applyCrop() {
+    clampCrop();
+    const ie = $('#crop-img');
+    ie.style.width = crop.img.naturalWidth * crop.k + 'px';
+    ie.style.height = crop.img.naturalHeight * crop.k + 'px';
+    ie.style.left = crop.ox + 'px'; ie.style.top = crop.oy + 'px';
+  }
+  function setZoom(z) {
+    const prevK = crop.k; crop.z = Math.max(1, Math.min(4, z)); crop.k = crop.base * crop.z;
+    // keep the frame center anchored while zooming
+    const cx = crop.F / 2, cy = crop.F / 2;
+    crop.ox = cx - (cx - crop.ox) * (crop.k / prevK);
+    crop.oy = cy - (cy - crop.oy) * (crop.k / prevK);
+    applyCrop();
+  }
+  async function canvasBlobUnder(canvas, maxBytes) {
+    const type = 'image/webp';
+    let q = 0.9, blob = null;
+    for (let i = 0; i < 6; i++) {
+      blob = await new Promise((r) => canvas.toBlob(r, type, q));
+      if (!blob) break; // webp unsupported
+      if (blob.size <= maxBytes || q <= 0.4) return blob;
+      q -= 0.12;
+    }
+    if (blob) return blob;
+    // WebP unsupported → JPEG fallback
+    for (let q2 = 0.9; q2 >= 0.4; q2 -= 0.12) {
+      const b = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', q2));
+      if (b && (b.size <= maxBytes || q2 <= 0.4)) return b;
+    }
+    return null;
+  }
+  function cropToCanvas(dim) {
+    const srcSize = crop.F / crop.k, sx = -crop.ox / crop.k, sy = -crop.oy / crop.k;
+    const c = document.createElement('canvas'); c.width = dim; c.height = dim;
+    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+    g.drawImage(crop.img, sx, sy, srcSize, srcSize, 0, 0, dim, dim);
+    return c;
+  }
+  async function saveCrop() {
+    const btn = $('#avatar-crop-save'); const st = $('#avatar-crop-status');
+    btn.disabled = true; st.hidden = false; st.className = 'auth-status'; st.textContent = 'Processing…';
+    try {
+      const thumb = await canvasBlobUnder(cropToCanvas(AV_THUMB), AV_MAX_BYTES);
+      const full = await canvasBlobUnder(cropToCanvas(AV_FULL), AV_MAX_BYTES);
+      if (!thumb || !full) throw new Error('Could not process the image.');
+      const uid = myUid();
+      st.textContent = 'Uploading…';
+      const up1 = await sb.storage.from('avatars').upload(`${uid}/thumb.webp`, thumb, { upsert: true, contentType: thumb.type });
+      if (up1.error) throw up1.error;
+      const up2 = await sb.storage.from('avatars').upload(`${uid}/full.webp`, full, { upsert: true, contentType: full.type });
+      if (up2.error) throw up2.error;
+      const { data: nv, error } = await sb.rpc('avatar_set');
+      if (error) throw error;
+      myAvatarV = nv || (myAvatarV + 1); avatarVer.set(uid, myAvatarV);
+      $('#avatar-crop-modal').hidden = true; crop = null;
+      renderAccount(); renderProfile(); profileStatus('Profile picture updated ✓', true);
+    } catch (e) {
+      st.textContent = avatarOffline() ? 'You went offline — try again when connected.' : (errMsg(e) || 'Upload failed.');
+      st.className = 'auth-status err';
+    } finally { btn.disabled = false; }
+  }
+  async function removeAvatar() {
+    if (avatarOffline()) { profileStatus('You’re offline — connect to remove your picture.', false); return; }
+    const uid = myUid();
+    try {
+      await sb.storage.from('avatars').remove([`${uid}/thumb.webp`, `${uid}/full.webp`]);
+      const { error } = await sb.rpc('avatar_clear'); if (error) throw error;
+      myAvatarV = 0; avatarVer.set(uid, 0);
+      renderAccount(); renderProfile(); profileStatus('Reverted to the default avatar.', true);
+    } catch (e) { profileStatus('Couldn’t remove the picture — try again.', false); }
+  }
+  (function bindAvatarEditor() {
+    const av = $('#profile-ava'); if (!av) return;
+    av.addEventListener('click', onAvatarTap);
+    $('#avatar-remove').addEventListener('click', removeAvatar);
+    $('#avatar-file').addEventListener('change', onAvatarFile);
+    $('#avatar-crop-cancel').addEventListener('click', () => { $('#avatar-crop-modal').hidden = true; crop = null; });
+    $('#avatar-crop-modal').addEventListener('click', (e) => { if (e.target.id === 'avatar-crop-modal') { $('#avatar-crop-modal').hidden = true; crop = null; } });
+    $('#avatar-crop-save').addEventListener('click', saveCrop);
+    $('#crop-zoom').addEventListener('input', (e) => { if (crop) setZoom(parseFloat(e.target.value)); });
+    // drag + wheel-zoom + two-finger pinch on the frame
+    const frame = $('#crop-frame'); const pts = new Map(); let pinchD0 = 0, pinchZ0 = 1, dragX = 0, dragY = 0;
+    frame.addEventListener('pointerdown', (e) => { frame.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragX = e.clientX; dragY = e.clientY; if (pts.size === 2) { const p = [...pts.values()]; pinchD0 = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); pinchZ0 = crop.z; } });
+    frame.addEventListener('pointermove', (e) => {
+      if (!crop || !pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { const p = [...pts.values()]; const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); if (pinchD0) { setZoom(pinchZ0 * (d / pinchD0)); $('#crop-zoom').value = String(crop.z); } return; }
+      crop.ox += e.clientX - dragX; crop.oy += e.clientY - dragY; dragX = e.clientX; dragY = e.clientY; applyCrop();
+    });
+    const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinchD0 = 0; };
+    frame.addEventListener('pointerup', up); frame.addEventListener('pointercancel', up);
+    frame.addEventListener('wheel', (e) => { if (!crop) return; e.preventDefault(); setZoom(crop.z * (e.deltaY < 0 ? 1.1 : 0.9)); $('#crop-zoom').value = String(crop.z); }, { passive: false });
+  })();
 
   /* ======================================================================
      Admin (owner-only). The screen and every RPC are gated server-side by
@@ -3010,6 +3215,7 @@
     if (resolved && h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; }
     const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
     const side = (p, isMe, lead) => `<div class="h2h-side ${isMe ? 'me' : ''} ${lead ? 'leading' : ''}">
+      <div class="h2h-ava">${avatarHTML(p.uid, p.name, 'md', p.avatar_v)}</div>
       <div class="h2h-name">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}</div>
       <div class="h2h-score ${sc(p.score)}">${p.score > 0 ? '+' : ''}${p.score}</div>
       <div class="h2h-base">racing level ${p.baseline != null ? p.baseline : '—'}</div>
@@ -3042,6 +3248,7 @@
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
     }
     body.innerHTML = html;
+    sweepAvatars();
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
     const e = $('#h2h-end'); if (e && !me.ended) e.addEventListener('click', endMatch);
     const d = $('#h2h-done'); if (d) d.addEventListener('click', closeH2H);
@@ -3204,9 +3411,9 @@
         <div class="hub-body">
           <div class="hub-live-head"><span class="match-badge live">LIVE</span><span class="hub-rules">${escapeHTML(rules)}</span>${mdStale ? '<span class="feed-stale">offline — last known</span>' : ''}</div>
           <div class="hub-scores">
-            <span class="hub-side you"><span class="hub-nm">You</span>${youScore}</span>
+            <span class="hub-side you">${avatarHTML(myUid(), 'You', 'sm', myAvatarV)}<span class="hub-nm">You</span>${youScore}</span>
             <span class="hub-mid"><span class="hub-vs">vs</span><span class="hub-prog">${escapeHTML(meta)}</span></span>
-            <span class="hub-side"><span class="hub-nm">${themName}</span>${themScore}</span>
+            <span class="hub-side">${avatarHTML(s ? them.uid : a.opponent, s ? them.name : a.opponent_name, 'sm', s ? them.avatar_v : a.avatar_v)}<span class="hub-nm">${themName}</span>${themScore}</span>
           </div>
         </div>
         <div class="hub-cta-zone"><button type="button" class="btn primary sm" data-hublog>${logLabel}</button><button type="button" class="btn ghost sm" data-mopen="${a.id}">Open match</button></div>
@@ -3245,6 +3452,7 @@
       </div>`;
     }
     els.forEach((e) => { e.hidden = false; e.innerHTML = html; });
+    sweepAvatars();
     // The hub owns the single dark primary on the climbing screen (Challenge /
     // Log-in-match). Demote the header "Log a climb" pill to an outline so it
     // doesn't compete — logging stays one tap via it and the FAB.
@@ -4423,6 +4631,7 @@
     const label = name || (session && session.user && session.user.email) || 'Athlete';
     const ava = $('#profile-ava');
     ava.innerHTML = avatarHTML(myUid(), label, 'lg', myAvatarV);
+    const rm = $('#avatar-remove'); if (rm) rm.hidden = !(myAvatarV > 0);
     if (document.activeElement !== $('#profile-name')) $('#profile-name').value = name;
     const meta = [];
     if (session && session.user) {
