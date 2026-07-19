@@ -697,8 +697,13 @@
     const which = size === 'lg' ? 'full' : 'thumb';
     const color = avatarColorFor(uid);
     const ini = escapeHTML(avatarInitial(name));
+    // Render a known photo already-visible ('on'): on a full re-render (e.g. the
+    // head-to-head's ~3s poll) a fresh img must NOT restart the opacity fade, or
+    // the default circle flashes underneath every refresh. The first-appearance
+    // fade is kept for the sweep-upgrade path (upgradeAvatarDom), which handles
+    // avatars whose version wasn't known at render time.
     const img = ver > 0
-      ? `<img class="av-img" src="${avatarPicUrl(uid, which, ver)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('on')" onerror="this.remove()">`
+      ? `<img class="av-img on" src="${avatarPicUrl(uid, which, ver)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
       : '';
     return `<span class="av av-${size || 'sm'}" style="background:${color}" data-uid="${uid || ''}" data-avsize="${size || 'sm'}"><span class="av-ini">${ini}</span>${img}</span>`;
   }
