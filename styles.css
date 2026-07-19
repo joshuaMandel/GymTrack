@@ -938,6 +938,11 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   cursor: pointer;
 }
 .qs-grade.is-active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+/* Live-match point value on each grade pill (par points, known in advance). */
+.qs-grade .qs-pts { display: block; font-size: 10px; font-weight: 800; color: var(--good); line-height: 1; margin-top: 2px; }
+.qs-grade .qs-pts.zero { color: var(--muted); }
+.qs-grade.is-active .qs-pts { color: var(--accent); }
+.qs-match-note { text-align: center; font-size: 12px; font-weight: 600; color: var(--accent-2); margin: 2px 0 6px; }
 .qs-results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .qs-result {
   min-height: 54px; border-radius: 14px; border: 0; cursor: pointer;
@@ -1375,6 +1380,11 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .h2h-elo { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .h2h-vs { align-self: center; font-family: var(--font-disp); font-weight: 700; color: var(--muted); font-size: 13px; }
 .h2h-status { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.h2h-turn { font-weight: 700; }
+.h2h-turn.mine { color: var(--accent-2); }
+.h2h-pts-lbl { font-size: 13px; font-weight: 700; color: var(--muted); }
+.h2h-guide { text-align: center; font-size: 11px; color: var(--muted); line-height: 1.5; margin: 8px auto 2px; max-width: 340px; }
+.md-pts { font-size: 11px; font-weight: 700; color: var(--muted); }
 .h2h-result { text-align: center; font-family: var(--font-disp); font-weight: 700; font-size: 22px; margin: 6px 0; }
 .h2h-result.won { color: var(--good); } .h2h-result.lost { color: var(--danger); } .h2h-result.draw { color: var(--muted); }
 .h2h-elochange { text-align: center; font-size: 15px; font-weight: 700; margin-bottom: 12px; }

@@ -1215,6 +1215,29 @@
   const routeRating = (discipline, grade) => SS_BASE + (discipline === 'Bouldering' ? 0 : SS_ROPE_OFFSET) + SS_STEP * gradeD(discipline, grade);
   const sendExpected = (R, routeR) => 1 / (1 + Math.pow(10, (routeR - R) / SS_SPREAD));
 
+  /* ---------- Match par-points helpers ----------
+     Matches score PAR POINTS: each climb's value is a pure function of grade vs
+     YOUR par (from match_state), so it's knowable before you climb. Turn state
+     (turn / can_log) always comes from the server — never derived locally. */
+  const MATCH_DISCS = { boulder: ['Bouldering'], lead: ['Sport'], toprope: ['Top Rope'], agnostic: ['Sport', 'Top Rope'] };
+  // The live ruleset match state; mdState is kept fresh by the dock's 3s poll
+  // even while the dock itself is hidden.
+  function matchLive() {
+    return (matches.active && mdState && mdState.id === matches.active.id && mdState.status === 'active'
+      && mdState.rules && mdState.rules.discipline != null) ? mdState : null;
+  }
+  const matchMySide = (s) => (s.i_am === 'challenger' ? s.challenger : s.opponent);
+  const matchTheirSide = (s) => (s.i_am === 'challenger' ? s.opponent : s.challenger);
+  // What a SEND of this grade is worth for me right now (flash = +1 more when
+  // it scores): max(0, 3 + round(D − parD)). Null when it wouldn't count.
+  function matchPointsFor(discipline, grade) {
+    const live = matchLive(); if (!live) return null;
+    const discs = MATCH_DISCS[live.rules.discipline]; if (!discs || !discs.includes(discipline)) return null;
+    const me = matchMySide(live); if (me.par_d == null) return null;
+    const d = gradeD(discipline, grade); if (d == null) return null;
+    return Math.max(0, 3 + Math.round(d - me.par_d));
+  }
+
   // THE scoring replay over an explicit climb list, grouped into sessions
   // (dates). Returns the converged rating plus per-session detail with each
   // climb's exact ± rating move.
@@ -1789,8 +1812,13 @@
       renderQuickLog();
     }));
 
-    $('#qs-grades').innerHTML = gradesFor(qsState.discipline).map((g) =>
-      `<button type="button" class="qs-grade${g === qsState.grade ? ' is-active' : ''}" data-g="${escapeHTML(g)}">${escapeHTML(g)}</button>`).join('');
+    // During a live match, every grade pill shows what a send of it is worth
+    // for YOU (par points — knowable before you climb, so you can strategize).
+    $('#qs-grades').innerHTML = gradesFor(qsState.discipline).map((g) => {
+      const p = matchPointsFor(qsState.discipline, g);
+      const chip = p == null ? '' : `<span class="qs-pts${p === 0 ? ' zero' : ''}">${p === 0 ? '0' : '+' + p}</span>`;
+      return `<button type="button" class="qs-grade${g === qsState.grade ? ' is-active' : ''}" data-g="${escapeHTML(g)}">${escapeHTML(g)}${chip}</button>`;
+    }).join('');
     $$('#qs-grades .qs-grade').forEach((b) => b.addEventListener('click', () => {
       qsState.grade = b.dataset.g;
       saveQs();
@@ -1823,6 +1851,21 @@
     }));
 
     $$('#quick-sheet .qs-result').forEach((b) => { b.disabled = !qsState.grade; });
+
+    // Match strip: whose turn it is and whether this sheet's discipline counts.
+    const note = $('#qs-match-note');
+    if (note) {
+      const live = matchLive();
+      const discs = live ? MATCH_DISCS[live.rules.discipline] : null;
+      if (!live || !discs || !discs.includes(qsState.discipline)) { note.hidden = true; }
+      else {
+        const me = matchMySide(live), them = matchTheirSide(live), bn = live.rules.best_n;
+        note.hidden = false;
+        if (bn && me.counted != null && me.counted >= bn) note.textContent = `Match · your ${bn} slots are full — climbs log as session only.`;
+        else if (me.can_log === false) note.textContent = `Match · ${them.name}'s turn — climbs log as session only.`;
+        else note.textContent = 'Match · your turn — each grade shows its points, flash +1.';
+      }
+    }
   }
 
   function quickSaveClimb(discipline, grade, result) {
@@ -1831,12 +1874,25 @@
       attempts: result === 'Project' ? 2 : 1, // a project implies more than one go
       result, location: '', notes: ''
     };
+    // Predict whether this climb will COUNT toward the live match (turns/slots/
+    // discipline). Client-side prediction from the last poll; the server's walk
+    // is the truth and the next poll reconciles a rare race.
+    const live = matchLive();
+    const inDisc = !!(live && (MATCH_DISCS[live.rules.discipline] || []).includes(discipline));
+    const willCount = inDisc && matchMySide(live).can_log === true;
     withSync(async () => {
       await Store.addClimb(entry);
       renderClimbing();
       renderDashboard();
       const added = state.climbs[state.climbs.length - 1];
-      showToast(`${grade} ${result} ✓`, () => {
+      let toastMsg = `${grade} ${result} ✓`;
+      if (live && inDisc && !willCount) {
+        const me = matchMySide(live), them = matchTheirSide(live), bn = live.rules.best_n;
+        toastMsg += bn && me.counted != null && me.counted >= bn
+          ? ' — session only (match slots full)'
+          : ` — session only (${them.name}'s turn)`;
+      }
+      showToast(toastMsg, () => {
         withSync(async () => {
           await Store.delClimb(added.id);
           renderClimbing(); renderDashboard(); renderQuickLog();
@@ -1849,11 +1905,11 @@
       // my own climb won't come back over realtime — refresh the live match views
       if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
       if (h2hMid) refreshH2H();
-      // During a live match, drop the sheet after logging so you fall back to the
-      // head-to-head and watch the score update; plain sessions keep it open for
-      // rapid multi-logging. Either way the stick-figure moment plays top-of-
-      // screen AFTER the save — never in its path — matches only.
-      if (matches.active) {
+      // A COUNTING match climb drops the sheet (fall back to the head-to-head)
+      // and fires the stick-figure moment. A session-only climb during a match
+      // keeps the sheet open and stays quiet. If the live state isn't known yet
+      // (first poll pending), fall back to the old always-close behavior.
+      if (matches.active && (live == null || willCount)) {
         quickSheet.hidden = true;
         playMatchAnim({
           type: result === 'Project' ? 'fail' : 'send',
@@ -3173,9 +3229,8 @@
     const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
     const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
-    const lenLabel = `best of ${mcState.length} — your first ${mcState.length} ${noun} lock in, attempts included`;
     const sum = $('#mc-summary');
-    if (sum) sum.textContent = `${discLabel} · ${lenLabel}. Flash = +1 bonus point.`;
+    if (sum) sum.textContent = `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Points vs your par: at par 3 · +1 per grade above · below 2/1 · far below or fall 0 · flash +1. Most points wins.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
@@ -3237,18 +3292,22 @@
     const me = iAmCh ? s.challenger : s.opponent, them = iAmCh ? s.opponent : s.challenger;
     const resolved = s.status === 'resolved' || s.status === 'abandoned';
     if (resolved && h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; }
-    const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+    const rules = s.rules || {};
+    // Par-points mode = any ruleset match; legacy (null-discipline) rows keep
+    // the old signed-elo-delta presentation end to end.
+    const parMode = rules.discipline != null;
+    const sc = (v) => (parMode ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : '');
     const side = (p, isMe, lead) => `<div class="h2h-side ${isMe ? 'me' : ''} ${lead ? 'leading' : ''}">
       <div class="h2h-ava">${avatarHTML(p.uid, p.name, 'md', p.avatar_v)}</div>
       <div class="h2h-name">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}</div>
-      <div class="h2h-score ${sc(p.score)}">${p.score > 0 ? '+' : ''}${p.score}</div>
-      <div class="h2h-base">racing level ${p.baseline != null ? p.baseline : '—'}</div>
+      <div class="h2h-score ${sc(p.score)}">${!parMode && p.score > 0 ? '+' : ''}${p.score}${parMode ? '<span class="h2h-pts-lbl"> pts</span>' : ''}</div>
+      <div class="h2h-base">${parMode ? `par ${p.par != null ? escapeHTML(p.par) : '—'}` : `racing level ${p.baseline != null ? p.baseline : '—'}`}</div>
       <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
-    const rules = s.rules || {};
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
-    // Hard cap: once you've logged best_n counting sends, your side is full —
-    // further climbs no longer count toward the match (first N lock in).
+    // Hard cap: once your best_n slots are used your side is full — further
+    // climbs no longer count toward the match.
     const myFull = !!(rules.best_n && me.counted != null && me.counted >= rules.best_n);
+    const myTurn = me.can_log === true;
     // Rules banner — always visible so the agreed ruleset is unambiguous.
     let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}</span></div>` : '';
     // Best-of-N progress: "4 of 6 problems logged" per side, or a plain count for
@@ -3267,14 +3326,22 @@
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
     } else if (myFull) {
       html += `<div class="h2h-status">Your ${rules.best_n} ${noun} are locked in — match limit reached. New climbs won’t change your score.</div>`;
+    } else if (parMode && s.turn) {
+      html += `<div class="h2h-status h2h-turn ${myTurn ? 'mine' : ''}">${myTurn ? 'Your turn — log a climb.' : `${escapeHTML(them.name)}’s turn…`}</div>`;
     } else {
       html += `<div class="h2h-status">Live — only ${escapeHTML((rules.discipline === 'boulder' ? 'bouldering' : rules.style_label ? rules.style_label.split(' · ')[0].toLowerCase() : 'matching'))} climbs count. Log as usual.</div>`;
     }
     html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
+    // How points work — visible while live so both players can strategize.
+    if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
+      html += `<div class="h2h-guide">Par ${escapeHTML(me.par)} · send at par 3 · +1 per grade above · below par 2/1 · far below or fall 0 · flash +1 — most points wins.</div>`;
+    }
     if (!resolved && s.status === 'active') {
       const logBtn = myFull
         ? `<button class="btn primary" id="h2h-log" disabled>Limit reached · ${rules.best_n} of ${rules.best_n}</button>`
-        : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
+        : (parMode && s.turn && !myTurn && !me.ended)
+          ? `<button class="btn primary" id="h2h-log" disabled>${escapeHTML(them.name)}’s turn…</button>`
+          : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
       html += `<div class="h2h-actions">${logBtn}<button class="btn ghost" id="h2h-end"${me.ended ? ' disabled' : ''}>${me.ended ? 'Waiting for them…' : 'End my session'}</button></div>`;
     } else if (resolved) {
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
@@ -3323,13 +3390,13 @@
     const active = matches.active;
     const resolvedRecently = mdState && (mdState.status === 'resolved' || mdState.status === 'abandoned') && Date.now() < mdEndedHideAt;
     const anyLive = cloudOn() && dockableView() && (active || resolvedRecently);
-    // Polling runs whenever a match is live on a dockable view — the hub card
-    // needs fresh state even while the dock itself is hidden.
-    if (anyLive && active) {
+    // Polling runs whenever a match is ACTIVE on any view — the hub card, the
+    // head-to-head, and the quick sheet's turn/point chips all read mdState,
+    // and the sheet can open from anywhere. Dock VISIBILITY stays view-gated.
+    if (cloudOn() && active) {
       startDockPoll();
       if (!mdState || (mdState.id !== active.id)) { mdState = null; refreshMatchDock(); }
-    }
-    if (!anyLive) {
+    } else {
       stopDockPoll();
       if (!active && mdState && mdState.status === 'active' && !mdFetching) {
         refreshMatchDock(); // match ended elsewhere — fetch the final result once
@@ -3370,6 +3437,14 @@
     }
     renderMatchHub(); // hub card first (it may hide/show the dock)
     renderMatchDock();
+    // If the quick sheet is open, keep its turn note + point chips current —
+    // but only rebuild when the match facts actually changed (rebuilding every
+    // poll would recreate the pill buttons mid-tap).
+    if (quickSheet && !quickSheet.hidden) {
+      const live = matchLive();
+      const key = live ? JSON.stringify([live.turn, matchMySide(live).counted, matchMySide(live).can_log, matchMySide(live).par_d]) : '';
+      if (quickSheet.__matchKey !== key) { quickSheet.__matchKey = key; renderQuickLog(); }
+    }
   }
   // Dock appears/disappears as the hub card scrolls out of / into view.
   let mdScrollT = null;
@@ -3390,7 +3465,8 @@
     const s = mdState, iAmCh = s.i_am === 'challenger';
     const me = iAmCh ? s.challenger : s.opponent, them = iAmCh ? s.opponent : s.challenger;
     const resolved = s.status === 'resolved' || s.status === 'abandoned';
-    const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+    // Par-points are unsigned; only legacy elo-delta scores color by sign.
+    const sc = (v) => ((s.rules && s.rules.discipline != null) ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : '');
     if (resolved) {
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
       matchDock.classList.add('resolved');
@@ -3403,13 +3479,16 @@
     matchDock.classList.remove('resolved');
     if (logBtn) logBtn.hidden = false;
     const rules = s.rules || {};
+    const parMode = rules.discipline != null;
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
     const prog = (rules.best_n && me.counted != null) ? `${Math.min(me.counted, rules.best_n)} of ${rules.best_n} ${noun}`
       : (me.counted != null ? `${me.counted} ${noun}` : '');
-    const meta = [prog, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
+    const turnHint = parMode && s.turn ? (me.can_log === true ? 'your turn' : `${them.name}’s turn`) : '';
+    const meta = [prog, turnHint, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
+    const num = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
     c.innerHTML = `<span class="md-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
       <span class="md-body">
-        <span class="md-line1"><b class="${sc(me.score)}">${me.score > 0 ? '+' : ''}${me.score}</b><span class="md-vs">vs</span><b class="${sc(them.score)}">${them.score > 0 ? '+' : ''}${them.score}</b> <span class="md-them">${escapeHTML(them.name)}</span></span>
+        <span class="md-line1"><b class="${sc(me.score)}">${num(me.score)}</b><span class="md-vs">vs</span><b class="${sc(them.score)}">${num(them.score)}</b>${parMode ? ' <span class="md-pts">pts</span>' : ''} <span class="md-them">${escapeHTML(them.name)}</span></span>
         <span class="md-line2">${escapeHTML(meta)}${mdStale ? ' <span class="md-stale">· offline</span>' : ''}</span>
       </span>`;
   }
@@ -3434,16 +3513,24 @@
       const iAmCh = s && s.i_am === 'challenger';
       const me = s ? (iAmCh ? s.challenger : s.opponent) : null;
       const them = s ? (iAmCh ? s.opponent : s.challenger) : null;
-      const sc = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+      const parMode = !!(((s && s.rules && s.rules.discipline) || a.discipline) != null);
+      const sc = (v) => (parMode ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : '');
       const rules = (s && s.rules && s.rules.style_label) || a.rules_label || 'Head-to-head';
       const noun = ((s && s.rules && s.rules.discipline) || a.discipline) === 'boulder' ? 'problems' : 'routes';
       const bn = (s && s.rules && s.rules.best_n) != null ? s.rules.best_n : a.best_n;
       const prog = me && me.counted != null ? (bn ? `${Math.min(me.counted, bn)} of ${bn} ${noun}` : `${me.counted} ${noun}`) : '';
-      const meta = [prog, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
-      const youScore = s ? `<b class="${sc(me.score)}">${me.score > 0 ? '+' : ''}${me.score}</b>` : '<b>—</b>';
+      const myTurn = s && me.can_log === true;
+      const turnHint = s && parMode && s.turn ? (myTurn ? 'your turn' : `${them.name}’s turn`) : '';
+      const meta = [prog, turnHint, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
+      const fmtScore = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
+      const youScore = s ? `<b class="${sc(me.score)}">${fmtScore(me.score)}</b>` : '<b>—</b>';
       const themName = s ? escapeHTML(them.name) : escapeHTML(a.opponent_name);
-      const themScore = s ? `<b class="${sc(them.score)}">${them.score > 0 ? '+' : ''}${them.score}</b>` : '<b>—</b>';
-      const logLabel = noun === 'problems' ? 'Log a problem' : 'Log a route';
+      const themScore = s ? `<b class="${sc(them.score)}">${fmtScore(them.score)}</b>` : '<b>—</b>';
+      const myFull = !!(s && bn && me.counted != null && me.counted >= bn);
+      const logGated = !!(s && parMode && s.turn && !myTurn);
+      const logLabel = myFull ? 'Slots full'
+        : logGated ? `${escapeHTML((them.name || '').split(' ')[0])}’s turn…`
+        : (noun === 'problems' ? 'Log a problem' : 'Log a route');
       // Body = live head + a tight You–vs–opponent scoreboard; action zone on the
       // right (desktop) / below (mobile). Content fills the card like the hero.
       html = `<div class="hub-card hub-active" data-mopen="${a.id}" role="button" tabindex="0">
@@ -3455,7 +3542,7 @@
             <span class="hub-side">${avatarHTML(s ? them.uid : a.opponent, s ? them.name : a.opponent_name, 'sm', s ? them.avatar_v : a.avatar_v)}<span class="hub-nm">${themName}</span>${themScore}</span>
           </div>
         </div>
-        <div class="hub-cta-zone"><button type="button" class="btn primary sm" data-hublog>${logLabel}</button><button type="button" class="btn ghost sm" data-mopen="${a.id}">Open match</button></div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary sm" data-hublog${(myFull || logGated) ? ' disabled' : ''}>${logLabel}</button><button type="button" class="btn ghost sm" data-mopen="${a.id}">Open match</button></div>
       </div>`;
     } else if (matches.incoming.length) {
       const m = matches.incoming[0];
