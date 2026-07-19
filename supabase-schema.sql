@@ -1162,15 +1162,17 @@ revoke all on function public.match_counted(uuid, uuid) from public, anon, authe
 -- like a normal session filtered to the discipline. Best-of-N = your FIRST N
 -- logged climbs, attempts included (a hard cap: every matching climb — send or
 -- project — consumes a slot; a project replays as a miss, exactly as the engine
--- treats it in a normal session; once N are logged your side is locked). Baseline
--- is the group snapshot at accept (unchanged handicap); if the player had no
--- prior climbs in the group, seed from their first matching climb like the
--- engine does. Returns the rounded rating delta — same units as match_score.
+-- treats it in a normal session; once N are logged your side is locked). Each
+-- FLASH among the counting climbs adds a flat +1 bonus point on top of its
+-- higher replay rating. Baseline is the group snapshot at accept (unchanged
+-- handicap); if the player had no prior climbs in the group, seed from their
+-- first matching climb like the engine does. Returns the rounded rating delta
+-- (+ flash bonuses) — same units as match_score.
 create or replace function public.match_subset_score(uid uuid, grp text, discs text[], best_n int, wstart timestamptz, snapshot int)
 returns numeric language plpgsql stable security definer set search_path = public as $$
 declare
   base_snap int := snapshot; r numeric; s_idx int; k numeric; cur_date date := null;
-  rec record; fg text; fd text;
+  rec record; fg text; fd text; fl int := 0;
 begin
   if discs is null then return 0; end if;
   if base_snap is null then
@@ -1218,8 +1220,9 @@ begin
       k := case when s_idx < 5 then 40 else 16 end;
     end if;
     r := public.ss_step(r, k, rec.route_r, rec.res <> 'Project');
+    if rec.res = 'Flash' then fl := fl + 1; end if; -- flat flash bonus
   end loop;
-  return round(r) - base_snap;
+  return round(r) - base_snap + fl;
 end $$;
 revoke all on function public.match_subset_score(uuid, text, text[], int, timestamptz, int) from public, anon, authenticated;
 
