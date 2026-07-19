@@ -909,10 +909,16 @@ $backfill$;
 -- must fall back to the auth display name, or existing climbers are invisible.
 create or replace function public.user_display(uid uuid)
 returns text language sql stable security definer set search_path = public as $$
-  select coalesce(
-    nullif(trim((select p.display_name from public.profiles p where p.id = uid)), ''),
-    nullif(trim((select u.raw_user_meta_data->>'display_name' from auth.users u where u.id = uid)), ''),
-    'Climber')
+  -- A null id, or an id whose auth row is gone (an admin-deleted account), shows
+  -- as a deleted placeholder so preserved match history reads cleanly instead of
+  -- rewriting other people's records.
+  select case
+    when uid is null or not exists (select 1 from auth.users u where u.id = uid) then 'Deleted climber'
+    else coalesce(
+      nullif(trim((select p.display_name from public.profiles p where p.id = uid)), ''),
+      nullif(trim((select u.raw_user_meta_data->>'display_name' from auth.users u where u.id = uid)), ''),
+      'Climber')
+  end
 $$;
 revoke all on function public.user_display(uuid) from public, anon, authenticated;
 
@@ -1026,6 +1032,18 @@ alter table public.matches add constraint matches_no_self check (challenger <> o
 alter table public.matches add constraint matches_status_chk check (status in ('pending','active','declined','canceled','resolved','abandoned'));
 create index if not exists matches_ch_idx on public.matches (challenger, status);
 create index if not exists matches_op_idx on public.matches (opponent, status);
+-- Preserve completed matches when a participant is deleted: the reference goes
+-- NULL (shown as "Deleted climber" via user_display) instead of cascade-deleting
+-- the row, so the surviving player's elo history and record stay intact. The
+-- admin delete flow removes in-flight matches explicitly first.
+alter table public.matches drop constraint if exists matches_challenger_fkey;
+alter table public.matches drop constraint if exists matches_opponent_fkey;
+alter table public.matches alter column challenger drop not null;
+alter table public.matches alter column opponent drop not null;
+alter table public.matches add constraint matches_challenger_fkey
+  foreign key (challenger) references auth.users (id) on delete set null;
+alter table public.matches add constraint matches_opponent_fkey
+  foreign key (opponent) references auth.users (id) on delete set null;
 
 -- Ruleset (configured by the challenger at creation; agreed to on accept; never
 -- changes after). discipline null = a legacy match created before rulesets — it
@@ -1499,3 +1517,142 @@ returns jsonb language sql stable security definer set search_path = public as $
 $$;
 revoke all on function public.match_my_adjustments() from public, anon;
 grant execute on function public.match_my_adjustments() to authenticated;
+
+-- ============================================================================
+-- Admin — a private, owner-only screen to see the full user list and delete
+-- accounts. The gate is a flag on the owner's profile row (matched once, by
+-- email); EVERY admin RPC checks it server-side, so hiding the UI is not the
+-- security boundary. Deleting an account preserves other people's completed
+-- match history (the deleted side shows as "Deleted climber"), removes the
+-- account's own data + in-flight matches, hard-deletes the auth row so the same
+-- email can sign up fresh, and logs the deletion.
+-- ============================================================================
+
+-- The owner's email lives in exactly one place.
+create or replace function public.admin_email() returns text
+  language sql immutable as $$ select 'jmandelmvp@gmail.com'::text $$;
+
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+
+-- is_admin is DERIVED from the auth email on every profile write, so a user can
+-- never grant themselves admin by updating their own row (the trigger recomputes
+-- it and overrides whatever they set).
+create or replace function public.profile_admin_flag() returns trigger
+  language plpgsql security definer set search_path = public, auth as $$
+begin
+  new.is_admin := exists (
+    select 1 from auth.users u
+    where u.id = new.id and lower(u.email) = lower(public.admin_email()));
+  return new;
+end $$;
+drop trigger if exists profiles_admin_flag on public.profiles;
+create trigger profiles_admin_flag before insert or update on public.profiles
+  for each row execute function public.profile_admin_flag();
+
+-- Backfill any existing profile (idempotent on re-apply).
+update public.profiles p set is_admin = true
+  where p.is_admin is distinct from true
+    and exists (select 1 from auth.users u where u.id = p.id and lower(u.email) = lower(public.admin_email()));
+
+-- The gate every admin endpoint calls.
+create or replace function public.admin_is() returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select is_admin from public.profiles where id = auth.uid()), false)
+$$;
+revoke all on function public.admin_is() from public, anon;
+grant execute on function public.admin_is() to authenticated;
+
+-- A simple audit log of deletions.
+create table if not exists public.admin_deletions (
+  id          bigserial primary key,
+  deleted_uid uuid,
+  username    text,
+  email       text,
+  deleted_by  uuid,
+  deleted_at  timestamptz not null default now()
+);
+alter table public.admin_deletions enable row level security;  -- no policy → reachable only via the gated RPCs
+
+-- Full user list with the useful columns, paginated + searchable. Server-gated.
+drop function if exists public.admin_user_list(text, integer, integer);
+create or replace function public.admin_user_list(q text default '', page integer default 0, page_size integer default 25)
+returns table (id uuid, username text, display_name text, email text, joined timestamptz,
+               last_active timestamptz, send_score integer, friend_count integer, is_admin boolean)
+language plpgsql stable security definer set search_path = public, auth as $$
+declare lim integer := greatest(1, least(page_size, 100));
+begin
+  if not public.admin_is() then raise exception 'not authorized' using errcode = '42501'; end if;
+  return query
+  select u.id,
+         p.username::text,
+         public.user_display(u.id),
+         u.email::text,
+         u.created_at,
+         greatest(
+           (select max(c.created_at) from public.climbs   c where c.user_id = u.id),
+           (select max(l.created_at) from public.lifts    l where l.user_id = u.id),
+           (select max(a.created_at) from public.activity a where a.user_id = u.id)
+         ),
+         coalesce(public.climb_display_rating(u.id, 'boulder'), 1000)::integer,
+         (select count(*)::int from public.friendships f
+            where f.status = 'accepted' and (f.user_a = u.id or f.user_b = u.id)),
+         coalesce(p.is_admin, false)
+    from auth.users u
+    left join public.profiles p on p.id = u.id
+   where coalesce(q, '') = ''
+         or p.username ilike '%' || q || '%'
+         or public.user_display(u.id) ilike '%' || q || '%'
+         or u.email ilike '%' || q || '%'
+   order by u.created_at desc nulls last
+   limit lim offset greatest(0, page) * lim;
+end $$;
+revoke all on function public.admin_user_list(text, integer, integer) from public, anon;
+grant execute on function public.admin_user_list(text, integer, integer) to authenticated;
+
+-- Delete a user. Server-gated; cannot delete yourself.
+create or replace function public.admin_delete_user(target uuid)
+returns void language plpgsql security definer set search_path = public, auth as $$
+declare uname text; uemail text;
+begin
+  if not public.admin_is() then raise exception 'not authorized' using errcode = '42501'; end if;
+  if target = auth.uid() then raise exception 'cannot delete your own admin account' using errcode = '42501'; end if;
+  if not exists (select 1 from auth.users where id = target) then raise exception 'no such user'; end if;
+
+  select p.username, u.email into uname, uemail
+    from auth.users u left join public.profiles p on p.id = u.id where u.id = target;
+
+  -- in-flight matches can't continue → remove them; resolved/abandoned survive
+  -- (their FK goes NULL on the auth delete below → "Deleted climber")
+  delete from public.matches
+   where (challenger = target or opponent = target)
+     and status in ('pending', 'active', 'declined', 'canceled');
+
+  -- the account's own records
+  delete from public.activity    where user_id = target;
+  delete from public.climbs      where user_id = target;
+  delete from public.lifts       where user_id = target;
+  delete from public.routines    where user_id = target;
+  delete from public.friendships where user_a = target or user_b = target or requested_by = target;
+  delete from public.profiles    where id = target;
+
+  insert into public.admin_deletions (deleted_uid, username, email, deleted_by)
+    values (target, uname, uemail, auth.uid());
+
+  -- hard-delete the auth row: frees the email/credentials for a fresh signup
+  delete from auth.users where id = target;
+end $$;
+revoke all on function public.admin_delete_user(uuid) from public, anon;
+grant execute on function public.admin_delete_user(uuid) to authenticated;
+
+-- Recent deletions, for the owner's record. Server-gated.
+drop function if exists public.admin_deletion_list(integer);
+create or replace function public.admin_deletion_list(lim integer default 50)
+returns table (username text, email text, deleted_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.admin_is() then raise exception 'not authorized' using errcode = '42501'; end if;
+  return query select d.username, d.email, d.deleted_at
+    from public.admin_deletions d order by d.deleted_at desc limit greatest(1, least(lim, 200));
+end $$;
+revoke all on function public.admin_deletion_list(integer) from public, anon;
+grant execute on function public.admin_deletion_list(integer) to authenticated;

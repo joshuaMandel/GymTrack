@@ -689,14 +689,20 @@
      ====================================================================== */
   // Top tab bar, mobile bottom nav, and the header avatar all switch views.
   function showView(view) {
+    // Admin is owner-only: a non-admin who reaches for it lands on Home, nothing
+    // special (the screen + its endpoints are gated server-side regardless).
+    if (view === 'admin' && !isAdmin) view = 'dashboard';
+    const target = $('#view-' + view) || $('#view-dashboard');
+    if (!target) return;
     $$('.tab[data-view], .bnav-btn[data-view]').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
     $$('.view').forEach((v) => v.classList.remove('is-active'));
-    $('#view-' + view).classList.add('is-active');
+    target.classList.add('is-active');
     const ava = $('#profile-btn');
     if (ava) ava.classList.toggle('is-active', view === 'profile');
     window.scrollTo(0, 0); // each page opens from its top
     redrawActiveCharts();  // charts drawn while hidden re-fit to real width
     if (view === 'friends') { renderFriendsScreen(); loadFriends(); loadFeed(); } // freshest data on entry
+    if (view === 'admin') renderAdmin();
     if (typeof renderMatchDock === 'function') renderMatchDock(); // dock only on Home + Climbing
   }
   $$('.tab[data-view], .bnav-btn[data-view]').forEach((btn) => {
@@ -2629,13 +2635,128 @@
 
   // Called from refresh(): (re)load friends + feed and ensure a subscription.
   function initFriends() {
-    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; matchesLoaded = false; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchHub(); renderMatchDock(); return; }
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; matchesLoaded = false; isAdmin = false; const ae = $('#admin-entry'); if (ae) ae.hidden = true; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchHub(); renderMatchDock(); return; }
     if (!matchesLoaded) renderMatchHub(); // first load → hub skeleton until matches arrive
     loadFriends();
     loadFeed();
     loadMatches();
+    loadAdminFlag();
     subscribeRealtime();
   }
+
+  /* ======================================================================
+     Admin (owner-only). The screen and every RPC are gated server-side by
+     admin_is(); this just hides the entry and renders the list + delete for
+     the owner. A non-admin who forces the view is bounced back to Home.
+     ====================================================================== */
+  let isAdmin = false, adminPage = 0, adminQ = '', adminRows = [], adminDelUid = null, adminSearchT = null;
+  const ADMIN_PAGE = 20;
+  // joined / last_active come back as full timestamptz strings (not date-only),
+  // so format them directly rather than via fmtDate (which assumes YYYY-MM-DD).
+  const adminDate = (ts) => { const d = new Date(ts); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); };
+  async function loadAdminFlag() {
+    if (!cloudOn()) { isAdmin = false; const e = $('#admin-entry'); if (e) e.hidden = true; return; }
+    try { const { data, error } = await sb.rpc('admin_is'); isAdmin = !error && data === true; }
+    catch (e) { isAdmin = false; }
+    const entry = $('#admin-entry'); if (entry) entry.hidden = !isAdmin;
+    if (!isAdmin && $('#view-admin') && $('#view-admin').classList.contains('is-active')) showView('dashboard');
+  }
+  async function renderAdmin() {
+    const list = $('#admin-list'); if (!list) return;
+    if (!isAdmin) { showView('dashboard'); return; }
+    list.innerHTML = '<div class="admin-empty muted">Loading…</div>';
+    let rows = [];
+    try {
+      const { data, error } = await sb.rpc('admin_user_list', { q: adminQ, page: adminPage, page_size: ADMIN_PAGE });
+      if (error) throw error;
+      rows = data || [];
+    } catch (e) { list.innerHTML = '<div class="admin-empty muted">Could not load users.</div>'; return; }
+    adminRows = rows;
+    if (!rows.length) {
+      list.innerHTML = `<div class="admin-empty muted">${adminQ ? 'No users match your search.' : 'No users yet.'}</div>`;
+    } else {
+      list.innerHTML = rows.map((u) => {
+        const name = escapeHTML(u.display_name || 'Climber');
+        const handle = u.username ? '@' + escapeHTML(u.username) : 'no username';
+        const last = u.last_active ? adminDate(u.last_active) : "never";
+        return `<button type="button" class="admin-row" data-auid="${u.id}">
+          <div class="admin-row-main">
+            <div class="admin-row-name">${name}${u.is_admin ? ' <span class="admin-badge">admin</span>' : ''}</div>
+            <div class="admin-row-sub">${handle} · ${escapeHTML(u.email || 'no email')}</div>
+          </div>
+          <div class="admin-row-meta"><b>${u.send_score}</b><span>${u.friend_count} friend${u.friend_count === 1 ? '' : 's'} · ${last}</span></div>
+        </button>`;
+      }).join('');
+    }
+    const pager = $('#admin-pager');
+    if (pager) {
+      const more = rows.length === ADMIN_PAGE;
+      pager.hidden = adminPage === 0 && !more;
+      $('#admin-prev').disabled = adminPage === 0;
+      $('#admin-next').disabled = !more;
+      $('#admin-page-lbl').textContent = `Page ${adminPage + 1}`;
+    }
+  }
+  function openAdminDetail(uid) {
+    const u = adminRows.find((x) => x.id === uid); if (!u) return;
+    adminDelUid = uid;
+    $('#admin-detail').innerHTML = `
+      <div class="admin-detail-name">${escapeHTML(u.display_name || 'Climber')}${u.is_admin ? ' <span class="admin-badge">admin</span>' : ''}</div>
+      <div class="admin-detail-grid">
+        <div><span>Username</span><b>${u.username ? '@' + escapeHTML(u.username) : '—'}</b></div>
+        <div><span>Email</span><b>${escapeHTML(u.email || '—')}</b></div>
+        <div><span>Joined</span><b>${u.joined ? adminDate(u.joined) : "—"}</b></div>
+        <div><span>Last active</span><b>${u.last_active ? adminDate(u.last_active) : "never"}</b></div>
+        <div><span>Send Score</span><b>${u.send_score}</b></div>
+        <div><span>Friends</span><b>${u.friend_count}</b></div>
+      </div>`;
+    // The confirmation token is the username, or the email for accounts that
+    // never claimed a handle.
+    const token = u.username || u.email || '';
+    const input = $('#admin-del-input'), confirm = $('#admin-del-confirm'), st = $('#admin-del-status');
+    $('#admin-del-handle').textContent = u.username ? '@' + u.username : (u.email || '(this account)');
+    input.value = ''; input.placeholder = token; input.dataset.token = token;
+    st.hidden = true; confirm.disabled = true;
+    const selfBlocked = u.id === myUid();
+    input.disabled = selfBlocked;
+    if (selfBlocked) { st.hidden = false; st.textContent = 'You can’t delete your own admin account.'; st.className = 'auth-status'; }
+    $('#admin-del-modal').hidden = false;
+    if (!selfBlocked) input.focus();
+  }
+  (function bindAdminUI() {
+    const openEl = $('#admin-open'); if (!openEl) return;
+    openEl.addEventListener('click', () => { adminPage = 0; adminQ = ''; const s = $('#admin-search'); if (s) s.value = ''; showView('admin'); });
+    $('#admin-back').addEventListener('click', () => showView('profile'));
+    $('#admin-search').addEventListener('input', (e) => {
+      clearTimeout(adminSearchT);
+      adminSearchT = setTimeout(() => { adminQ = e.target.value.trim(); adminPage = 0; renderAdmin(); }, 250);
+    });
+    $('#admin-prev').addEventListener('click', () => { if (adminPage > 0) { adminPage--; renderAdmin(); } });
+    $('#admin-next').addEventListener('click', () => { adminPage++; renderAdmin(); });
+    $('#admin-list').addEventListener('click', (e) => { const r = e.target.closest('[data-auid]'); if (r) openAdminDetail(r.dataset.auid); });
+    const closeDel = () => { $('#admin-del-modal').hidden = true; adminDelUid = null; };
+    $('#admin-del-cancel').addEventListener('click', closeDel);
+    $('#admin-del-modal').addEventListener('click', (e) => { if (e.target.id === 'admin-del-modal') closeDel(); });
+    const input = $('#admin-del-input'), confirm = $('#admin-del-confirm');
+    input.addEventListener('input', () => {
+      confirm.disabled = input.disabled || input.value.trim() !== (input.dataset.token || '') || !input.value.trim();
+    });
+    confirm.addEventListener('click', async () => {
+      const uid = adminDelUid; if (!uid) return;
+      confirm.disabled = true;
+      const st = $('#admin-del-status'); st.hidden = false; st.className = 'auth-status'; st.textContent = 'Deleting…';
+      try {
+        const { error } = await sb.rpc('admin_delete_user', { target: uid });
+        if (error) throw error;
+        closeDel();
+        renderAdmin();
+      } catch (e) {
+        const m = errMsg(e);
+        st.textContent = /authorized|own admin|no such/.test(m) ? m : 'Could not delete that account.';
+        st.className = 'auth-status err'; confirm.disabled = false;
+      }
+    });
+  })();
 
   // One-time UI bindings (module load).
   (function bindFriendsUI() {
