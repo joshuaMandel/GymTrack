@@ -2815,19 +2815,23 @@
     applyCrop();
   }
   async function canvasBlobUnder(canvas, maxBytes) {
-    const type = 'image/webp';
-    let q = 0.9, blob = null;
-    for (let i = 0; i < 6; i++) {
-      blob = await new Promise((r) => canvas.toBlob(r, type, q));
-      if (!blob) break; // webp unsupported
-      if (blob.size <= maxBytes || q <= 0.4) return blob;
-      q -= 0.12;
-    }
-    if (blob) return blob;
-    // WebP unsupported → JPEG fallback
-    for (let q2 = 0.9; q2 >= 0.4; q2 -= 0.12) {
-      const b = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', q2));
-      if (b && (b.size <= maxBytes || q2 <= 0.4)) return b;
+    const encode = (type, q) => new Promise((r) => canvas.toBlob(r, type, q));
+    // Prefer WebP (smallest), then JPEG. The catch: Safari ignores an
+    // unsupported encode type and silently hands back a PNG (per the HTML
+    // spec) — and a PNG of a photo ignores the quality knob and easily blows
+    // past the Storage size cap, which is exactly the "object exceeded the
+    // maximum allowed size" rejection. So we only trust a result whose
+    // blob.type is the format we actually asked for; otherwise we fall through
+    // to JPEG, which every canvas encodes and which honors quality.
+    for (const type of ['image/webp', 'image/jpeg']) {
+      let smallest = null;
+      for (let q = 0.9; q >= 0.4; q -= 0.12) {
+        const blob = await encode(type, q);
+        if (!blob || blob.type !== type) { smallest = null; break; } // unsupported → next format
+        smallest = blob; // each lower-quality step is smaller than the last
+        if (blob.size <= maxBytes) return blob;
+      }
+      if (smallest) return smallest; // supported, but even lowest quality is over cap
     }
     return null;
   }
