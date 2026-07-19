@@ -1610,7 +1610,10 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 /* ---------- Shared avatars (initials default + fading photo) ---------- */
 .av { position: relative; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; overflow: hidden; color: #fff; font-weight: 700; flex: none; line-height: 1;
-  user-select: none; -webkit-user-select: none; }
+  user-select: none; -webkit-user-select: none;
+  /* Contain the photo's z-index so it can't paint over a sibling corner badge
+     (camera edit badge on Profile, activity badge in the feed). */
+  isolation: isolate; }
 .av-sm { width: 34px; height: 34px; font-size: 14px; }
 .av-md { width: 46px; height: 46px; font-size: 18px; }
 .av-lg { width: 96px; height: 96px; font-size: 36px; }
