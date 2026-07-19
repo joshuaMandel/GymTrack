@@ -1187,7 +1187,7 @@
        • fail a route BELOW your level → E→1    → bigger drop (you were expected to)
      K is large while provisional (first SS_PROV_SESSIONS sessions) so a new
      climber converges fast, then small so an established rating is stable. A
-     flash counts as sending a slightly harder route.
+     flash scores exactly like the send plus a flat +1 bonus point.
 
      Two independent ratings — Bouldering (V) and Roped (YDS) — since the
      scales differ. Ties within a date replay in id order so every device and
@@ -1196,7 +1196,7 @@
      ====================================================================== */
   const SS_BASE = 1000, SS_STEP = 100, SS_SPREAD = 200;   // boulder scale: rating = 1000 + 100·D
   const SS_K_PROV = 40, SS_K_EST = 16, SS_PROV_SESSIONS = 5; // sensitivity: fast then stable
-  const SS_FLASH_EDGE = 30;                                // a flash ≈ sending +0.3 grade
+  const SS_FLASH_BONUS = 1;                                // a flash = a send + exactly 1 point
   // Roped ratings sit a constant offset higher so a 5.10c climber (D0) lands
   // near 1300, not 1000. Pure display shift: Elo depends only on (routeR − R),
   // and both move together, so NO dynamics change (convergence, penalties, etc.).
@@ -1244,11 +1244,12 @@
       let sends = 0;
       for (const c of sesh) {
         const sent = isSend(c.result);
-        const routeR = routeRating(c.discipline, c.grade) + (c.result === 'Flash' ? SS_FLASH_EDGE : 0);
+        const routeR = routeRating(c.discipline, c.grade);
         // Per-climb Δ is the change in the ROUNDED running rating, so per-climb
         // moves always sum exactly to the session's shown change (telescoping).
         const prevRounded = Math.round(R);
         R += K * ((sent ? 1 : 0) - sendExpected(R, routeR));
+        if (c.result === 'Flash') R += SS_FLASH_BONUS; // flash = same send, one extra point
         if (sent) {
           sends++;
           const rk = gradeRank(c.discipline, c.grade);

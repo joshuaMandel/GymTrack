@@ -93,7 +93,7 @@ create policy "own routines" on public.routines
 -- It replays every climber's history with the SAME converging Elo rating the
 -- app runs client-side (scoreBreakdown in app.js) so your own hero number and
 -- your leaderboard number always agree. KEEP THE CONSTANTS AND grade→D MAPS
--- IN SYNC with app.js (SS_BASE, SS_STEP, SS_SPREAD, SS_K_*, SS_FLASH_EDGE):
+-- IN SYNC with app.js (SS_BASE, SS_STEP, SS_SPREAD, SS_K_*, SS_FLASH_BONUS):
 --   • routeRating = 1000 + 100·D   (boulder VB=-1 … V17=17; roped 5.10c≈D0),
 --     plus a +300 offset for roped so a 5.10c climber lands ~1300 not 1000
 --     (a pure display shift — both R and routeR move together, dynamics unchanged).
@@ -153,7 +153,7 @@ declare
   dvals numeric[];
   BASE constant numeric := 1000; STEP constant numeric := 100; SPREAD constant numeric := 200;
   K_PROV constant numeric := 40; K_EST constant numeric := 16; PROV_SESSIONS constant int := 5;
-  FLASH_EDGE constant numeric := 30;
+  FLASH_BONUS constant numeric := 1; -- a flash = the send + exactly 1 point
   ROPE_OFFSET constant numeric := 300;  -- roped ratings sit higher: 5.10c→~1300, not 1000
   disc_offset numeric := 0;             -- 0 for boulder, ROPE_OFFSET for roped (pure display shift)
   rec record;
@@ -238,10 +238,11 @@ begin
       k_now := case when s_idx < PROV_SESSIONS then K_PROV else K_EST end;
     end if;
 
-    -- ----- the climb: one Elo update (flash adds FLASH_EDGE to routeR) -----
+    -- ----- the climb: one Elo update; a flash adds a flat FLASH_BONUS point -----
     -- Same math as before, now via the shared ss_step core (SPREAD=200 there).
-    route_r := BASE + disc_offset + STEP * dvals[rec.pos] + (case when rec.res = 'Flash' then FLASH_EDGE else 0 end);
+    route_r := BASE + disc_offset + STEP * dvals[rec.pos];
     R := public.ss_step(R, k_now, route_r, rec.res <> 'Project');
+    if rec.res = 'Flash' then R := R + FLASH_BONUS; end if;
     if rec.res <> 'Project' and (hardest_pos is null or rec.pos > hardest_pos) then
       hardest_pos := rec.pos;
     end if;
@@ -1162,17 +1163,17 @@ revoke all on function public.match_counted(uuid, uuid) from public, anon, authe
 -- like a normal session filtered to the discipline. Best-of-N = your FIRST N
 -- logged climbs, attempts included (a hard cap: every matching climb — send or
 -- project — consumes a slot; a project replays as a miss, exactly as the engine
--- treats it in a normal session; once N are logged your side is locked). Each
--- FLASH among the counting climbs adds a flat +1 bonus point on top of its
--- higher replay rating. Baseline is the group snapshot at accept (unchanged
--- handicap); if the player had no prior climbs in the group, seed from their
--- first matching climb like the engine does. Returns the rounded rating delta
--- (+ flash bonuses) — same units as match_score.
+-- treats it in a normal session; once N are logged your side is locked). A
+-- FLASH scores exactly like the send plus a flat +1 bonus point — the same
+-- rule as the engine itself. Baseline is the group snapshot at accept
+-- (unchanged handicap); if the player had no prior climbs in the group, seed
+-- from their first matching climb like the engine does. Returns the rounded
+-- rating delta — same units as match_score.
 create or replace function public.match_subset_score(uid uuid, grp text, discs text[], best_n int, wstart timestamptz, snapshot int)
 returns numeric language plpgsql stable security definer set search_path = public as $$
 declare
   base_snap int := snapshot; r numeric; s_idx int; k numeric; cur_date date := null;
-  rec record; fg text; fd text; fl int := 0;
+  rec record; fg text; fd text;
 begin
   if discs is null then return 0; end if;
   if base_snap is null then
@@ -1203,8 +1204,7 @@ begin
     select x.cdate, x.res, x.route_r from (
       select c.date as cdate, c.id as cid, c.result as res,
         1000 + (case when c.discipline = 'Bouldering' then 0 else 300 end)
-             + 100 * public.grade_d(c.discipline, c.grade)
-             + (case when c.result = 'Flash' then 30 else 0 end) as route_r,
+             + 100 * public.grade_d(c.discipline, c.grade) as route_r,
         row_number() over (order by c.date, c.id) as rnk
       from public.climbs c
       where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
@@ -1220,9 +1220,9 @@ begin
       k := case when s_idx < 5 then 40 else 16 end;
     end if;
     r := public.ss_step(r, k, rec.route_r, rec.res <> 'Project');
-    if rec.res = 'Flash' then fl := fl + 1; end if; -- flat flash bonus
+    if rec.res = 'Flash' then r := r + 1; end if; -- flash = the send + 1 point (same as the engine)
   end loop;
-  return round(r) - base_snap + fl;
+  return round(r) - base_snap;
 end $$;
 revoke all on function public.match_subset_score(uuid, text, text[], int, timestamptz, int) from public, anon, authenticated;
 
