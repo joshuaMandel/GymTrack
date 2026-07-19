@@ -66,6 +66,7 @@
   }
 
   let session = null;            // current auth session (or null)
+  let myAvatarV = 0;             // my profile-picture version (0 = default avatar)
   let migrationHandled = false;  // only prompt to migrate once per page load
 
   /* ----- Local persistence ----- */
@@ -657,6 +658,40 @@
     const counts = {};
     arr.forEach((x) => { counts[x] = (counts[x] || 0) + 1; });
     return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+  }
+
+  /* ======================================================================
+     Avatars — one renderer for every surface. A user with a picture (avatar
+     version > 0) shows their thumbnail from Supabase Storage; everyone else
+     gets a stable initials-on-color default, the color derived deterministically
+     from their user id so it's identical on every surface. The colored circle
+     reserves the space immediately and the photo fades in over it (no layout
+     shift, no broken-image icon — a failed load just leaves the initial).
+     ====================================================================== */
+  const AVATAR_PALETTE = ['#1f3a5f', '#2e7d5b', '#b4531f', '#6b4ea0', '#a03a5f', '#2f6f8f', '#8a6d1f', '#3f7d6b', '#9a4b3f', '#4a5db0'];
+  function avatarColorFor(uid) {
+    const s = String(uid || ''); let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+  }
+  const avatarInitial = (name) => (String(name || '').trim()[0] || '?').toUpperCase();
+  const avatarStorageBase = () => `${(cfg.url || '').replace(/\/$/, '')}/storage/v1/object/public/avatars`;
+  const avatarPicUrl = (uid, which, v) => `${avatarStorageBase()}/${uid}/${which}.webp?v=${v || 1}`;
+  // In-memory version cache so a surface that doesn't carry avatar_v (e.g. a
+  // realtime feed row) can still render the right picture once we've seen it.
+  const avatarVer = new Map();
+  function noteAvatar(uid, v) { if (uid != null && v != null) avatarVer.set(uid, v); }
+  function avatarVersion(uid, v) { if (v != null) { noteAvatar(uid, v); return v; } return avatarVer.get(uid) || 0; }
+  // size: 'sm' (lists) | 'md' (cards/matches) | 'lg' (profile hero)
+  function avatarHTML(uid, name, size, v) {
+    const ver = avatarVersion(uid, v);
+    const which = size === 'lg' ? 'full' : 'thumb';
+    const color = avatarColorFor(uid);
+    const ini = escapeHTML(avatarInitial(name));
+    const img = ver > 0
+      ? `<img class="av-img" src="${avatarPicUrl(uid, which, ver)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('on')" onerror="this.remove()">`
+      : '';
+    return `<span class="av av-${size || 'sm'}" style="background:${color}"><span class="av-ini">${ini}</span>${img}</span>`;
   }
 
   // Extract a human-readable message from a Supabase / fetch error object
@@ -2359,6 +2394,7 @@
             <li class="${r.is_me ? 'me' : ''}" title="See ${escapeHTML(r.display_name)}'s summary">
               <div class="feed-left">
                 <span class="lb-rank${i < 3 ? ' r' + (i + 1) : ''}">${i + 1}</span>
+                ${avatarHTML(r.user_id, r.display_name, 'sm', r.avatar_v)}
                 <div>
                   <div class="feed-main">${escapeHTML(r.display_name)}${r.is_me ? ' <span class="you-chip">You</span>' : ''}</div>
                   <div class="feed-sub">${sub}</div>
@@ -2456,7 +2492,7 @@
       const r = friendRating(it.user_id);
       return `<li>
         <div class="feed-left">
-          <span class="feed-ico ${L.cls}"><svg class="ico"><use href="#${L.ico}"/></svg></span>
+          <span class="feed-av">${avatarHTML(it.user_id, it.display_name, 'sm', it.avatar_v)}<span class="feed-ico-badge ${L.cls}"><svg class="ico"><use href="#${L.ico}"/></svg></span></span>
           <div><div class="feed-main">${L.main}</div><div class="feed-sub">${L.sub}</div></div>
         </div>
         <div class="feed-date">${ago(it.created_at)}${r != null ? `<span class="feed-score">${r}</span>` : ''}</div>
@@ -2524,7 +2560,7 @@
     }
     return `<li>
       <div class="feed-left">
-        <span class="feed-ico"><svg class="ico"><use href="#i-user"/></svg></span>
+        ${avatarHTML(p.user_id, p.display_name, 'sm', p.avatar_v)}
         <div><div class="feed-main">${name}</div>${sub}</div>
       </div>
       <div class="feed-actions">${right}</div>
@@ -4304,12 +4340,10 @@
     if (!signedIn) { accountEl.hidden = true; accountEl.innerHTML = ''; return; }
     accountEl.hidden = false;
     const label = currentDisplayName() || session.user.email || 'Account';
-    const initial = (label.trim()[0] || '?').toUpperCase();
-    const color = AVATAR_COLORS[getSettings().avatar_color] || AVATAR_COLORS.Navy;
-    // Colored circle avatar with the user's initial; opens the Profile page.
+    // The shared avatar (photo if set, else stable initials-on-color), opens Profile.
     accountEl.innerHTML = `
       <span class="sync-dot" id="sync-dot" title="Synced"></span>
-      <button class="avatar" id="profile-btn" style="background:${color}" title="${escapeHTML(label)} — profile" aria-label="Profile">${escapeHTML(initial)}</button>`;
+      <button class="avatar-btn" id="profile-btn" title="${escapeHTML(label)} — profile" aria-label="Profile">${avatarHTML(myUid(), label, 'sm', myAvatarV)}</button>`;
     const btn = $('#profile-btn');
     btn.addEventListener('click', () => showView('profile'));
     btn.classList.toggle('is-active', $('#view-profile').classList.contains('is-active'));
@@ -4388,8 +4422,7 @@
     const name = currentDisplayName();
     const label = name || (session && session.user && session.user.email) || 'Athlete';
     const ava = $('#profile-ava');
-    ava.textContent = (label.trim()[0] || '?').toUpperCase();
-    ava.style.background = AVATAR_COLORS[settings.avatar_color] || AVATAR_COLORS.Navy;
+    ava.innerHTML = avatarHTML(myUid(), label, 'lg', myAvatarV);
     if (document.activeElement !== $('#profile-name')) $('#profile-name').value = name;
     const meta = [];
     if (session && session.user) {
