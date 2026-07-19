@@ -2714,7 +2714,9 @@
     // never claimed a handle.
     const token = u.username || u.email || '';
     const input = $('#admin-del-input'), confirm = $('#admin-del-confirm'), st = $('#admin-del-status');
-    $('#admin-del-handle').textContent = u.username ? '@' + u.username : (u.email || '(this account)');
+    // Show the EXACT string that must be typed (the bare username, or the email
+    // for accounts with no handle) — no "@" prefix, so the label matches input.
+    $('#admin-del-handle').textContent = token || '(this account)';
     input.value = ''; input.placeholder = token; input.dataset.token = token;
     st.hidden = true; confirm.disabled = true;
     const selfBlocked = u.id === myUid();
