@@ -1838,17 +1838,21 @@
       qsState.discipline = discipline;
       qsState.grade = grade;
       saveQs();
-      renderQuickLog(); // sheet stays open — refresh the Today list
+      renderQuickLog(); // refresh the Today list
       // my own climb won't come back over realtime — refresh the live match views
       if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
       if (h2hMid) refreshH2H();
-      // A live match? Fire the stick-figure moment — AFTER the save, never in its
-      // path. It plays top-of-screen and takes no taps below it, so the next
-      // climb can be logged immediately. Matches only; plain sessions stay quiet.
-      if (matches.active) playMatchAnim({
-        type: result === 'Project' ? 'fail' : 'send',
-        grade, discipline, magnitude: maMagnitude(discipline, grade)
-      });
+      // During a live match, drop the sheet after logging so you fall back to the
+      // head-to-head and watch the score update; plain sessions keep it open for
+      // rapid multi-logging. Either way the stick-figure moment plays top-of-
+      // screen AFTER the save — never in its path — matches only.
+      if (matches.active) {
+        quickSheet.hidden = true;
+        playMatchAnim({
+          type: result === 'Project' ? 'fail' : 'send',
+          grade, discipline, magnitude: maMagnitude(discipline, grade)
+        });
+      }
     });
   }
 
