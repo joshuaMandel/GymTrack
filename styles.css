@@ -368,6 +368,12 @@ body:not(.lifting-on) #log-lift { display: none !important; }
 }
 .rating-hero.is-empty .hero-ring { display: none; } /* no ghost ring when there's no data */
 .rating-hero.is-empty .hero-value { opacity: 0.5; }
+/* With no ring, center the empty-state copy and trim the block's height so the
+   dark band reads as a compact, intentional empty state — not a heavy void that
+   out-weighs the CTA below it. */
+.rating-hero.is-empty { justify-content: center; text-align: center; padding-top: 18px; padding-bottom: 18px; }
+.rating-hero.is-empty .rh-main { align-items: center; }
+.rating-hero.is-empty .hero-value { font-size: 40px; }
 .hero-ring::before {
   content: "";
   position: absolute;
@@ -562,6 +568,10 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   gap: 8px;
 }
 .btn.pill:hover { filter: brightness(1.35); }
+/* Demoted pill: outline treatment so a nearby dark primary (e.g. the active
+   match hub's "Log a climb") reads as THE action, not one of two. */
+.btn.pill.is-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn.pill.is-secondary:hover { filter: none; border-color: var(--muted); }
 .btn.pill .ico { width: 14px; height: 14px; }
 
 /* Menu under the dashboard "Log entry" button */
@@ -733,7 +743,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 /* Climber rating cards */
 .rating-strip { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
 .rating-card {
-  flex: 1; min-width: 150px;
+  flex: 1 1 220px; min-width: 150px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 4px solid var(--border);
@@ -743,6 +753,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 }
 .rating-card.boulder { border-left-color: var(--accent-2); }
 .rating-card.rope { border-left-color: var(--accent); }
+.rating-card.is-empty .rating-value { opacity: 0.5; }
 .rating-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .rating-value { font-family: var(--font-disp); font-size: 30px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 8px; }
 .rating-delta { font-size: 13px; font-weight: 700; font-family: "Archivo", Helvetica, Arial, sans-serif; }
@@ -1207,6 +1218,71 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 /* Reserve room so the dock never covers the last content or the FAB actions. */
 body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env(safe-area-inset-bottom, 0px)); }
 
+/* ---------- Match hub (top of Home + Climbing) ---------- */
+.match-hub { margin-bottom: 14px; }
+/* One container model for every hub state: content on the left (.hub-body),
+   the action(s) on the right (.hub-cta-zone) — fills the card width like the
+   Send Score hero. Stacks vertically on mobile. */
+.hub-card {
+  display: flex; align-items: center; gap: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 20px;
+}
+.hub-card.hub-active { cursor: pointer; border-color: var(--accent-2); box-shadow: 0 6px 18px rgba(31, 58, 95, 0.10); }
+.hub-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.hub-cta-zone { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.hub-cta-zone .btn { width: auto; min-width: 150px; margin: 0; white-space: nowrap; }
+.hub-live-head { display: flex; align-items: center; gap: 8px; }
+.hub-rules { font-size: 12px; font-weight: 700; color: var(--accent-2); }
+/* Active scoreboard: a tight left-aligned You–vs–opponent group in the body. */
+.hub-scores { display: flex; align-items: center; justify-content: flex-start; gap: 22px; }
+.hub-mid { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
+.hub-prog { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.hub-side { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.hub-side .hub-nm { font-size: 12px; font-weight: 700; color: var(--muted); }
+.hub-side.you .hub-nm { color: var(--accent-2); }
+.hub-side b { font-family: var(--font-disp); font-weight: 700; font-size: 30px; line-height: 1.1; color: var(--ink); }
+.hub-side b.pos { color: var(--good); } .hub-side b.neg { color: var(--danger); }
+.hub-vs { font-family: var(--font-disp); font-weight: 700; font-size: 13px; color: var(--muted); }
+.hub-idle-title { font-family: var(--font-disp); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+.hub-idle-sub { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+.hub-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+/* Idle / new-user bodies are just a short title + subtitle, so the content-left
+   / button-right split leaves a big middle gap on desktop. Stack the CTA
+   full-width beneath the copy instead — it fills the card the way the active
+   state's wide scoreboard fills its row. (Active keeps the side-by-side split.) */
+.hub-card.hub-idle { flex-direction: column; align-items: stretch; gap: 12px; }
+.hub-card.hub-idle .hub-cta-zone { width: 100%; }
+.hub-card.hub-idle .hub-cta-zone .btn { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .hub-card { flex-direction: column; align-items: stretch; gap: 12px; }
+  .hub-cta-zone { width: 100%; }
+  .hub-cta-zone .btn { width: 100%; min-width: 0; }
+}
+.hub-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 600;
+  color: var(--text); font-family: inherit; cursor: pointer;
+}
+.hub-chip b { font-family: var(--font-disp); }
+.hub-chip.won b { color: var(--good); }
+.hub-chip.lost b { color: var(--danger); }
+.hub-chip.draw b { color: var(--muted); }
+.hub-chip span { color: var(--muted); }
+/* Loading skeleton */
+.hub-skel { gap: 12px; }
+.skel { display: inline-block; border-radius: 8px; background: linear-gradient(90deg, var(--panel-2) 25%, var(--border) 50%, var(--panel-2) 75%); background-size: 200% 100%; animation: skel-shimmer 1.2s infinite linear; }
+.skel-ico { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; }
+.skel-lines { flex: 1; display: flex; flex-direction: column; gap: 7px; }
+.skel-line { height: 12px; width: 70%; }
+.skel-line.short { width: 40%; }
+.skel-btn { width: 120px; height: 38px; border-radius: 999px; flex-shrink: 0; }
+@keyframes skel-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
 /* ---------- Footer ---------- */
 .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
 .footer p { color: var(--muted); font-size: 13px; margin: 0; }
@@ -1219,7 +1295,7 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
   .topbar-inner { padding: 12px 16px; }
   .bottom-nav { display: flex; }
   .account { display: none; } /* profile lives in the bottom nav */
-  .container { padding: 24px 20px calc(var(--dock-h) + env(safe-area-inset-bottom, 0px)); }
+  .container { padding: 24px 20px calc(var(--dock-h) + 24px + env(safe-area-inset-bottom, 0px)); }
   .home-head .btn.pill { display: none; } /* the FAB covers logging */
   /* Scrim: content fades into the page bg before the floating dock, so
      nothing appears to bleed through the gaps around the nav pill. */
@@ -1240,7 +1316,7 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 @media (max-width: 780px) {
   .two-col { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
-  .container { padding: 22px 16px calc(var(--dock-h) + env(safe-area-inset-bottom, 0px)); }
+  .container { padding: 22px 16px calc(var(--dock-h) + 24px + env(safe-area-inset-bottom, 0px)); }
 
   .view-head h2 { font-size: 26px; }
   .view-head.has-action { flex-wrap: wrap; }
