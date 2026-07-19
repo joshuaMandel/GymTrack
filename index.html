@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-16t" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-16u" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -435,6 +435,23 @@
           <button type="submit" class="btn primary" id="username-modal-save">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Admin: user detail + heavy-friction delete confirmation. -->
+  <div class="modal-overlay" id="admin-del-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="admin-del-title">
+      <h2 id="admin-del-title">Delete account</h2>
+      <div class="admin-detail" id="admin-detail"></div>
+      <p class="admin-warn">This permanently deletes the account and all of its data. Their completed matches stay on other players' records as “Deleted climber.” This cannot be undone.</p>
+      <label>Type <b id="admin-del-handle"></b> to confirm
+        <input type="text" id="admin-del-input" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="username" />
+      </label>
+      <div class="auth-status" id="admin-del-status" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="admin-del-cancel">Cancel</button>
+        <button type="button" class="btn primary danger" id="admin-del-confirm" disabled>Delete account</button>
+      </div>
     </div>
   </div>
 
@@ -951,6 +968,35 @@
           </div>
           <button type="button" class="btn ghost danger signout-btn" id="modal-signout">Sign out</button>
         </div>
+
+        <!-- Owner-only: entry to the admin screen. Hidden for everyone else; the
+             screen + its endpoints are gated server-side regardless. -->
+        <div class="panel" id="admin-entry" hidden>
+          <h3>Admin</h3>
+          <p class="muted small">Internal tools — the full user list and account management.</p>
+          <button type="button" class="btn" id="admin-open">Open admin</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Admin screen: full user list + delete. Only reachable by the owner; a
+         non-admin who forces the view is bounced back to Home. -->
+    <section class="view" id="view-admin">
+      <div class="admin-col">
+        <div class="view-head has-action">
+          <div>
+            <h2>Admin</h2>
+            <p class="muted">All users. Tap a row to view details or remove an account.</p>
+          </div>
+          <button type="button" class="btn ghost sm" id="admin-back">Back</button>
+        </div>
+        <input type="search" class="admin-search" id="admin-search" placeholder="Search username, name, or email" aria-label="Search users" />
+        <div class="admin-list" id="admin-list" aria-live="polite"></div>
+        <div class="admin-pager" id="admin-pager" hidden>
+          <button type="button" class="btn ghost sm" id="admin-prev">‹ Prev</button>
+          <span class="muted small" id="admin-page-lbl"></span>
+          <button type="button" class="btn ghost sm" id="admin-next">Next ›</button>
+        </div>
       </div>
     </section>
 
@@ -962,7 +1008,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- versioned like app.js/styles.css: the SW precaches assets cache-first,
        so an untagged config would serve stale (old client IDs) after deploys -->
-  <script src="supabase-config.js?v=2026-07-16t"></script>
-  <script src="app.js?v=2026-07-16t"></script>
+  <script src="supabase-config.js?v=2026-07-16u"></script>
+  <script src="app.js?v=2026-07-16u"></script>
 </body>
 </html>
