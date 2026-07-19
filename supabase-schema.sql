@@ -1141,25 +1141,27 @@ returns text language sql immutable as $$
     else (case disc when 'boulder' then 'Bouldering' when 'lead' then 'Lead'
                     when 'toprope' then 'Top rope' when 'agnostic' then 'Routes (any)' else disc end)
        || ' · ' || (case when best_n is null then 'open session'
-                         else 'best ' || best_n || (case when disc = 'boulder' then ' problems' else ' routes' end) end)
+                         else 'best of ' || best_n || (case when disc = 'boulder' then ' problems' else ' routes' end) end)
   end
 $$;
 
--- How many climbs a player has logged in the match window that COUNT toward the
--- match (match its discipline settings) — drives the "4 of 6 logged" progress.
+-- How many counting SENDS a player has logged in the match window — drives the
+-- "4 of 6" progress and the hard cap. Projects don't count toward a match (they
+-- never scored), so they don't consume one of your best-of-N slots either.
 create or replace function public.match_counted(mid uuid, uid uuid)
 returns integer language sql stable security definer set search_path = public as $$
   select count(*)::int from public.climbs c, public.matches m
   where m.id = mid and c.user_id = uid and c.created_at >= m.window_start
     and m.discipline is not null and c.discipline = any(public.match_disciplines(m.discipline))
-    and public.grade_d(c.discipline, c.grade) is not null
+    and public.grade_d(c.discipline, c.grade) is not null and c.result <> 'Project'
 $$;
 revoke all on function public.match_counted(uuid, uuid) from public, anon, authenticated;
 
 -- Ruleset match score: replay the EXISTING Send Score Elo (shared ss_step) over
 -- only the climbs that count. Open (best_n null) = all matching climbs, exactly
--- like a normal session filtered to the discipline. Best-of-N = your N hardest
--- sends (projects never improve a best-of-N, so they are not selected). Baseline
+-- like a normal session filtered to the discipline. Best-of-N = your FIRST N
+-- sends (a hard cap: once N sends are logged your side is locked, later climbs
+-- don't count; projects are misses and never consume a slot). Baseline
 -- is the group snapshot at accept (unchanged handicap); if the player had no
 -- prior climbs in the group, seed from their first matching climb like the
 -- engine does. Returns the rounded rating delta — same units as match_score.
@@ -1201,14 +1203,13 @@ begin
              + 100 * public.grade_d(c.discipline, c.grade)
              + (case when c.result = 'Flash' then 30 else 0 end) as route_r,
         row_number() over (order by (c.result <> 'Project') desc,
-          (1000 + (case when c.discipline='Bouldering' then 0 else 300 end) + 100*public.grade_d(c.discipline,c.grade)) desc,
           c.date, c.id) as rnk
       from public.climbs c
       where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
         and public.grade_d(c.discipline, c.grade) is not null
     ) x
     where best_n is null                              -- open: every matching climb counts
-       or (x.res <> 'Project' and x.rnk <= best_n)    -- best-of-N: your N hardest sends
+       or (x.res <> 'Project' and x.rnk <= best_n)    -- best-of-N: your first N sends
     order by x.cdate, x.cid
   loop
     if rec.cdate is distinct from cur_date then
@@ -1350,7 +1351,9 @@ begin
   if discipline is not null and discipline not in ('boulder','lead','toprope','agnostic') then
     raise exception 'invalid discipline';
   end if;
-  if best_n is not null and (best_n < 1 or best_n > 50) then raise exception 'invalid match length'; end if;
+  -- Matches are a best-of odd series: 3, 5, 7, or 9. (null stays allowed for the
+  -- legacy 1-arg call / older open-session matches; the app always sends one.)
+  if best_n is not null and best_n not in (3,5,7,9) then raise exception 'invalid match length'; end if;
   if not exists (select 1 from public.friendships f where f.status='accepted' and f.user_a=a and f.user_b=b) then
     raise exception 'can only challenge friends';
   end if;

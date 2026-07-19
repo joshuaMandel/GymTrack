@@ -3166,7 +3166,7 @@
     const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
     const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
-    const lenLabel = mcState.length == null ? 'an open session — every climb counts' : `your best ${mcState.length} ${noun}`;
+    const lenLabel = `best of ${mcState.length} — your first ${mcState.length} ${noun} lock in`;
     const sum = $('#mc-summary');
     if (sum) sum.textContent = `${discLabel} · ${lenLabel}.`;
   }
@@ -3239,6 +3239,9 @@
       <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
     const rules = s.rules || {};
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
+    // Hard cap: once you've logged best_n counting sends, your side is full —
+    // further climbs no longer count toward the match (first N lock in).
+    const myFull = !!(rules.best_n && me.counted != null && me.counted >= rules.best_n);
     // Rules banner — always visible so the agreed ruleset is unambiguous.
     let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}</span></div>` : '';
     // Best-of-N progress: "4 of 6 problems logged" per side, or a plain count for
@@ -3255,12 +3258,17 @@
       if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
     } else if (s.status === 'pending') {
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
+    } else if (myFull) {
+      html += `<div class="h2h-status">Your ${rules.best_n} ${noun} are locked in — match limit reached. New climbs won’t change your score.</div>`;
     } else {
       html += `<div class="h2h-status">Live — only ${escapeHTML((rules.discipline === 'boulder' ? 'bouldering' : rules.style_label ? rules.style_label.split(' · ')[0].toLowerCase() : 'matching'))} climbs count. Log as usual.</div>`;
     }
     html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
     if (!resolved && s.status === 'active') {
-      html += `<div class="h2h-actions"><button class="btn primary" id="h2h-log">Log a climb</button><button class="btn ghost" id="h2h-end"${me.ended ? ' disabled' : ''}>${me.ended ? 'Waiting for them…' : 'End my session'}</button></div>`;
+      const logBtn = myFull
+        ? `<button class="btn primary" id="h2h-log" disabled>Limit reached · ${rules.best_n} of ${rules.best_n}</button>`
+        : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
+      html += `<div class="h2h-actions">${logBtn}<button class="btn ghost" id="h2h-end"${me.ended ? ' disabled' : ''}>${me.ended ? 'Waiting for them…' : 'End my session'}</button></div>`;
     } else if (resolved) {
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
     }
