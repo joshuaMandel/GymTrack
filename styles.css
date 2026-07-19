@@ -1609,5 +1609,8 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .admin-detail-grid span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .admin-detail-grid b { font-size: 14px; word-break: break-word; }
 .admin-warn { font-size: 13px; color: var(--danger); background: rgba(226,87,76,0.08); border: 1px solid rgba(226,87,76,0.25); border-radius: var(--radius-sm); padding: 10px 12px; margin: 4px 0 12px; line-height: 1.45; }
-.btn.primary.danger { background: var(--danger); border-color: var(--danger); }
+/* Solid red confirm button: force light text — .btn.danger (red text) would
+   otherwise win over .btn.primary and render the label invisible on red. */
+.btn.primary.danger { background: var(--danger); border-color: var(--danger); color: var(--cream); }
+.btn.primary.danger:hover { filter: brightness(1.08); }
 .btn.primary.danger:disabled { opacity: 0.5; }
