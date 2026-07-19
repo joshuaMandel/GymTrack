@@ -3174,7 +3174,7 @@
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
     const lenLabel = `best of ${mcState.length} — your first ${mcState.length} ${noun} lock in, attempts included`;
     const sum = $('#mc-summary');
-    if (sum) sum.textContent = `${discLabel} · ${lenLabel}.`;
+    if (sum) sum.textContent = `${discLabel} · ${lenLabel}. Flash = +1 bonus point.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
