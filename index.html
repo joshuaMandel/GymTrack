@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
-  <link rel="stylesheet" href="styles.css?v=2026-07-19k" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-20a" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -405,6 +405,14 @@
           <button type="button" class="grade-pill" data-n="5">Best of 5</button>
           <button type="button" class="grade-pill" data-n="7">Best of 7</button>
           <button type="button" class="grade-pill" data-n="9">Best of 9</button>
+        </div>
+      </div>
+
+      <div class="mc-field">
+        <label class="mc-label">Stakes</label>
+        <div class="seg" id="mc-ranked" role="tablist">
+          <button type="button" class="seg-btn is-active" data-ranked="1">Ranked</button>
+          <button type="button" class="seg-btn" data-ranked="0">Unranked</button>
         </div>
       </div>
 
@@ -1031,7 +1039,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- versioned like app.js/styles.css: the SW precaches assets cache-first,
        so an untagged config would serve stale (old client IDs) after deploys -->
-  <script src="supabase-config.js?v=2026-07-19k"></script>
-  <script src="app.js?v=2026-07-19k"></script>
+  <script src="supabase-config.js?v=2026-07-20a"></script>
+  <script src="app.js?v=2026-07-20a"></script>
 </body>
 </html>
