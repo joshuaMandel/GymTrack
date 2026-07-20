@@ -3235,24 +3235,34 @@
   // flow on one account). Same sheet, but no opponent picker and it calls
   // match_practice instead of match_challenge.
   function openPracticeCreate() { openMatchCreate(null, null, true); }
+  // Enable/disable the Send button: you must have an opponent (or be in practice
+  // mode, which needs none). Called on open + whenever the selection changes.
+  function syncMcSend() {
+    const send = $('#mc-send'); if (send) send.disabled = !mcState.practice && !mcTarget;
+  }
   function openMatchCreate(uid, name, practice) {
     mcTarget = uid ? { uid, name } : null;
     mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3; mcState.ranked = true;
     mcState.practice = !!practice;
     const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
     const ff = $('#mc-friend-field');
-    // Opened from the hub CTA (no friend chosen yet): show the opponent picker.
-    // With exactly one friend, preselect them. Practice skips the picker entirely.
+    // Preselect the friend you came in on (or your only friend), but keep the
+    // picker VISIBLE so you can see who you're challenging and switch. Practice
+    // has no opponent to pick.
     if (!mcState.practice && !mcTarget && friends.list.length === 1) {
       const f = friends.list[0];
       mcTarget = { uid: f.user_id, name: f.display_name || 'your friend' };
     }
     if (ff) {
-      ff.hidden = mcState.practice || !!(uid || friends.list.length <= 1);
+      ff.hidden = mcState.practice || friends.list.length === 0;
       const box = $('#mc-friends');
       if (box && !ff.hidden) {
-        box.innerHTML = friends.list.map((f) =>
-          `<button type="button" class="grade-pill${mcTarget && mcTarget.uid === f.user_id ? ' is-active' : ''}" data-fuid="${f.user_id}">${escapeHTML(f.display_name || 'Climber')}</button>`).join('');
+        // People chips: avatar + name, with a clear selected state.
+        box.innerHTML = friends.list.map((f) => {
+          const on = mcTarget && mcTarget.uid === f.user_id;
+          return `<button type="button" class="mc-friend-opt${on ? ' is-active' : ''}" data-fuid="${f.user_id}" aria-pressed="${on ? 'true' : 'false'}">${avatarHTML(f.user_id, f.display_name || 'Climber', 'sm', f.avatar_v)}<span class="mc-friend-nm">${escapeHTML(f.display_name || 'Climber')}</span></button>`;
+        }).join('');
+        sweepAvatars(); // load real photos into the fresh avatar nodes
       }
     }
     const nm = $('#mc-name'); if (nm) nm.textContent = mcState.practice ? 'Practice Partner 🤖' : (mcTarget ? mcTarget.name : 'a friend');
@@ -3261,6 +3271,7 @@
       : 'Both of you race your own level, so anyone can win. Winner takes elo.';
     const send = $('#mc-send'); if (send) send.textContent = mcState.practice ? 'Start practice' : 'Send challenge';
     renderMcPickers();
+    syncMcSend();
     if (mcModal) mcModal.hidden = false;
   }
   function closeMatchCreate() { if (mcModal) mcModal.hidden = true; mcTarget = null; }
@@ -3320,8 +3331,13 @@
       const f = friends.list.find((x) => x.user_id === b.dataset.fuid); if (!f) return;
       mcTarget = { uid: f.user_id, name: f.display_name || 'your friend' };
       const nm = $('#mc-name'); if (nm) nm.textContent = mcTarget.name;
-      $$('#mc-friends .grade-pill').forEach((p) => p.classList.toggle('is-active', p.dataset.fuid === b.dataset.fuid));
+      $$('#mc-friends .mc-friend-opt').forEach((p) => {
+        const on = p.dataset.fuid === b.dataset.fuid;
+        p.classList.toggle('is-active', on);
+        p.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
       const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
+      syncMcSend();
     });
   })();
   async function matchAct(act, mid) {
