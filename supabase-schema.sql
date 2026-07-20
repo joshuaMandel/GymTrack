@@ -1620,7 +1620,7 @@ begin
     j := public.match_play(mid);
   end if;
   return jsonb_build_object(
-    'id', m.id, 'status', m.status, 'window_end', m.window_end,
+    'id', m.id, 'status', m.status, 'window_start', m.window_start, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
     'winner', m.winner, 'group', m.grp, 'practice', coalesce(m.practice, false),
     'forfeited_by', m.forfeited_by,

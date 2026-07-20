@@ -103,7 +103,7 @@
     return row;
   };
   const fromLift = (r) => ({ id: r.id, ...liftRow(r) });
-  const fromClimb = (r) => ({ id: r.id, ...climbRow(r), color: r.color || '' });
+  const fromClimb = (r) => ({ id: r.id, ...climbRow(r), color: r.color || '', created_at: r.created_at });
   const routineRow = (r) => ({
     name: r.name, position: r.position | 0,
     exercises: r.exercises || [], last_run: r.last_run || null
@@ -1861,20 +1861,38 @@
       rpt.onclick = () => quickSaveClimb(last.discipline, last.grade, last.result);
     }
 
-    // Today's climbs in the active discipline group — tap to fix a mistake
-    const grp = ratingGroup(qsState.discipline);
-    const today = state.climbs
-      .filter((c) => c.date === todayISO() && ratingGroup(c.discipline) === grp)
-      .slice(-3).reverse();
-    $('#qs-recent').innerHTML = today.length
-      ? '<span class="qs-recent-label">Today</span>' + today.map((c) => `
-          <button type="button" class="qs-recent-row" data-id="${escapeHTML(String(c.id))}">
-            ${escapeHTML(c.grade)} · ${escapeHTML(c.result)} <svg class="ico"><use href="#i-pencil"/></svg>
+    // The recent list — "tap to fix a mistake". In a live match it shows ONLY
+    // this match's climbs (mine, in the match discipline, logged since the
+    // match window opened — mirroring the server's membership rule) and each
+    // row DELETES (with undo) instead of opening the full edit form, which is
+    // kept out of matches. Outside a match it's today's climbs in the active
+    // rating group, and a row opens the edit modal.
+    let recent, recentLabel;
+    if (qsLive) {
+      const start = new Date(qsLive.window_start).getTime();
+      recent = state.climbs
+        .filter((c) => qsAllowed.includes(c.discipline) && c.created_at && new Date(c.created_at).getTime() >= start)
+        .slice(-3).reverse();
+      recentLabel = 'This match';
+    } else {
+      const grp = ratingGroup(qsState.discipline);
+      recent = state.climbs
+        .filter((c) => c.date === todayISO() && ratingGroup(c.discipline) === grp)
+        .slice(-3).reverse();
+      recentLabel = 'Today';
+    }
+    const recIcon = qsLive ? 'i-x' : 'i-pencil';
+    $('#qs-recent').innerHTML = recent.length
+      ? `<span class="qs-recent-label">${recentLabel}</span>` + recent.map((c) => `
+          <button type="button" class="qs-recent-row${qsLive ? ' is-del' : ''}" data-id="${escapeHTML(String(c.id))}">
+            ${escapeHTML(c.grade)} · ${escapeHTML(c.result)} <svg class="ico"><use href="#${recIcon}"/></svg>
           </button>`).join('')
       : '';
     $$('#qs-recent .qs-recent-row').forEach((b) => b.addEventListener('click', () => {
       const c = state.climbs.find((x) => String(x.id) === b.dataset.id);
-      if (c) { quickSheet.hidden = true; openEditClimb(c); }
+      if (!c) return;
+      if (qsLive) { removeMatchClimb(c); return; }
+      quickSheet.hidden = true; openEditClimb(c);
     }));
 
     $$('#quick-sheet .qs-result').forEach((b) => { b.disabled = !qsState.grade; });
@@ -1908,7 +1926,12 @@
     const entry = {
       date: todayISO(), discipline, grade,
       attempts: result === 'Project' ? 2 : 1, // a project implies more than one go
-      result, location: '', notes: ''
+      result, location: '', notes: '',
+      // Stamp a client timestamp so the optimistic row passes the match-window
+      // filter before the server round-trip; the synced row replaces it via
+      // fromClimb(data). climbRow() ignores this field, so the insert still
+      // lets the DB default created_at = now().
+      created_at: new Date().toISOString()
     };
     // Predict whether this climb will COUNT toward the live match (turns/slots/
     // discipline). Client-side prediction from the last poll; the server's walk
@@ -1954,6 +1977,28 @@
           grade, discipline, magnitude: maMagnitude(discipline, grade)
         });
       }
+    });
+  }
+
+  // Remove a match climb straight from the recent list — no edit modal. Deletes
+  // the climb (freeing its slot / adjusting the score), keeps the h2h in sync,
+  // and offers Undo, which re-logs it. Mirrors quickSaveClimb's undo path.
+  function removeMatchClimb(c) {
+    const label = `${c.grade} · ${c.result}`;
+    const restore = { date: c.date, discipline: c.discipline, grade: c.grade, attempts: c.attempts, result: c.result, location: c.location || '', notes: c.notes || '', color: c.color || '', created_at: c.created_at };
+    withSync(async () => {
+      await Store.delClimb(c.id);
+      renderClimbing(); renderDashboard(); renderQuickLog();
+      if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
+      if (h2hMid) refreshH2H();
+    });
+    showToast(`Removed ${label}`, () => {
+      withSync(async () => {
+        await Store.addClimb(restore);
+        renderClimbing(); renderDashboard(); renderQuickLog();
+        if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
+        if (h2hMid) refreshH2H();
+      });
     });
   }
 
