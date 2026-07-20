@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/gym-progress-tracker-fw39et
   workflow_dispatch:
 
 # Allow the workflow to publish to Pages
