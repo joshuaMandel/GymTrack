@@ -3266,9 +3266,6 @@
       }
     }
     const nm = $('#mc-name'); if (nm) nm.textContent = mcState.practice ? 'Practice Partner 🤖' : (mcTarget ? mcTarget.name : 'a friend');
-    const sub = $('#mc-sub'); if (sub) sub.textContent = mcState.practice
-      ? 'A solo demo match against the bot — real turns and scoring, but it never affects your Send Score.'
-      : 'Both of you race your own level, so anyone can win. Winner takes elo.';
     const send = $('#mc-send'); if (send) send.textContent = mcState.practice ? 'Start practice' : 'Send challenge';
     renderMcPickers();
     syncMcSend();
@@ -3285,16 +3282,16 @@
     $$('#mc-ranked .seg-btn').forEach((b) => b.classList.toggle('is-active', (b.dataset.ranked === '1') === mcState.ranked));
     const styleField = $('#mc-style-field'); if (styleField) styleField.hidden = mcState.discipline !== 'routes';
     // Live plain-language summary of exactly what the opponent will agree to.
-    const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
+    const one = mcState.discipline === 'boulder' ? 'problem' : 'route';
     const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
-    const scratchScale = mcState.discipline === 'boulder'
-      ? 'your V-grade is your score (V5 = 5)'
-      : 'a 5.10c send is 3, +1 per grade above';
+    const intro = `${discLabel}, best of ${mcState.length} — you take turns, and you go first.`;
     const sum = $('#mc-summary');
     if (sum) sum.textContent = mcState.ranked
-      ? `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Points vs your par: at par 3 · +1 per grade above · below 2/1 · far below or fall 0 · flash +1. Most points wins.`
-      : `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Unranked: no handicap, straight scoring — ${scratchScale}, flash +1, fall 0. Whoever climbs harder wins · no elo at stake.`;
+      ? `${intro} Every ${one} is scored against your own level: one at your level is worth 3 points, and each grade harder is worth 1 more. A grade easier scores 2, two easier scores 1, and anything well below your level — or a fall — scores 0. A flash adds 1 point. Most points wins, and the winner takes elo.`
+      : mcState.discipline === 'boulder'
+        ? `${intro} Unranked, so there's no handicap — your grade is your score: a V5 is worth 5, a V8 is worth 8, and so on. A flash adds 1, a fall is 0. Whoever climbs harder wins, and no elo is on the line.`
+        : `${intro} Unranked, so there's no handicap — climbs score up from 5.10c (worth 3), with each grade harder worth 1 more. A flash adds 1, a fall is 0. Whoever climbs harder wins, and no elo is on the line.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
@@ -3449,13 +3446,13 @@
     // How points work — visible while live so both players can strategize.
     if (unranked && !resolved && s.status !== 'pending') {
       const scale = rules.discipline === 'boulder'
-        ? 'your V-grade is your score — V5 is 5, V8 is 8'
-        : 'a 5.10c send is 3 · +1 per grade above';
-      html += `<div class="h2h-guide">Unranked · straight scoring — ${scale} · flash +1 · fall 0. Whoever climbs harder wins · no elo at stake.</div>`;
+        ? 'your grade is your score — a V5 is worth 5, a V8 is worth 8'
+        : 'climbs score up from 5.10c (worth 3), each grade harder worth 1 more';
+      html += `<div class="h2h-guide">Unranked, so there’s no handicap: ${scale}. A flash adds 1, a fall is 0. Whoever climbs harder wins, and no elo is on the line.</div>`;
     } else if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
-      html += `<div class="h2h-guide">Par ${escapeHTML(me.par)} · send at par 3 · +1 per grade above · below par 2/1 · far below or fall 0 · flash +1 — most points wins.</div>`;
+      html += `<div class="h2h-guide">Every climb is scored against your own level (${escapeHTML(me.par)}): one at your level is worth 3 points, and each grade harder is worth 1 more. A grade easier scores 2, two easier scores 1, and anything well below your level — or a fall — scores 0. A flash adds 1 point. Most points wins.</div>`;
     } else if (parMode && !resolved && s.status !== 'pending') {
-      html += `<div class="h2h-guide">Your first send sets your par — it scores 3 (flash +1), any grade. After that: at par 3 · +1 per grade above · below par 2/1 · fall 0 — most points wins.</div>`;
+      html += `<div class="h2h-guide">Your first send sets your level — it’s worth 3 points at any grade (a flash adds 1). After that, one at your level is worth 3, each grade harder is worth 1 more, a grade or two easier scores 2 or 1, and a fall scores 0. Most points wins.</div>`;
     }
     if (!resolved && s.status === 'active') {
       const logBtn = myFull
