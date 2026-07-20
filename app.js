@@ -3614,8 +3614,10 @@
       const bn = (s && s.rules && s.rules.best_n) != null ? s.rules.best_n : a.best_n;
       const prog = me && me.counted != null ? (bn ? `${Math.min(me.counted, bn)} of ${bn} ${noun}` : `${me.counted} ${noun}`) : '';
       const myTurn = s && me.can_log === true;
-      const hubLast = s ? matchLastLine(them) : '';
-      const turnHint = s && parMode && s.turn ? (myTurn ? (hubLast ? `${them.name} ${hubLast} · your turn` : 'your turn') : `${them.name}’s turn`) : '';
+      // The hub card is a tight glanceable scoreboard — keep its meta short
+      // (the opponent's-last-climb handoff lives on the full match screen + dock,
+      // which have room). A long line here clips the avatars off the card edges.
+      const turnHint = s && parMode && s.turn ? (myTurn ? 'your turn' : `${them.name}’s turn`) : '';
       const meta = [prog, turnHint, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
       const fmtScore = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
       const youScore = s ? `<b class="${sc(me.score)}">${fmtScore(me.score)}</b>` : '<b>—</b>';
