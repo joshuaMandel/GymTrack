@@ -1254,10 +1254,12 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
    when the body spans the full card (mobile stack) the group spreads
    symmetrically instead of hugging the left; on desktop the body is
    content-sized (no leftover), so the tight centered cluster is unchanged. */
-.hub-scores { display: flex; align-items: center; justify-content: center; gap: 22px; }
-.hub-mid { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
-.hub-prog { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.hub-side { display: flex; flex-direction: column; align-items: center; gap: 0; flex: 1 1 0; min-width: 0; }
+.hub-scores { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hub-mid { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; flex: 1 1 auto; min-width: 0; }
+/* Wraps instead of forcing width, so a long turn line can never push the You /
+   opponent columns (and their avatars) off the edges of the card. */
+.hub-prog { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.hub-side { display: flex; flex-direction: column; align-items: center; gap: 0; flex: 0 0 auto; max-width: 40%; min-width: 0; }
 .hub-side .hub-nm { font-size: 12px; font-weight: 700; color: var(--muted); }
 .hub-side.you .hub-nm { color: var(--accent-2); }
 .hub-side b { font-family: var(--font-disp); font-weight: 700; font-size: 30px; line-height: 1.1; color: var(--ink); }
