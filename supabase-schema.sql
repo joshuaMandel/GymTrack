@@ -1494,14 +1494,23 @@ end $$;
 -- passed) the match resolves. A player who never ends still resolves at the cap.
 create or replace function public.match_end(mid uuid)
 returns text language plpgsql volatile security definer set search_path = public as $$
-declare me uuid := auth.uid(); m record;
+declare me uuid := auth.uid(); m record; j jsonb;
 begin
   select * into m from public.matches where id = mid for update;
   if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
   if m.status <> 'active' then return m.status; end if;
   if me = m.challenger then update public.matches set ch_ended = true, ch_ended_at = coalesce(ch_ended_at, now()) where id = mid; m.ch_ended := true; end if;
   if me = m.opponent  then update public.matches set op_ended = true, op_ended_at = coalesce(op_ended_at, now()) where id = mid; m.op_ended := true; end if;
-  if m.ch_ended and m.op_ended then perform public.match_resolve(mid); end if;
+  if m.ch_ended and m.op_ended then perform public.match_resolve(mid);
+  elsif m.discipline is not null and m.best_n is not null then
+    -- A side with all slots used is done even without tapping End — if the
+    -- other side just ended, nothing can change: resolve now.
+    j := public.match_play(mid);
+    if (m.ch_ended or coalesce((j->'ch'->>'counted')::int, 0) >= m.best_n)
+       and (m.op_ended or coalesce((j->'op'->>'counted')::int, 0) >= m.best_n) then
+      perform public.match_resolve(mid);
+    end if;
+  end if;
   return (select status from public.matches where id = mid);
 end $$;
 
@@ -1520,6 +1529,16 @@ begin
     select * into m from public.matches where id = mid;
   end if;
   if m.discipline is not null then j := public.match_play(mid); end if;
+  -- Both sides done (ended OR slots full) → the match resolves itself. Nobody
+  -- should have to tap "End my session" after the last counting climb; the 3s
+  -- state poll lands here within moments of it.
+  if j is not null and m.status = 'active' and m.best_n is not null
+     and (m.ch_ended or coalesce((j->'ch'->>'counted')::int, 0) >= m.best_n)
+     and (m.op_ended or coalesce((j->'op'->>'counted')::int, 0) >= m.best_n) then
+    perform public.match_resolve(mid);
+    select * into m from public.matches where id = mid;
+    j := public.match_play(mid);
+  end if;
   return jsonb_build_object(
     'id', m.id, 'status', m.status, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,

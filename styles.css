@@ -862,6 +862,10 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
 }
+/* The full climb form ("More detail…") opens on top of the head-to-head during
+   a match — at equal z-index DOM order decides and it painted BEHIND the match
+   modal. Keep it above modals (50), below the sheet (60) and the anim (65). */
+#edit-modal { z-index: 55; }
 .modal {
   position: relative;
   background: var(--panel);
@@ -1528,17 +1532,20 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 @keyframes ma-show-climb { 0%,63% { opacity: 1; } 64%,100% { opacity: 0; } }
 @keyframes ma-show-top   { 0%,63% { opacity: 0; } 64%,100% { opacity: 1; } }
 @keyframes ma-flash { 0% { opacity: .85; transform: scale(.3); } 100% { opacity: 0; transform: scale(6.5); } }
-/* fail: climb a bit, pop off the wall in an arc, tumble, land splat (in view) */
+/* fail: climb a bit, pop off the wall in an arc, tumble, land splat (in view).
+   The figure is anchored bottom:4px inside an overflow:hidden stage, so the
+   landing translateY must stay small — 33px pushed the whole splat below the
+   clip edge and the stage played out EMPTY (the "broken animation" report). */
 @keyframes ma-fail-body {
   0%   { transform: translateY(48px) rotate(0deg); }
   22%  { transform: translateY(24px) rotate(-6deg); }  /* climbing */
   30%  { transform: translateY(14px) rotate(-20deg); } /* leans off, slipping */
   40%  { transform: translateY(-16px) rotate(110deg); } /* pops OFF the wall, airborne */
   50%  { transform: translateY(-30px) rotate(195deg); } /* INVERTED APEX, up in the air */
-  60%  { transform: translateY(-4px) rotate(285deg); }  /* head-first plunge */
-  67%  { transform: translateY(33px) rotate(360deg) scaleY(.55) scaleX(1.34); } /* SPLAT squash */
-  75%  { transform: translateY(27px) rotate(360deg) scaleY(1.07); } /* bounce */
-  100% { transform: translateY(33px) rotate(360deg); }
+  60%  { transform: translateY(-6px) rotate(285deg); }  /* head-first plunge */
+  67%  { transform: translateY(11px) rotate(360deg) scaleY(.55) scaleX(1.34); } /* SPLAT squash — on the floor, in frame */
+  75%  { transform: translateY(7px) rotate(360deg) scaleY(1.07); } /* bounce */
+  100% { transform: translateY(11px) rotate(360deg); }
 }
 @keyframes ma-dust { 0% { opacity: 0; transform: scale(.3); } 25% { opacity: .9; } 100% { opacity: 0; transform: scale(1.7) translateY(-3px); } }
 @keyframes ma-fshow-climb { 0%,28% { opacity: 1; } 29%,100% { opacity: 0; } }

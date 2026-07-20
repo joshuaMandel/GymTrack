@@ -1817,8 +1817,16 @@
   }
 
   function renderQuickLog() {
-    $('#qs-disciplines').innerHTML = ALL_DISCIPLINES.map((d) =>
-      `<button type="button" class="qs-tab${d === qsState.discipline ? ' is-active' : ''}" data-d="${d}">${d === 'Bouldering' ? 'Boulder' : d}</button>`).join('');
+    // During a live match, only the match's discipline(s) can be logged — the
+    // other tabs lock so a mis-tap can't produce a climb that silently doesn't
+    // count. (Agnostic route matches keep both Sport and Top Rope open.)
+    const qsLive = matchLive();
+    const qsAllowed = qsLive ? MATCH_DISCS[qsLive.rules.discipline] : null;
+    if (qsAllowed && !qsAllowed.includes(qsState.discipline)) qsState.discipline = qsAllowed[0];
+    $('#qs-disciplines').innerHTML = ALL_DISCIPLINES.map((d) => {
+      const locked = qsAllowed && !qsAllowed.includes(d);
+      return `<button type="button" class="qs-tab${d === qsState.discipline ? ' is-active' : ''}" data-d="${d}"${locked ? ' disabled title="Locked during the match"' : ''}>${d === 'Bouldering' ? 'Boulder' : d}</button>`;
+    }).join('');
     $$('#qs-disciplines .qs-tab').forEach((b) => b.addEventListener('click', () => {
       qsState.discipline = b.dataset.d;
       if (!gradesFor(qsState.discipline).includes(qsState.grade)) qsState.grade = null;
@@ -1922,12 +1930,14 @@
       // my own climb won't come back over realtime — refresh the live match views
       if (typeof refreshMatchDock === 'function' && matches.active) refreshMatchDock();
       if (h2hMid) refreshH2H();
-      // A COUNTING match climb drops the sheet (fall back to the head-to-head)
-      // and fires the stick-figure moment. A session-only climb during a match
-      // keeps the sheet open and stays quiet. If the live state isn't known yet
-      // (first poll pending), fall back to the old always-close behavior.
+      // A COUNTING match climb drops the sheet, RETURNS TO THE HEAD-TO-HEAD
+      // (wherever you logged from — dock, hub, FAB) and fires the stick-figure
+      // moment over it. A session-only climb during a match keeps the sheet
+      // open and stays quiet. If the live state isn't known yet (first poll
+      // pending), fall back to the old always-close behavior.
       if (matches.active && (live == null || willCount)) {
         quickSheet.hidden = true;
+        if (!h2hMid) openH2H(matches.active.id);
         playMatchAnim({
           type: result === 'Project' ? 'fail' : 'send',
           grade, discipline, magnitude: maMagnitude(discipline, grade)
