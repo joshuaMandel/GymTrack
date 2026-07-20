@@ -1010,7 +1010,12 @@ $$;
 -- opponent has ended their session or filled their slots. Most points wins;
 -- an exact tie is a draw. The stake is a real Elo step between the two
 -- players' displayed ratings (Δ = 16·(outcome − E)), stored per match and
--- added on top of the displayed rating. The per-climb Send Score algorithm is
+-- added on top of the displayed rating. An UNRANKED match (ranked = false,
+-- challenger's choice at creation) is the same game with the handicap and the
+-- stake removed: both players score off the same fixed scratch baseline
+-- (par D = 0 — a V0 / 5.10c send is 3, +1 per grade above), so whoever climbs
+-- harder and sends more simply wins, and no elo changes hands (deltas 0).
+-- The per-climb Send Score algorithm is
 -- NEVER modified; climbs are scored once by the normal pipeline and the match
 -- adjustment is applied once on top. Legacy matches (created before rulesets,
 -- discipline null) keep the original engine-delta scoring end to end.
@@ -1063,6 +1068,9 @@ alter table public.matches add column if not exists best_n integer;    -- slots 
 -- become counting when scored after they ended.
 alter table public.matches add column if not exists ch_ended_at timestamptz;
 alter table public.matches add column if not exists op_ended_at timestamptz;
+-- Unranked (scratch) matches: par is a shared fixed baseline instead of each
+-- player's rating, and no elo is exchanged. Pre-existing rows are ranked.
+alter table public.matches add column if not exists ranked boolean not null default true;
 alter table public.matches drop constraint if exists matches_discipline_chk;
 alter table public.matches add constraint matches_discipline_chk check (discipline is null or discipline in ('boulder','lead','toprope','agnostic'));
 alter table public.matches drop constraint if exists matches_best_n_chk;
@@ -1147,13 +1155,16 @@ returns text[] language sql immutable as $$
 $$;
 
 -- Human-readable ruleset label for the challenge + head-to-head screens.
-create or replace function public.match_rules_label(disc text, best_n int)
+-- (The old 2-arg signature must go or the 2-arg calls would be ambiguous.)
+drop function if exists public.match_rules_label(text, int);
+create or replace function public.match_rules_label(disc text, best_n int, ranked boolean default true)
 returns text language sql immutable as $$
   select case when disc is null then 'Any climbing'
     else (case disc when 'boulder' then 'Bouldering' when 'lead' then 'Lead'
                     when 'toprope' then 'Top rope' when 'agnostic' then 'Routes (any)' else disc end)
        || ' · ' || (case when best_n is null then 'open session'
                          else 'best of ' || best_n || (case when disc = 'boulder' then ' problems' else ' routes' end) end)
+       || (case when coalesce(ranked, true) then '' else ' · unranked' end)
   end
 $$;
 
@@ -1226,6 +1237,10 @@ begin
       order by (c.result <> 'Project') desc, c.created_at, c.id limit 1;
     if fg is not null then op_par := public.grade_d(fd, fg); end if;
   end if;
+  -- Unranked: no handicap. Both sides score off the same fixed scratch
+  -- baseline (D 0 = V0 / 5.10c → 3 points, +1 per grade above), so points are
+  -- absolute — whoever climbs harder and sends more wins.
+  if not coalesce(m.ranked, true) then ch_par := 0; op_par := 0; end if;
   -- The walk.
   for rec in
     select c.user_id, c.created_at, c.result as res, public.grade_d(c.discipline, c.grade) as gd
@@ -1269,10 +1284,12 @@ begin
   return jsonb_build_object(
     'group', grp,
     'turn', case when n is null or m.status <> 'active' then null else turn end,
+    -- Unranked: par_d 0 still drives the point math (and the client's pill
+    -- chips), but there's no personal par to DISPLAY — par comes back null.
     'ch', jsonb_build_object('points', ch_pts, 'counted', ch_n, 'par_d', ch_par,
-      'par', public.par_grade(grp, ch_par), 'can_log', ch_can),
+      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, ch_par) end, 'can_log', ch_can),
     'op', jsonb_build_object('points', op_pts, 'counted', op_n, 'par_d', op_par,
-      'par', public.par_grade(grp, op_par), 'can_log', op_can));
+      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, op_par) end, 'can_log', op_can));
 end $$;
 revoke all on function public.match_play(uuid) from public, anon, authenticated;
 
@@ -1396,7 +1413,8 @@ begin
   -- A genuine draw means both climbers performed equally relative to their OWN
   -- baselines, so neither out-performed the other: no rating changes hands. (For
   -- wins/losses the chess-Elo gap still makes upsets pay more than expected wins.)
-  if win = 'draw' then d := 0; end if;
+  -- Unranked matches never move elo — that's the point of playing unranked.
+  if win = 'draw' or not coalesce(m.ranked, true) then d := 0; end if;
   update public.matches set status = 'resolved', resolved_at = now(), grp = g,
     ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
   perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
@@ -1409,7 +1427,8 @@ revoke all on function public.match_resolve(uuid) from public, anon, authenticat
 -- length, else best-of-N (1..50). Defaults keep the old 1-arg call working
 -- (legacy null ruleset) for older harnesses; the app always sends a ruleset.
 drop function if exists public.match_challenge(uuid);
-create or replace function public.match_challenge(friend uuid, discipline text default null, best_n integer default null)
+drop function if exists public.match_challenge(uuid, text, integer);
+create or replace function public.match_challenge(friend uuid, discipline text default null, best_n integer default null, ranked boolean default true)
 returns uuid language plpgsql volatile security definer set search_path = public as $$
 declare me uuid := auth.uid(); mid uuid; a uuid := least(auth.uid(), friend); b uuid := greatest(auth.uid(), friend);
 begin
@@ -1423,6 +1442,9 @@ begin
   -- The bare 1-arg legacy call (both null) stays allowed for old harnesses.
   if best_n is not null and best_n not in (3,5,7,9) then raise exception 'invalid match length'; end if;
   if discipline is not null and best_n is null then raise exception 'invalid match length'; end if;
+  -- Unranked is a scratch-scoring variant of the ruleset game; a legacy
+  -- null-discipline match has no per-climb scoring for it to change.
+  if not coalesce(ranked, true) and discipline is null then raise exception 'invalid ruleset'; end if;
   if not exists (select 1 from public.friendships f where f.status='accepted' and f.user_a=a and f.user_b=b) then
     raise exception 'can only challenge friends';
   end if;
@@ -1430,8 +1452,8 @@ begin
       and ((m.challenger=me and m.opponent=friend) or (m.challenger=friend and m.opponent=me))) then
     raise exception 'a match with this friend is already in progress';
   end if;
-  insert into public.matches (challenger, opponent, status, discipline, best_n)
-    values (me, friend, 'pending', discipline, best_n) returning id into mid;
+  insert into public.matches (challenger, opponent, status, discipline, best_n, ranked)
+    values (me, friend, 'pending', discipline, best_n, coalesce(ranked, true)) returning id into mid;
   return mid;
 end $$;
 
@@ -1497,7 +1519,8 @@ begin
     'winner', m.winner, 'group', m.grp,
     'turn', case when j is null then null else j->>'turn' end,
     'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
-      'style_label', public.match_rules_label(m.discipline, m.best_n)),
+      'ranked', coalesce(m.ranked, true),
+      'style_label', public.match_rules_label(m.discipline, m.best_n, m.ranked)),
     'challenger', jsonb_build_object('name', public.user_display(m.challenger),
       'uid', m.challenger, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.challenger), 0),
       'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
@@ -1528,7 +1551,7 @@ end $$;
 -- My matches: pending/active (to act on) and resolved (history), with ruleset.
 drop function if exists public.match_list();
 create or replace function public.match_list()
-returns table (id uuid, status text, i_am text, opponent uuid, opponent_name text, winner text, my_delta integer, my_score numeric, opp_score numeric, discipline text, best_n integer, rules_label text, created_at timestamptz)
+returns table (id uuid, status text, i_am text, opponent uuid, opponent_name text, winner text, my_delta integer, my_score numeric, opp_score numeric, discipline text, best_n integer, ranked boolean, rules_label text, created_at timestamptz)
 language sql stable security definer set search_path = public as $$
   select m.id, m.status,
     case when m.challenger = auth.uid() then 'challenger' else 'opponent' end,
@@ -1538,20 +1561,20 @@ language sql stable security definer set search_path = public as $$
     case when m.challenger = auth.uid() then m.ch_delta else m.op_delta end,
     case when m.challenger = auth.uid() then m.ch_score else m.op_score end,
     case when m.challenger = auth.uid() then m.op_score else m.ch_score end,
-    m.discipline, m.best_n, public.match_rules_label(m.discipline, m.best_n),
+    m.discipline, m.best_n, coalesce(m.ranked, true), public.match_rules_label(m.discipline, m.best_n, m.ranked),
     m.created_at
   from public.matches m
   where m.challenger = auth.uid() or m.opponent = auth.uid()
   order by m.created_at desc
 $$;
 
-revoke all on function public.match_challenge(uuid, text, integer) from public, anon;
+revoke all on function public.match_challenge(uuid, text, integer, boolean) from public, anon;
 revoke all on function public.match_respond(uuid, boolean) from public, anon;
 revoke all on function public.match_cancel(uuid)           from public, anon;
 revoke all on function public.match_end(uuid)              from public, anon;
 revoke all on function public.match_state(uuid)            from public, anon;
 revoke all on function public.match_list()                 from public, anon;
-grant execute on function public.match_challenge(uuid, text, integer) to authenticated;
+grant execute on function public.match_challenge(uuid, text, integer, boolean) to authenticated;
 grant execute on function public.match_respond(uuid, boolean) to authenticated;
 grant execute on function public.match_cancel(uuid)           to authenticated;
 grant execute on function public.match_end(uuid)              to authenticated;

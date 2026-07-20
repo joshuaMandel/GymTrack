@@ -3165,14 +3165,16 @@
     }
     matches.incoming.forEach((m) => { html += `<li>
       <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
-        <div><div class="feed-main">${escapeHTML(m.opponent_name)} challenged you</div><div class="feed-sub">${rules(m)} · winner takes elo</div></div></div>
+        <div><div class="feed-main">${escapeHTML(m.opponent_name)} challenged you</div><div class="feed-sub">${rules(m)} · ${m.ranked === false ? 'no elo at stake' : 'winner takes elo'}</div></div></div>
       <div class="feed-actions"><button class="btn primary sm" data-mact="accept" data-mid="${m.id}">Accept</button><button class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div></li>`; });
     matches.outgoing.forEach((m) => { html += `<li>
       <div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
         <div><div class="feed-main">Challenge sent to ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${rules(m)} · waiting to accept</div></div></div>
       <div class="feed-actions"><button class="btn ghost sm" data-mact="cancelm" data-mid="${m.id}">Cancel</button></div></li>`; });
     matches.history.forEach((m) => {
-      const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' ? 'draw' : (m.my_delta > 0 ? 'won' : m.my_delta < 0 ? 'lost' : 'draw'));
+      // Won/lost comes from the stored winner, never the delta sign — an
+      // unranked win moves no elo (delta 0) but is still a win.
+      const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' || !m.winner ? 'draw' : (m.winner === m.i_am ? 'won' : 'lost'));
       const lbl = m.status === 'abandoned' ? 'abandoned' : res;
       html += `<li><div class="feed-left"><span class="feed-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
         <div><div class="feed-main">vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${m.status === 'abandoned' ? 'no climbs logged' : `you ${res}`}</div></div></div>
@@ -3183,7 +3185,7 @@
 
   // ----- Match creation: pick the ruleset, then send the challenge -----
   let mcTarget = null; // { uid, name }
-  const mcState = { discipline: 'boulder', style: 'lead', length: 3 };
+  const mcState = { discipline: 'boulder', style: 'lead', length: 3, ranked: true };
   const mcModal = $('#match-create-modal');
   // Map the pickers to the backend discipline: bouldering, or the rope style.
   function mcMappedDiscipline() { return mcState.discipline === 'boulder' ? 'boulder' : mcState.style; }
@@ -3194,7 +3196,7 @@
   }
   function openMatchCreate(uid, name) {
     mcTarget = uid ? { uid, name } : null;
-    mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3;
+    mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3; mcState.ranked = true;
     const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
     // Opened from the hub CTA (no friend chosen yet): show the opponent picker.
     // With exactly one friend, preselect them — the sheet is then identical to
@@ -3224,13 +3226,17 @@
       const v = b.dataset.n === '' ? null : parseInt(b.dataset.n, 10);
       b.classList.toggle('is-active', v === mcState.length);
     });
+    $$('#mc-ranked .seg-btn').forEach((b) => b.classList.toggle('is-active', (b.dataset.ranked === '1') === mcState.ranked));
     const styleField = $('#mc-style-field'); if (styleField) styleField.hidden = mcState.discipline !== 'routes';
     // Live plain-language summary of exactly what the opponent will agree to.
     const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
     const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
+    const scratch = mcState.discipline === 'boulder' ? 'V0' : '5.10c';
     const sum = $('#mc-summary');
-    if (sum) sum.textContent = `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Points vs your par: at par 3 · +1 per grade above · below 2/1 · far below or fall 0 · flash +1. Most points wins.`;
+    if (sum) sum.textContent = mcState.ranked
+      ? `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Points vs your par: at par 3 · +1 per grade above · below 2/1 · far below or fall 0 · flash +1. Most points wins.`
+      : `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Unranked: no handicap, straight scoring — a ${scratch} send is 3, +1 per grade above, flash +1, fall 0. Whoever climbs harder wins · no elo at stake.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
@@ -3238,7 +3244,7 @@
     if (!mcTarget) { if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = 'Pick who to challenge first.'; } return; }
     if (btn) btn.disabled = true;
     try {
-      const { data, error } = await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length });
+      const { data, error } = await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length, ranked: mcState.ranked });
       if (error) throw error;
       closeMatchCreate();
       await loadMatches();
@@ -3258,6 +3264,7 @@
     $('#mc-discipline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-disc]'); if (!b) return; mcState.discipline = b.dataset.disc; renderMcPickers(); });
     $('#mc-style').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; mcState.style = b.dataset.style; renderMcPickers(); });
     $('#mc-length').addEventListener('click', (ev) => { const b = ev.target.closest('[data-n]'); if (!b) return; mcState.length = b.dataset.n === '' ? null : parseInt(b.dataset.n, 10); renderMcPickers(); });
+    $('#mc-ranked').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ranked]'); if (!b) return; mcState.ranked = b.dataset.ranked === '1'; renderMcPickers(); });
     const mf = $('#mc-friends');
     if (mf) mf.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-fuid]'); if (!b) return;
@@ -3296,12 +3303,15 @@
     // Par-points mode = any ruleset match; legacy (null-discipline) rows keep
     // the old signed-elo-delta presentation end to end.
     const parMode = rules.discipline != null;
+    // Unranked = the same turn-by-turn game with the handicap and elo stake
+    // removed: everyone scores off the same scratch baseline, absolute points.
+    const unranked = parMode && rules.ranked === false;
     const sc = (v) => (parMode ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : '');
     const side = (p, isMe, lead) => `<div class="h2h-side ${isMe ? 'me' : ''} ${lead ? 'leading' : ''}">
       <div class="h2h-ava">${avatarHTML(p.uid, p.name, 'md', p.avatar_v)}</div>
       <div class="h2h-name">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}</div>
       <div class="h2h-score ${sc(p.score)}">${!parMode && p.score > 0 ? '+' : ''}${p.score}${parMode ? '<span class="h2h-pts-lbl"> pts</span>' : ''}</div>
-      <div class="h2h-base">${parMode ? `par ${p.par != null ? escapeHTML(p.par) : '—'}` : `racing level ${p.baseline != null ? p.baseline : '—'}`}</div>
+      <div class="h2h-base">${parMode ? (unranked ? 'unranked' : `par ${p.par != null ? escapeHTML(p.par) : '—'}`) : `racing level ${p.baseline != null ? p.baseline : '—'}`}</div>
       <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
     // Hard cap: once your best_n slots are used your side is full — further
@@ -3322,6 +3332,7 @@
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
       html += `<div class="h2h-result ${r}">${s.status === 'abandoned' ? 'Match abandoned' : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw'}</div>`;
       if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
+      else if (unranked && s.status !== 'abandoned') html += `<div class="h2h-elochange">Unranked — no elo exchanged</div>`;
     } else if (s.status === 'pending') {
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
     } else if (myFull) {
@@ -3333,7 +3344,10 @@
     }
     html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
     // How points work — visible while live so both players can strategize.
-    if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
+    if (unranked && !resolved && s.status !== 'pending') {
+      const scr = rules.discipline === 'boulder' ? 'V0' : '5.10c';
+      html += `<div class="h2h-guide">Unranked · straight scoring — a ${scr} send is 3 · +1 per grade above · flash +1 · fall 0. Whoever climbs harder wins · no elo at stake.</div>`;
+    } else if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
       html += `<div class="h2h-guide">Par ${escapeHTML(me.par)} · send at par 3 · +1 per grade above · below par 2/1 · far below or fall 0 · flash +1 — most points wins.</div>`;
     }
     if (!resolved && s.status === 'active') {
@@ -3548,7 +3562,7 @@
       const m = matches.incoming[0];
       html = `<div class="hub-card hub-idle">
         <div class="hub-body"><div class="hub-idle-title">${escapeHTML(m.opponent_name)} challenged you</div>
-        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · winner takes elo</div></div>
+        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · ${m.ranked === false ? 'no elo at stake' : 'winner takes elo'}</div></div>
         <div class="hub-cta-zone"><button type="button" class="btn primary" data-mact="accept" data-mid="${m.id}">Accept</button><button type="button" class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div>
       </div>`;
     } else if (matches.outgoing.length) {
@@ -3566,7 +3580,8 @@
       </div>`;
     } else {
       const chips = matches.history.slice(0, 4).map((m) => {
-        const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' ? 'draw' : (m.my_delta > 0 ? 'won' : m.my_delta < 0 ? 'lost' : 'draw'));
+        // Winner-based, not delta-sign: unranked wins carry delta 0.
+        const res = m.status === 'abandoned' ? 'draw' : (m.winner === 'draw' || !m.winner ? 'draw' : (m.winner === m.i_am ? 'won' : 'lost'));
         const lbl = res === 'won' ? 'W' : res === 'lost' ? 'L' : 'D';
         return `<button type="button" class="hub-chip ${res}" data-mopen="${m.id}"><b>${lbl}</b> ${escapeHTML(m.opponent_name)}${m.my_delta ? ` <span>${m.my_delta > 0 ? '+' : ''}${m.my_delta}</span>` : ''}</button>`;
       }).join('');
