@@ -976,6 +976,9 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
   color: var(--text); cursor: pointer;
 }
 .qs-recent-row .ico { width: 14px; height: 14px; color: var(--muted); }
+/* Match rows delete on tap (no edit modal) — the ✕ reads as a remove action. */
+.qs-recent-row.is-del .ico { color: var(--danger, #d1495b); }
+.qs-recent-row.is-del:hover { border-color: var(--danger, #d1495b); }
 .qs-foot { margin-top: 10px; text-align: center; }
 
 /* ---------- Undo toast ---------- */
