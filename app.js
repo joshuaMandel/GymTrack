@@ -1801,16 +1801,21 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
 
-  function openQuickLog() {
+  async function openQuickLog() {
     if (!qsState.grade && state.climbs.length) {
       const last = state.climbs[state.climbs.length - 1];
       qsState.discipline = last.discipline;
       qsState.grade = last.grade;
     }
-    // A match is on but its state hasn't landed yet (first open right after
-    // accept): fetch now so the point chips appear without waiting for the
-    // 3s poll — the keyed refresh re-renders the open sheet when it arrives.
-    if (cloudOn() && matches.active && !matchLive()) refreshMatchDock();
+    // During a match, pull the live state BEFORE rendering so the recent list's
+    // delete affordance is current: your latest climb is only deletable until the
+    // opponent responds, and the dock's 3s poll could otherwise leave a stale
+    // "deletable" row for a few seconds after they do. Fetch directly (the dock
+    // refresh skips when a poll is mid-flight). (Also lands point chips on the
+    // first open right after accept.)
+    if (cloudOn() && matches.active) {
+      try { const { data } = await sb.rpc('match_state', { mid: matches.active.id }); if (data) mdState = data; } catch (e) { /* keep last-known state */ }
+    }
     renderQuickLog();
     quickSheet.hidden = false;
     // Bring the selected grade into view once the sheet has laid out
@@ -1867,13 +1872,21 @@
     // row DELETES (with undo) instead of opening the full edit form, which is
     // kept out of matches. Outside a match it's today's climbs in the active
     // rating group, and a row opens the edit modal.
-    let recent, recentLabel;
+    let recent, recentLabel, canDelLatest = false;
     if (qsLive) {
       const start = new Date(qsLive.window_start).getTime();
       recent = state.climbs
         .filter((c) => qsAllowed.includes(c.discipline) && c.created_at && new Date(c.created_at).getTime() >= start)
         .slice(-3).reverse();
       recentLabel = 'This match';
+      // Match scoring re-derives the whole turn-walk from the current climbs, so
+      // deleting a mid-sequence climb could un-count the OPPONENT's next climb.
+      // Only your latest climb is safe to remove, and only while it's still the
+      // global tail — i.e. the opponent hasn't logged a counting climb since. Once
+      // they respond, every row is read-only.
+      const them = matchTheirSide(qsLive);
+      canDelLatest = qsLive.status === 'active' && recent.length > 0
+        && (!them.last || !them.last.at || new Date(recent[0].created_at).getTime() > new Date(them.last.at).getTime());
     } else {
       const grp = ratingGroup(qsState.discipline);
       recent = state.climbs
@@ -1881,18 +1894,23 @@
         .slice(-3).reverse();
       recentLabel = 'Today';
     }
-    const recIcon = qsLive ? 'i-x' : 'i-pencil';
     $('#qs-recent').innerHTML = recent.length
-      ? `<span class="qs-recent-label">${recentLabel}</span>` + recent.map((c) => `
-          <button type="button" class="qs-recent-row${qsLive ? ' is-del' : ''}" data-id="${escapeHTML(String(c.id))}">
-            ${escapeHTML(c.grade)} · ${escapeHTML(c.result)} <svg class="ico"><use href="#${recIcon}"/></svg>
-          </button>`).join('')
+      ? `<span class="qs-recent-label">${recentLabel}</span>` + recent.map((c, i) => {
+        const del = qsLive && i === 0 && canDelLatest;   // only the safe latest match row deletes
+        const edit = !qsLive;                             // non-match rows open the editor
+        const cls = del ? ' is-del' : (qsLive ? ' is-static' : '');
+        const icon = del ? '<svg class="ico"><use href="#i-x"/></svg>' : edit ? '<svg class="ico"><use href="#i-pencil"/></svg>' : '';
+        return `<button type="button" class="qs-recent-row${cls}" data-id="${escapeHTML(String(c.id))}"${del ? ' data-del="1"' : ''}${edit ? ' data-edit="1"' : ''}>
+            ${escapeHTML(c.grade)} · ${escapeHTML(c.result)} ${icon}
+          </button>`;
+      }).join('')
       : '';
     $$('#qs-recent .qs-recent-row').forEach((b) => b.addEventListener('click', () => {
       const c = state.climbs.find((x) => String(x.id) === b.dataset.id);
       if (!c) return;
-      if (qsLive) { removeMatchClimb(c); return; }
-      quickSheet.hidden = true; openEditClimb(c);
+      if (b.dataset.del) { removeMatchClimb(c); return; }
+      if (b.dataset.edit) { quickSheet.hidden = true; openEditClimb(c); }
+      // read-only match rows: no action
     }));
 
     $$('#quick-sheet .qs-result').forEach((b) => { b.disabled = !qsState.grade; });
@@ -1983,7 +2001,35 @@
   // Remove a match climb straight from the recent list — no edit modal. Deletes
   // the climb (freeing its slot / adjusting the score), keeps the h2h in sync,
   // and offers Undo, which re-logs it. Mirrors quickSaveClimb's undo path.
-  function removeMatchClimb(c) {
+  async function removeMatchClimb(c) {
+    // Safety re-verify against FRESH server state before removing. Match scoring
+    // re-derives the whole turn-walk, so only your LATEST climb — and only while
+    // the opponent hasn't logged a counting climb since — is safe to remove
+    // without un-counting THEIR climb. The on-screen affordance can lag the ~3s
+    // poll, so never trust it for the act itself.
+    if (matches.active) {
+      try {
+        const { data: s, error } = await sb.rpc('match_state', { mid: matches.active.id });
+        if (!error && s) {
+          mdState = s; // adopt fresh state
+          const discs = MATCH_DISCS[s.rules && s.rules.discipline] || [];
+          const them = s.i_am === 'challenger' ? s.opponent : s.challenger;
+          const start = new Date(s.window_start).getTime();
+          const mine = state.climbs
+            .filter((x) => discs.includes(x.discipline) && x.created_at && new Date(x.created_at).getTime() >= start)
+            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+          const latest = mine[mine.length - 1];
+          const safe = s.status === 'active' && latest && String(latest.id) === String(c.id)
+            && (!them.last || !them.last.at || new Date(latest.created_at).getTime() > new Date(them.last.at).getTime());
+          if (!safe) {
+            renderQuickLog();
+            if (h2hMid) refreshH2H();
+            showToast('Can’t remove — the match has moved on');
+            return;
+          }
+        }
+      } catch (e) { /* offline / RPC failure: fall through to the optimistic delete */ }
+    }
     const label = `${c.grade} · ${c.result}`;
     const restore = { date: c.date, discipline: c.discipline, grade: c.grade, attempts: c.attempts, result: c.result, location: c.location || '', notes: c.notes || '', color: c.color || '', created_at: c.created_at };
     withSync(async () => {

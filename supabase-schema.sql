@@ -1301,8 +1301,8 @@ begin
     -- say what the opponent just did ("Bob flashed V9 (+10) — your turn").
     -- Only counting climbs are exposed: they're part of the agreed match;
     -- out-of-turn / non-matching climbs stay private session data.
-    if is_ch then ch_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts);
-    else op_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts); end if;
+    if is_ch then ch_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts, 'at', rec.created_at);
+    else op_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts, 'at', rec.created_at); end if;
     if n is not null and not other_rel then
       turn := case when is_ch then 'opponent' else 'challenger' end;
     end if;
