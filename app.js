@@ -31,6 +31,53 @@
   let state = { lifts: [], climbs: [], routines: [] };
 
   /* ======================================================================
+     Motion — vanilla spring animations via motion.dev (window.Motion),
+     vendored same-origin and precached for offline (index.html + sw.js).
+     This layer ONLY enhances: every call falls back to the existing CSS (or
+     a no-op) when Motion is absent or the user prefers reduced motion, so
+     nothing here is load-bearing. Springs are easing generators in this
+     build (spring({stiffness,damping,mass}) → easing), not {type:'spring'}.
+     ====================================================================== */
+  const MO = (typeof window !== 'undefined' && window.Motion) || null;
+  // Spring feels, tuned lively-but-professional and reused app-wide. Referenced
+  // by name via the opts.spring shorthand so the generator is only built after
+  // the motionOK() guard (MO may be null).
+  const SPRING_CFG = {
+    pop: { stiffness: 560, damping: 26, mass: 0.9 }, // default entrance
+    gentle: { stiffness: 380, damping: 30 }, // calm slide/fade
+    snappy: { stiffness: 720, damping: 32 }, // quick, minimal overshoot
+    bouncy: { stiffness: 480, damping: 17 } // playful overshoot (receive, chips)
+  };
+  function motionOK() { return !!MO && !maReduced(); }
+  // animate(el, keyframes, opts) when Motion is usable; else run cssFallback
+  // (if given) and return null. opts.spring:'pop' expands to a spring easing.
+  // Never throws — a bad call degrades to the fallback.
+  function mAnim(el, keyframes, opts, cssFallback) {
+    if (!el) return null;
+    if (!motionOK()) { if (cssFallback) cssFallback(); return null; }
+    const o = Object.assign({}, opts);
+    if (o.spring) { o.easing = MO.spring(SPRING_CFG[o.spring] || SPRING_CFG.pop); delete o.spring; }
+    try { return MO.animate(el, keyframes, o); }
+    catch (e) { if (cssFallback) cssFallback(); return null; }
+  }
+  // Stop a Motion playback controls object safely (no-op if null/absent).
+  function mStop(a) { try { a && a.stop && a.stop(); } catch (e) { /* ignore */ } }
+  // Spring an overlay's dialog/sheet into view. Call right AFTER setting the
+  // overlay's hidden=false; a pure no-op when Motion is off/reduced (the overlay
+  // is already visible). Bottom sheets slide up; centered dialogs pop in.
+  function animOverlayIn(overlay) {
+    if (!overlay || !motionOK()) return;
+    mAnim(overlay, { opacity: [0, 1] }, { duration: 0.16, easing: 'ease-out' });
+    const panel = overlay.querySelector('.sheet, .modal');
+    if (!panel) return;
+    const sheet = panel.classList.contains('sheet');
+    mAnim(panel,
+      sheet ? { transform: ['translateY(100%)', 'translateY(0)'] }
+        : { transform: ['translateY(8px) scale(.92)', 'translateY(0) scale(1)'] },
+      { spring: sheet ? 'gentle' : 'pop' });
+  }
+
+  /* ======================================================================
      Supabase setup
      ====================================================================== */
   const cfg = window.SUPABASE_CONFIG || {};
@@ -1578,6 +1625,7 @@
     editStatus.textContent = '';
     editStatus.className = 'auth-status';
     editModal.hidden = false;
+    animOverlayIn(editModal);
   }
   function closeEditModal() {
     editModal.hidden = true;
@@ -1791,14 +1839,31 @@
   const saveQs = () => { try { localStorage.setItem(QS_KEY, JSON.stringify(qsState)); } catch (e) { /* ignore */ } };
 
   let toastTimer = null;
+  let toastAnim = null;
+  // The toast is centered with translateX(-50%); keep that in every keyframe so
+  // the spring rise/fall never knocks it off-center.
+  function hideToast(t) {
+    t = t || $('#toast');
+    mStop(toastAnim);
+    const done = () => { t.hidden = true; };
+    const a = mAnim(t,
+      { opacity: [1, 0], transform: ['translateX(-50%) translateY(0)', 'translateX(-50%) translateY(10px)'] },
+      { duration: 0.2, easing: 'ease-in' }, done);
+    toastAnim = a;
+    if (a && a.finished) a.finished.then(done, done); else if (!a) done();
+  }
   function showToast(msg, onUndo) {
     const t = $('#toast');
+    mStop(toastAnim);
     $('#toast-msg').textContent = msg;
     $('#toast-undo').hidden = !onUndo;
-    $('#toast-undo').onclick = () => { t.hidden = true; if (onUndo) onUndo(); };
+    $('#toast-undo').onclick = () => { if (onUndo) onUndo(); hideToast(t); };
     t.hidden = false;
+    toastAnim = mAnim(t,
+      { opacity: [0, 1], transform: ['translateX(-50%) translateY(14px) scale(.96)', 'translateX(-50%) translateY(0) scale(1)'] },
+      { spring: 'pop' });
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+    toastTimer = setTimeout(() => hideToast(t), 5000);
   }
 
   async function openQuickLog() {
@@ -1818,6 +1883,7 @@
     }
     renderQuickLog();
     quickSheet.hidden = false;
+    animOverlayIn(quickSheet);
     // Bring the selected grade into view once the sheet has laid out
     const active = $('#qs-grades .qs-grade.is-active');
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -2071,7 +2137,34 @@
      fast-log path. Markup/timings pair with the ".ma-*" rules in styles.css.
      ====================================================================== */
   let maTimers = [];
-  const maClear = () => { maTimers.forEach(clearTimeout); maTimers = []; };
+  let maAnims = []; // live Motion controls for the current card, stopped on teardown
+  const maClear = () => {
+    maTimers.forEach(clearTimeout); maTimers = [];
+    maAnims.forEach(mStop); maAnims = [];
+  };
+  // Card-level Motion beats (spring entrance, "fired a message" fling, receive
+  // slide-out). Motion owns ONLY the card transform (via the .ma-mo class, which
+  // suppresses the CSS card keyframes); the internal figure/confetti/FX stay CSS.
+  function maCardIn(card, recv) {
+    const kf = recv
+      ? { opacity: [0, 1], transform: ['translateX(60px) scale(.85)', 'translateX(0) scale(1)'] }
+      : { opacity: [0, 1], transform: ['translateY(-14px) scale(.86)', 'translateY(0) scale(1)'] };
+    const a = mAnim(card, kf, { spring: recv ? 'bouncy' : 'pop' });
+    if (a) maAnims.push(a);
+  }
+  function maFling(card) {
+    // a hair of wind-up, then hurl the card toward the opponent (top-right)
+    const a = mAnim(card,
+      { transform: ['translateY(0) rotate(0deg) scale(1)', 'translate(62vw,-26vh) rotate(20deg) scale(.18)'], opacity: [1, 0] },
+      { duration: 0.6, easing: [0.5, -0.25, 0.85, 0.35] });
+    if (a) maAnims.push(a);
+  }
+  function maRecvOut(card) {
+    const a = mAnim(card,
+      { transform: ['translateX(0) scale(1)', 'translateX(-22px) translateY(-10px) scale(.9)'], opacity: [1, 0] },
+      { duration: 0.4, easing: 'ease-in' });
+    if (a) maAnims.push(a);
+  }
   function maReduced() {
     if (typeof window.__REDUCED !== 'undefined') return !!window.__REDUCED; // test hook
     try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
@@ -2162,16 +2255,26 @@
     const dismiss = () => { maClear(); host.hidden = true; host.innerHTML = ''; host.setAttribute('aria-hidden', 'true'); };
     card.addEventListener('click', dismiss); // tap to skip
 
+    // Motion drives the card-level beats with real springs when available; the
+    // calm summary/reduced card keeps its gentle CSS fade. ma-mo suppresses the
+    // CSS card keyframes so the two engines never fight over the transform.
+    const useMotion = motionOK() && !opts.summary;
+    if (useMotion) { card.classList.add('ma-mo'); maCardIn(card, recv); }
+
     if (recv || reduced || opts.summary) {
       const dur = recv ? 2300 : 1500;
-      if (recv) maTimers.push(setTimeout(() => card.classList.add('ma-recv-out'), dur - 400));
+      if (recv) maTimers.push(setTimeout(() => {
+        if (useMotion) maRecvOut(card); else card.classList.add('ma-recv-out');
+      }, dur - 400));
       maTimers.push(setTimeout(dismiss, dur));
     } else {
       // send/fail: after the climb + top-out / crash, whisk the whole card off
       // toward the opponent (the "fired a message" swoosh).
       const swooshAt = fail ? 2050 : 1500;
       const dur = fail ? 2750 : 2250;
-      maTimers.push(setTimeout(() => card.classList.add('ma-swooshing'), swooshAt));
+      maTimers.push(setTimeout(() => {
+        if (useMotion) maFling(card); else card.classList.add('ma-swooshing');
+      }, swooshAt));
       maTimers.push(setTimeout(dismiss, dur));
     }
   }
@@ -2335,6 +2438,7 @@
     const status = $('#routine-status');
     status.textContent = ''; status.className = 'auth-status';
     routineModal.hidden = false;
+    animOverlayIn(routineModal);
   }
   function closeRoutineModal() { routineModal.hidden = true; editingRoutineId = null; }
 
@@ -3369,7 +3473,7 @@
     const send = $('#mc-send'); if (send) send.textContent = mcState.practice ? 'Start practice' : 'Send challenge';
     renderMcPickers();
     syncMcSend();
-    if (mcModal) mcModal.hidden = false;
+    if (mcModal) { mcModal.hidden = false; animOverlayIn(mcModal); }
   }
   function closeMatchCreate() { if (mcModal) mcModal.hidden = true; mcTarget = null; }
   function renderMcPickers() {
@@ -3456,7 +3560,7 @@
   }
 
   const matchModal = $('#match-modal');
-  function openH2H(mid) { h2hMid = mid; h2hLastHtml = null; h2hForfeitArm = false; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
+  function openH2H(mid) { h2hMid = mid; h2hLastHtml = null; h2hForfeitArm = false; if (matchModal) { matchModal.hidden = false; animOverlayIn(matchModal); } refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
   function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; h2hForfeitArm = false; loadMatches(); }
   async function refreshH2H() {
     if (!h2hMid || !cloudOn()) return;
@@ -3644,8 +3748,12 @@
       document.body.classList.remove('has-match-dock');
       return;
     }
+    const wasHidden = matchDock.hidden;
     matchDock.hidden = false;
     document.body.classList.add('has-match-dock');
+    // Spring the mini-player in ONLY on the hidden→shown transition — this runs
+    // on every 3s poll, so re-animating each time would jitter.
+    if (wasHidden) mAnim(matchDock, { opacity: [0, 1], transform: ['translateY(16px) scale(.97)', 'translateY(0) scale(1)'] }, { spring: 'gentle' });
     paintMatchDock();
   }
   let mdFetching = false;
@@ -3727,6 +3835,16 @@
         <span class="md-line1"><b class="${sc(me.score)}">${num(me.score)}</b><span class="md-vs">vs</span><b class="${sc(them.score)}">${num(them.score)}</b>${parMode ? ' <span class="md-pts">pts</span>' : ''} <span class="md-them">${escapeHTML(them.name)}</span></span>
         <span class="md-line2">${escapeHTML(meta)}${mdStale ? ' <span class="md-stale">· offline</span>' : ''}</span>
       </span>`;
+    // Pop my score when a point actually lands (rebuilds every poll, so gate on
+    // change). Targets the freshly-rendered node; touches no match state.
+    const myB = c.querySelector('.md-line1 b');
+    if (myB) {
+      const prev = matchDock.__mdScore;
+      matchDock.__mdScore = me.score;
+      if (prev != null && prev !== me.score) {
+        mAnim(myB, { transform: ['scale(1)', 'scale(1.34)', 'scale(1)'] }, { duration: 0.42, easing: [0.2, 1.3, 0.4, 1] });
+      }
+    }
   }
 
   /* ---------------- Match hub ----------------
@@ -3862,7 +3980,7 @@
   /* ----- "How the Send Score works" explainer (static content) ----- */
   const scoreModal = $('#score-modal');
   $$('.score-info-btn').forEach((btn) => {
-    btn.addEventListener('click', () => { scoreModal.hidden = false; });
+    btn.addEventListener('click', () => { scoreModal.hidden = false; animOverlayIn(scoreModal); });
   });
   $('#score-close').addEventListener('click', () => { scoreModal.hidden = true; });
   scoreModal.addEventListener('click', (e) => { if (e.target === scoreModal) scoreModal.hidden = true; });
@@ -3875,6 +3993,7 @@
     const box = $('#lb-summary');
     box.innerHTML = '<div class="chart-empty" style="height:90px">Loading…</div>';
     lbModal.hidden = false;
+    animOverlayIn(lbModal);
     try {
       // Whole-history view — the pyramid and sessions never clip to a range.
       const { data, error } = await sb.rpc('climb_user_summary', { target: row.user_id, days: 36500, grp });
