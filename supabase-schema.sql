@@ -39,6 +39,12 @@ alter table public.climbs add column if not exists color text default '';
 create index if not exists lifts_user_idx  on public.lifts  (user_id);
 create index if not exists climbs_user_idx on public.climbs (user_id);
 
+-- The Practice Partner bot's stable identity (defined here so the leaderboard
+-- and friend search below can exclude it — it's a private, owner-only demo
+-- opponent, never a public climber). Its behavior lives near the match RPCs.
+create or replace function public.practice_bot_id() returns uuid
+  language sql immutable as $$ select 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'::uuid $$;
+
 -- ---------- Row-Level Security ----------
 alter table public.lifts  enable row level security;
 alter table public.climbs enable row level security;
@@ -189,6 +195,7 @@ begin
     where (case when grp = 'boulder' then c.discipline = 'Bouldering'
                 else c.discipline <> 'Bouldering' end)
       and array_position(scale, c.grade) is not null
+      and c.user_id <> public.practice_bot_id()  -- the demo bot is never on the leaderboard
     order by c.user_id, c.date, c.id -- id breaks same-day ties, matching the app
   loop
     -- ----- user boundary: close previous user's last session, emit, reset -----
@@ -398,6 +405,9 @@ create table if not exists public.profiles (
 alter table public.profiles drop constraint if exists profiles_username_chk;
 alter table public.profiles add constraint profiles_username_chk
   check (username is null or username ~ '^[a-z0-9_]{3,20}$');
+-- A bot profile is the Practice Partner (owner-only demo opponent). It's kept
+-- out of search, the leaderboard, and normal friend flows.
+alter table public.profiles add column if not exists is_bot boolean not null default false;
 
 alter table public.profiles enable row level security;
 -- Own row only: you can read/claim/update your own profile. Other people's
@@ -662,6 +672,7 @@ language sql stable security definer set search_path = public as $$
   select p.id, p.username::text, p.display_name, public.friend_status(p.id)
   from public.profiles p
   where p.id <> auth.uid()
+    and not coalesce(p.is_bot, false)  -- the demo bot isn't searchable/friendable
     and length(coalesce(trim(q), '')) >= 2
     and (p.username ilike (trim(q) || '%') or p.display_name ilike (trim(q) || '%'))
   order by (p.username ilike (trim(q) || '%')) desc, p.username
@@ -933,6 +944,7 @@ language sql stable security definer set search_path = public as $$
   from auth.users u
   left join public.profiles p on p.id = u.id
   where u.id <> auth.uid()
+    and u.id <> public.practice_bot_id()  -- the demo bot isn't searchable/friendable
     and length(coalesce(trim(q), '')) >= 2
     and (
       p.username ilike (trim(q) || '%')
@@ -1071,6 +1083,10 @@ alter table public.matches add column if not exists op_ended_at timestamptz;
 -- Unranked (scratch) matches: par is a shared fixed baseline instead of each
 -- player's rating, and no elo is exchanged. Pre-existing rows are ranked.
 alter table public.matches add column if not exists ranked boolean not null default true;
+-- Practice matches (owner vs the Practice Partner bot): a real end-to-end match
+-- for solo demo/QA. They compute a score + elo delta so you can verify the math,
+-- but are excluded from your displayed rating and never post to the feed.
+alter table public.matches add column if not exists practice boolean not null default false;
 alter table public.matches drop constraint if exists matches_discipline_chk;
 alter table public.matches add constraint matches_discipline_chk check (discipline is null or discipline in ('boulder','lead','toprope','agnostic'));
 alter table public.matches drop constraint if exists matches_best_n_chk;
@@ -1101,6 +1117,7 @@ returns integer language sql stable security definer set search_path = public as
   select coalesce(sum(case when m.challenger = uid then m.ch_delta else m.op_delta end), 0)::int
   from public.matches m
   where m.status = 'resolved' and m.grp = grp and (m.challenger = uid or m.opponent = uid)
+    and not coalesce(m.practice, false)  -- practice never moves your real rating
 $$;
 revoke all on function public.match_adjustment(uuid, text) from public, anon, authenticated;
 
@@ -1428,8 +1445,11 @@ begin
   if win = 'draw' or not coalesce(m.ranked, true) then d := 0; end if;
   update public.matches set status = 'resolved', resolved_at = now(), grp = g,
     ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
-  perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
-  perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+  -- Practice matches never touch the social feed.
+  if not coalesce(m.practice, false) then
+    perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
+    perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+  end if;
 end $$;
 revoke all on function public.match_resolve(uuid) from public, anon, authenticated;
 
@@ -1505,6 +1525,11 @@ begin
   if m.status <> 'active' then return m.status; end if;
   if me = m.challenger then update public.matches set ch_ended = true, ch_ended_at = coalesce(ch_ended_at, now()) where id = mid; m.ch_ended := true; end if;
   if me = m.opponent  then update public.matches set op_ended = true, op_ended_at = coalesce(op_ended_at, now()) where id = mid; m.op_ended := true; end if;
+  -- Practice: the bot never taps "End", so it ends whenever you do → resolves now.
+  if m.practice then
+    if m.challenger = public.practice_bot_id() then update public.matches set ch_ended = true, ch_ended_at = coalesce(ch_ended_at, now()) where id = mid; m.ch_ended := true; end if;
+    if m.opponent  = public.practice_bot_id() then update public.matches set op_ended = true, op_ended_at = coalesce(op_ended_at, now()) where id = mid; m.op_ended := true; end if;
+  end if;
   if m.ch_ended and m.op_ended then perform public.match_resolve(mid);
   elsif m.discipline is not null and m.best_n is not null then
     -- A side with all slots used is done even without tapping End — if the
@@ -1546,13 +1571,14 @@ begin
   return jsonb_build_object(
     'id', m.id, 'status', m.status, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
-    'winner', m.winner, 'group', m.grp,
+    'winner', m.winner, 'group', m.grp, 'practice', coalesce(m.practice, false),
     'turn', case when j is null then null else j->>'turn' end,
     'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
       'ranked', coalesce(m.ranked, true),
       'style_label', public.match_rules_label(m.discipline, m.best_n, m.ranked)),
     'challenger', jsonb_build_object('name', public.user_display(m.challenger),
       'uid', m.challenger, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.challenger), 0),
+      'is_bot', coalesce((select is_bot from public.profiles where id = m.challenger), false),
       'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
       'par', case when j is null then null else j->'ch'->>'par' end,
       'par_d', case when j is null then null else (j->'ch'->>'par_d')::numeric end,
@@ -1566,6 +1592,7 @@ begin
       'ended', m.ch_ended, 'delta', m.ch_delta),
     'opponent', jsonb_build_object('name', public.user_display(m.opponent),
       'uid', m.opponent, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.opponent), 0),
+      'is_bot', coalesce((select is_bot from public.profiles where id = m.opponent), false),
       'baseline', coalesce(m.op_snap_boulder, m.op_snap_rope),
       'par', case when j is null then null else j->'op'->>'par' end,
       'par_d', case when j is null then null else (j->'op'->>'par_d')::numeric end,
@@ -1612,6 +1639,84 @@ grant execute on function public.match_cancel(uuid)           to authenticated;
 grant execute on function public.match_end(uuid)              to authenticated;
 grant execute on function public.match_state(uuid)            to authenticated;
 grant execute on function public.match_list()                 to authenticated;
+
+-- ---------- Practice Partner: solo demo/QA opponent (owner-only) ----------
+-- A real, auth-backed bot user so it can be a genuine match opponent. It never
+-- authenticates, never appears in search/leaderboard, and only the owner can
+-- start a match against it. The bot's turns are driven by the human's client
+-- calling match_bot_move on its poll — no background job needed.
+insert into auth.users (id, email, raw_user_meta_data, created_at)
+  values (public.practice_bot_id(), 'practice-partner@gymtrack.app', '{"display_name":"Practice Partner"}'::jsonb, now())
+  on conflict (id) do nothing;
+insert into public.profiles (id, username, display_name, is_bot)
+  values (public.practice_bot_id(), 'practicepartner', 'Practice Partner', true)
+  on conflict (id) do update set is_bot = true, display_name = 'Practice Partner';
+
+-- Start a practice match: goes straight to active (no accept step), with the
+-- bot's level mirrored to yours so a ranked match is a fair fight. Owner-only.
+create or replace function public.match_practice(discipline text default 'boulder', best_n integer default 3, ranked boolean default true)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); bot uuid := public.practice_bot_id(); mid uuid;
+begin
+  if not public.admin_is() then raise exception 'practice mode is owner-only'; end if;
+  if discipline is null or discipline not in ('boulder','lead','toprope','agnostic') then raise exception 'invalid discipline'; end if;
+  if best_n is null or best_n not in (3,5,7,9) then raise exception 'invalid match length'; end if;
+  -- One practice match at a time — clear any in-flight one so you can restart.
+  update public.matches set status = 'canceled'
+    where practice and status in ('pending','active')
+      and ((challenger = me and opponent = bot) or (challenger = bot and opponent = me));
+  insert into public.matches (challenger, opponent, status, discipline, best_n, ranked, practice,
+      window_start, window_end, ch_snap_boulder, ch_snap_rope, op_snap_boulder, op_snap_rope)
+    values (me, bot, 'active', discipline, best_n, coalesce(ranked, true), true,
+      now(), now() + interval '4 hours',
+      public.impl_rating(me, 'boulder'), public.impl_rating(me, 'rope'),
+      coalesce(public.impl_rating(me, 'boulder'), 1400), coalesce(public.impl_rating(me, 'rope'), 1300))
+    returning id into mid;
+  return mid;
+end $$;
+revoke all on function public.match_practice(text, integer, boolean) from public, anon;
+grant execute on function public.match_practice(text, integer, boolean) to authenticated;
+
+-- Advance the bot's turn: if this is a practice match and it's the bot's turn,
+-- log ONE climb for it (a lively, deterministic pattern around its mirrored
+-- level), then return the fresh state. A no-op otherwise, so the client can
+-- call it every poll safely. Any participant of a bot match may call it.
+create or replace function public.match_bot_move(mid uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid(); bot uuid := public.practice_bot_id(); m record; j jsonb;
+  botside text; grp text; discs text[]; disc text; off int; snap int; botd numeric;
+  slot int; res text; targetd numeric; g text;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
+  if not coalesce(m.practice, false) or (m.challenger <> bot and m.opponent <> bot) then return public.match_state(mid); end if;
+  if m.status <> 'active' then return public.match_state(mid); end if;
+  botside := case when m.challenger = bot then 'ch' else 'op' end;
+  j := public.match_play(mid);
+  if j is null or coalesce((j->botside->>'can_log')::boolean, false) is not true then return public.match_state(mid); end if;
+  grp := public.match_group(m.discipline);
+  discs := public.match_disciplines(m.discipline);
+  disc := discs[1];
+  off := case when grp = 'boulder' then 0 else 300 end;
+  snap := case when m.challenger = bot then (case grp when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end)
+               else (case grp when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) end;
+  botd := coalesce((snap - 1000 - off) / 100.0, 4);
+  slot := coalesce((j->botside->>'counted')::int, 0);
+  -- Cycle: send at level · flash one below · send one above · fall two above.
+  case slot % 4
+    when 0 then res := 'Send';    targetd := botd;
+    when 1 then res := 'Flash';   targetd := botd - 1;
+    when 2 then res := 'Send';    targetd := botd + 1;
+    else        res := 'Project'; targetd := botd + 2;
+  end case;
+  g := public.par_grade(grp, targetd);
+  insert into public.climbs (user_id, date, discipline, grade, attempts, result, created_at)
+    values (bot, current_date, disc, g, case when res = 'Project' then 2 else 1 end, res, now());
+  return public.match_state(mid);
+end $$;
+revoke all on function public.match_bot_move(uuid) from public, anon;
+grant execute on function public.match_bot_move(uuid) to authenticated;
 
 -- rebuild_activity's upsert must target the PARTIAL unique index (session kinds
 -- only) now that match_result rows are exempt — restate with the predicate.

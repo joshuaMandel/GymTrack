@@ -3017,6 +3017,7 @@
     catch (e) { isAdmin = false; }
     const entry = $('#admin-entry'); if (entry) entry.hidden = !isAdmin;
     if (!isAdmin && $('#view-admin') && $('#view-admin').classList.contains('is-active')) showView('dashboard');
+    if (typeof renderMatchHub === 'function') renderMatchHub(); // reveal the owner-only Practice button
   }
   async function renderAdmin() {
     const list = $('#admin-list'); if (!list) return;
@@ -3221,7 +3222,7 @@
 
   // ----- Match creation: pick the ruleset, then send the challenge -----
   let mcTarget = null; // { uid, name }
-  const mcState = { discipline: 'boulder', style: 'lead', length: 3, ranked: true };
+  const mcState = { discipline: 'boulder', style: 'lead', length: 3, ranked: true, practice: false };
   const mcModal = $('#match-create-modal');
   // Map the pickers to the backend discipline: bouldering, or the rope style.
   function mcMappedDiscipline() { return mcState.discipline === 'boulder' ? 'boulder' : mcState.style; }
@@ -3230,27 +3231,35 @@
     const f = (friends.list || []).find((x) => x.user_id === uid);
     openMatchCreate(uid, (f && f.display_name) || 'your friend');
   }
-  function openMatchCreate(uid, name) {
+  // Owner-only: a solo match against the Practice Partner bot (verify the whole
+  // flow on one account). Same sheet, but no opponent picker and it calls
+  // match_practice instead of match_challenge.
+  function openPracticeCreate() { openMatchCreate(null, null, true); }
+  function openMatchCreate(uid, name, practice) {
     mcTarget = uid ? { uid, name } : null;
     mcState.discipline = 'boulder'; mcState.style = 'lead'; mcState.length = 3; mcState.ranked = true;
+    mcState.practice = !!practice;
     const st = $('#mc-status'); if (st) { st.hidden = true; st.textContent = ''; }
-    // Opened from the hub CTA (no friend chosen yet): show the opponent picker.
-    // With exactly one friend, preselect them — the sheet is then identical to
-    // the friends-list path.
     const ff = $('#mc-friend-field');
-    if (!mcTarget && friends.list.length === 1) {
+    // Opened from the hub CTA (no friend chosen yet): show the opponent picker.
+    // With exactly one friend, preselect them. Practice skips the picker entirely.
+    if (!mcState.practice && !mcTarget && friends.list.length === 1) {
       const f = friends.list[0];
       mcTarget = { uid: f.user_id, name: f.display_name || 'your friend' };
     }
     if (ff) {
-      ff.hidden = !!(uid || friends.list.length <= 1);
+      ff.hidden = mcState.practice || !!(uid || friends.list.length <= 1);
       const box = $('#mc-friends');
       if (box && !ff.hidden) {
         box.innerHTML = friends.list.map((f) =>
           `<button type="button" class="grade-pill${mcTarget && mcTarget.uid === f.user_id ? ' is-active' : ''}" data-fuid="${f.user_id}">${escapeHTML(f.display_name || 'Climber')}</button>`).join('');
       }
     }
-    const nm = $('#mc-name'); if (nm) nm.textContent = mcTarget ? mcTarget.name : 'a friend';
+    const nm = $('#mc-name'); if (nm) nm.textContent = mcState.practice ? 'Practice Partner 🤖' : (mcTarget ? mcTarget.name : 'a friend');
+    const sub = $('#mc-sub'); if (sub) sub.textContent = mcState.practice
+      ? 'A solo demo match against the bot — real turns and scoring, but it never affects your Send Score.'
+      : 'Both of you race your own level, so anyone can win. Winner takes elo.';
+    const send = $('#mc-send'); if (send) send.textContent = mcState.practice ? 'Start practice' : 'Send challenge';
     renderMcPickers();
     if (mcModal) mcModal.hidden = false;
   }
@@ -3279,10 +3288,12 @@
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
     if (!cloudOn()) return;
-    if (!mcTarget) { if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = 'Pick who to challenge first.'; } return; }
+    if (!mcState.practice && !mcTarget) { if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = 'Pick who to challenge first.'; } return; }
     if (btn) btn.disabled = true;
     try {
-      const { data, error } = await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length, ranked: mcState.ranked });
+      const { data, error } = mcState.practice
+        ? await sb.rpc('match_practice', { discipline: mcMappedDiscipline(), best_n: mcState.length, ranked: mcState.ranked })
+        : await sb.rpc('match_challenge', { friend: mcTarget.uid, discipline: mcMappedDiscipline(), best_n: mcState.length, ranked: mcState.ranked });
       if (error) throw error;
       closeMatchCreate();
       await loadMatches();
@@ -3328,8 +3339,25 @@
   function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; loadMatches(); }
   async function refreshH2H() {
     if (!h2hMid || !cloudOn()) return;
-    try { const { data, error } = await sb.rpc('match_state', { mid: h2hMid }); if (error) throw error; renderH2H(data); }
+    try { const { data, error } = await sb.rpc('match_state', { mid: h2hMid }); if (error) throw error; renderH2H(data); maybeBotMove(data); }
     catch (e) { console.warn('Match state unavailable:', e); }
+  }
+  // Practice matches: when it's the bot's turn, nudge it to take its move (the
+  // server logs one climb and the next poll shows it). A short "thinking" delay
+  // makes the turn handoff feel real. Idempotent + re-entrancy-guarded.
+  let botMoving = false;
+  async function maybeBotMove(s) {
+    if (!s || !s.practice || s.status !== 'active' || botMoving) return;
+    const bot = s.challenger.is_bot ? s.challenger : s.opponent.is_bot ? s.opponent : null;
+    if (!bot || bot.can_log !== true) return;
+    botMoving = true;
+    setTimeout(async () => {
+      try { const { data } = await sb.rpc('match_bot_move', { mid: s.id }); if (data && h2hMid === s.id) renderH2H(data); }
+      catch (e) { console.warn('Bot move failed:', e); }
+      botMoving = false;
+      if (h2hMid === s.id) refreshH2H();
+      if (matches.active && matches.active.id === s.id) refreshMatchDock();
+    }, 800);
   }
   function renderH2H(s) {
     const body = $('#match-body'); if (!body || !s) return;
@@ -3357,7 +3385,8 @@
     const myFull = !!(rules.best_n && me.counted != null && me.counted >= rules.best_n);
     const myTurn = me.can_log === true;
     // Rules banner — always visible so the agreed ruleset is unambiguous.
-    let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}</span></div>` : '';
+    let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}${s.practice ? ' · practice' : ''}</span></div>` : '';
+    if (s.practice) html += `<div class="h2h-practice">🤖 Practice match — the bot plays its own turns. Doesn’t affect your Send Score.</div>`;
     // Best-of-N progress: "4 of 6 problems logged" per side, or a plain count for
     // an open session. counted is null on legacy (pre-ruleset) matches.
     if (!resolved && s.status === 'active' && me.counted != null) {
@@ -3369,7 +3398,8 @@
     if (resolved) {
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
       html += `<div class="h2h-result ${r}">${s.status === 'abandoned' ? 'Match abandoned' : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw'}</div>`;
-      if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
+      if (s.practice && s.status !== 'abandoned') html += `<div class="h2h-elochange">Practice — ${me.delta ? `would have been ${me.delta > 0 ? '+' : ''}${me.delta} Send Score, but ` : ''}your real score is untouched</div>`;
+      else if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
       else if (unranked && s.status !== 'abandoned') html += `<div class="h2h-elochange">Unranked — no elo exchanged</div>`;
     } else if (s.status === 'pending') {
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
@@ -3495,6 +3525,7 @@
     } finally {
       mdFetching = false;
     }
+    if (mdState && !mdStale) maybeBotMove(mdState); // drive the practice bot's turn
     renderMatchHub(); // hub card first (it may hide/show the dock)
     renderMatchDock();
     // If the quick sheet is open, keep its turn note + point chips current —
@@ -3565,6 +3596,8 @@
     const els = [$('#match-hub-dash'), $('#match-hub-climb')].filter(Boolean);
     if (!els.length) return;
     if (!CONFIGURED || !cloudOn()) { els.forEach((e) => { e.hidden = true; e.innerHTML = ''; e.__hubHtml = ''; }); renderMatchDock(); return; }
+    // Owner-only: a solo practice match against the bot, to verify the flow.
+    const practiceBtn = isAdmin ? '<button type="button" class="btn ghost sm" data-hubpractice>🤖 Practice</button>' : '';
     let html = '';
     if (!matchesLoaded) {
       html = `<div class="hub-card hub-skel" aria-hidden="true"><span class="skel skel-ico"></span><span class="skel-lines"><span class="skel skel-line"></span><span class="skel skel-line short"></span></span><span class="skel skel-btn"></span></div>`;
@@ -3624,7 +3657,7 @@
       html = `<div class="hub-card hub-idle">
         <div class="hub-body"><div class="hub-idle-title">Ready for a head-to-head?</div>
         <div class="hub-idle-sub">Add a friend, then race a session — each of you plays your own level, so anyone can win.</div></div>
-        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubfriends>Find friends</button></div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubfriends>Find friends</button>${practiceBtn}</div>
       </div>`;
     } else {
       const chips = matches.history.slice(0, 4).map((m) => {
@@ -3637,7 +3670,7 @@
         <div class="hub-body"><div class="hub-idle-title">No match on</div>
         <div class="hub-idle-sub">${matches.history.length ? 'Recent results — tap one to revisit it.' : 'Race a friend at your own levels. Winner takes elo.'}</div>
         ${chips ? `<div class="hub-chips">${chips}</div>` : ''}</div>
-        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubchallenge>Challenge a friend</button></div>
+        <div class="hub-cta-zone"><button type="button" class="btn primary" data-hubchallenge>Challenge a friend</button>${practiceBtn}</div>
       </div>`;
     }
     // The dock's 3s poll re-renders the hub too; skip the write when the card
@@ -3664,6 +3697,7 @@
       // card don't also open the head-to-head.
       const hl = ev.target.closest('[data-hublog]'); if (hl) { ev.preventDefault(); openQuickLog(); return; }
       const hc = ev.target.closest('[data-hubchallenge]'); if (hc) { ev.preventDefault(); openMatchCreate(null); return; }
+      const hp = ev.target.closest('[data-hubpractice]'); if (hp) { ev.preventDefault(); openPracticeCreate(); return; }
       const hf = ev.target.closest('[data-hubfriends]'); if (hf) { ev.preventDefault(); showView('friends'); return; }
       const open = ev.target.closest('[data-mopen]'); if (open) { ev.preventDefault(); openH2H(open.dataset.mopen); }
     });
