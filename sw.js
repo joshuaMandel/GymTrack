@@ -5,7 +5,7 @@
 // Bump SW_VERSION with every deploy, matching index.html's ?v= tags. A new
 // version re-runs install (fresh precache) and activate drops the old cache,
 // so offline users never get a new index.html paired with a stale app.js.
-const SW_VERSION = '2026-07-20j';
+const SW_VERSION = '2026-07-20k';
 const CACHE = 'gymtrack-' + SW_VERSION;
 
 // Everything needed to boot with no network at all — the versioned asset
