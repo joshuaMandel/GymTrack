@@ -3159,7 +3159,7 @@
      ====================================================================== */
   let matches = { incoming: [], outgoing: [], active: null, history: [] };
   let matchAdj = { boulder: 0, rope: 0 };
-  let h2hMid = null, h2hTimer = null, h2hLastHtml = null;
+  let h2hMid = null, h2hTimer = null, h2hLastHtml = null, h2hLastState = null, h2hForfeitArm = false;
 
   async function loadMatches() {
     if (!cloudOn()) { matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; renderMatchesPanel(); return; }
@@ -3332,11 +3332,19 @@
       else if (act === 'cancelm') { await sb.rpc('match_cancel', { mid }); await loadMatches(); }
     } catch (e) { console.warn('Match action failed:', e); loadMatches(); }
   }
-  async function endMatch() { if (!cloudOn() || !h2hMid) return; try { await sb.rpc('match_end', { mid: h2hMid }); } catch (e) {} refreshH2H(); }
+  // Forfeit: quit now and take the loss, without waiting on the opponent.
+  async function forfeitMatch() {
+    if (!cloudOn() || !h2hMid) return;
+    h2hForfeitArm = false;
+    try { await sb.rpc('match_forfeit', { mid: h2hMid }); } catch (e) { console.warn('Forfeit failed:', e); }
+    refreshH2H();
+    if (matches.active) refreshMatchDock();
+    loadMatches();
+  }
 
   const matchModal = $('#match-modal');
-  function openH2H(mid) { h2hMid = mid; h2hLastHtml = null; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
-  function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; loadMatches(); }
+  function openH2H(mid) { h2hMid = mid; h2hLastHtml = null; h2hForfeitArm = false; if (matchModal) matchModal.hidden = false; refreshH2H(); if (h2hTimer) clearInterval(h2hTimer); h2hTimer = setInterval(refreshH2H, 3000); }
+  function closeH2H() { if (matchModal) matchModal.hidden = true; if (h2hTimer) { clearInterval(h2hTimer); h2hTimer = null; } h2hMid = null; h2hForfeitArm = false; loadMatches(); }
   async function refreshH2H() {
     if (!h2hMid || !cloudOn()) return;
     try { const { data, error } = await sb.rpc('match_state', { mid: h2hMid }); if (error) throw error; renderH2H(data); maybeBotMove(data); }
@@ -3361,6 +3369,7 @@
   }
   function renderH2H(s) {
     const body = $('#match-body'); if (!body || !s) return;
+    h2hLastState = s; // kept so the forfeit confirm can re-render without a fetch
     const iAmCh = s.i_am === 'challenger';
     const me = iAmCh ? s.challenger : s.opponent, them = iAmCh ? s.opponent : s.challenger;
     const resolved = s.status === 'resolved' || s.status === 'abandoned';
@@ -3397,7 +3406,13 @@
     }
     if (resolved) {
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
-      html += `<div class="h2h-result ${r}">${s.status === 'abandoned' ? 'Match abandoned' : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw'}</div>`;
+      const iForfeited = s.forfeited_by && s.forfeited_by === me.uid;
+      const theyForfeited = s.forfeited_by && s.forfeited_by === them.uid;
+      const resultText = s.status === 'abandoned' ? 'Match abandoned'
+        : iForfeited ? 'You forfeited'
+        : theyForfeited ? `${escapeHTML(them.name)} forfeited — you win 🏆`
+        : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw';
+      html += `<div class="h2h-result ${r}">${resultText}</div>`;
       if (s.practice && s.status !== 'abandoned') html += `<div class="h2h-elochange">Practice — ${me.delta ? `would have been ${me.delta > 0 ? '+' : ''}${me.delta} Send Score, but ` : ''}your real score is untouched</div>`;
       else if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · opponent ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
       else if (unranked && s.status !== 'abandoned') html += `<div class="h2h-elochange">Unranked — no elo exchanged</div>`;
@@ -3432,7 +3447,19 @@
         : (parMode && s.turn && !myTurn && !me.ended)
           ? `<button class="btn primary" id="h2h-log" disabled>${escapeHTML(them.name)}’s turn…</button>`
           : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
-      html += `<div class="h2h-actions">${logBtn}<button class="btn ghost" id="h2h-end"${me.ended ? ' disabled' : ''}>${me.ended ? 'Waiting for them…' : 'End my session'}</button></div>`;
+      // Second action: forfeit (quit now, take the loss, no waiting on them) —
+      // but if you've already used all your slots there's nothing to give up, so
+      // it's just "waiting for them to finish". A tap arms an inline confirm.
+      let endBtn;
+      if (myFull) {
+        endBtn = `<button class="btn ghost" id="h2h-end" disabled>Waiting for ${escapeHTML((them.name || '').split(' ')[0])}…</button>`;
+      } else if (h2hForfeitArm) {
+        endBtn = `<button class="btn danger" id="h2h-forfeit-yes">Forfeit &amp; take the loss</button><button class="btn ghost" id="h2h-forfeit-no">Cancel</button>`;
+      } else {
+        endBtn = `<button class="btn ghost" id="h2h-end">Forfeit</button>`;
+      }
+      html += `<div class="h2h-actions">${logBtn}${endBtn}</div>`;
+      if (h2hForfeitArm) html += `<div class="h2h-guide">Forfeiting ends the match right now and hands ${escapeHTML((them.name || '').split(' ')[0])} the win — no waiting for them to finish.</div>`;
     } else if (resolved) {
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
     }
@@ -3446,7 +3473,11 @@
     body.innerHTML = html;
     sweepAvatars();
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
-    const e = $('#h2h-end'); if (e && !me.ended) e.addEventListener('click', endMatch);
+    // Forfeit is a two-tap confirm (arm → confirm), re-rendered from the stored
+    // state so it survives the 3s poll.
+    const e = $('#h2h-end'); if (e && !e.disabled) e.addEventListener('click', () => { h2hForfeitArm = true; if (h2hLastState) renderH2H(h2hLastState); });
+    const fy = $('#h2h-forfeit-yes'); if (fy) fy.addEventListener('click', forfeitMatch);
+    const fn = $('#h2h-forfeit-no'); if (fn) fn.addEventListener('click', () => { h2hForfeitArm = false; if (h2hLastState) renderH2H(h2hLastState); });
     const d = $('#h2h-done'); if (d) d.addEventListener('click', closeH2H);
   }
 
