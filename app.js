@@ -5062,7 +5062,22 @@
     initFriends(); // read-only social layer; isolated from the logging path
   }
 
+  // A small build footer on every page, so it's obvious which deploy you're on
+  // (the service worker can keep serving an old shell until it updates — the
+  // version here is whatever actually loaded). Sourced from the <meta name=build>
+  // tag, which the deploy bump keeps in lockstep with the cache tag / SW_VERSION.
+  function renderBuildBadge() {
+    const build = (document.querySelector('meta[name="build"]') || {}).content || 'dev';
+    document.querySelectorAll('.view').forEach((v) => {
+      let f = v.querySelector(':scope > .build-badge');
+      if (!f) { f = document.createElement('footer'); f.className = 'build-badge'; v.appendChild(f); }
+      f.textContent = `GymTrack · build ${build}`;
+      f.title = 'App version — bumps on every deploy';
+    });
+  }
+
   async function boot() {
+    renderBuildBadge();
     // PWA: cache the app shell so it opens instantly (and fully offline).
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker unavailable:', e));
