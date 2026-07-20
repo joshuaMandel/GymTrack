@@ -1233,8 +1233,11 @@
   function matchPointsFor(discipline, grade) {
     const live = matchLive(); if (!live) return null;
     const discs = MATCH_DISCS[live.rules.discipline]; if (!discs || !discs.includes(discipline)) return null;
-    const me = matchMySide(live); if (me.par_d == null) return null;
     const d = gradeD(discipline, grade); if (d == null) return null;
+    const me = matchMySide(live);
+    // No par yet (no rating snapshot, nothing counted): the engine seeds your
+    // par FROM your first send, so it scores exactly at-par — 3, any grade.
+    if (me.par_d == null) return 3;
     return Math.max(0, 3 + Math.round(d - me.par_d));
   }
   // A side's most recent counting climb as a phrase for the turn handoff:
@@ -1802,6 +1805,10 @@
       qsState.discipline = last.discipline;
       qsState.grade = last.grade;
     }
+    // A match is on but its state hasn't landed yet (first open right after
+    // accept): fetch now so the point chips appear without waiting for the
+    // 3s poll — the keyed refresh re-renders the open sheet when it arrives.
+    if (cloudOn() && matches.active && !matchLive()) refreshMatchDock();
     renderQuickLog();
     quickSheet.hidden = false;
     // Bring the selected grade into view once the sheet has laid out
@@ -1871,6 +1878,7 @@
         const theirLast = matchLastLine(them);
         if (bn && me.counted != null && me.counted >= bn) note.textContent = `Match · your ${bn} slots are full — climbs log as session only.`;
         else if (me.can_log === false) note.textContent = `Match · ${them.name}'s turn — climbs log as session only.`;
+        else if (me.par_d == null) note.textContent = 'Match · your turn — your first send sets your par: any send scores 3, flash +1.';
         else if (theirLast) note.textContent = `Match · ${them.name} ${theirLast} — your turn.`;
         else note.textContent = 'Match · your turn — each grade shows its points, flash +1.';
       }
@@ -3320,7 +3328,7 @@
       <div class="h2h-ava">${avatarHTML(p.uid, p.name, 'md', p.avatar_v)}</div>
       <div class="h2h-name">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}</div>
       <div class="h2h-score ${sc(p.score)}">${!parMode && p.score > 0 ? '+' : ''}${p.score}${parMode ? '<span class="h2h-pts-lbl"> pts</span>' : ''}</div>
-      <div class="h2h-base">${parMode ? (unranked ? 'unranked' : `par ${p.par != null ? escapeHTML(p.par) : '—'}`) : `racing level ${p.baseline != null ? p.baseline : '—'}`}</div>
+      <div class="h2h-base">${parMode ? (unranked ? 'unranked' : (p.par != null ? `par ${escapeHTML(p.par)}` : 'par · 1st send')) : `racing level ${p.baseline != null ? p.baseline : '—'}`}</div>
       <div class="h2h-elo">Send Score ${p.elo != null ? p.elo : '—'}</div></div>`;
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
     // Hard cap: once your best_n slots are used your side is full — further
@@ -3362,6 +3370,8 @@
       html += `<div class="h2h-guide">Unranked · straight scoring — a ${scr} send is 3 · +1 per grade above · flash +1 · fall 0. Whoever climbs harder wins · no elo at stake.</div>`;
     } else if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
       html += `<div class="h2h-guide">Par ${escapeHTML(me.par)} · send at par 3 · +1 per grade above · below par 2/1 · far below or fall 0 · flash +1 — most points wins.</div>`;
+    } else if (parMode && !resolved && s.status !== 'pending') {
+      html += `<div class="h2h-guide">Your first send sets your par — it scores 3 (flash +1), any grade. After that: at par 3 · +1 per grade above · below par 2/1 · fall 0 — most points wins.</div>`;
     }
     if (!resolved && s.status === 'active') {
       const logBtn = myFull
