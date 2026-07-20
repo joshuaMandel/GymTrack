@@ -1268,8 +1268,12 @@ begin
       other_rel := true; -- open rows: no alternation
     end if;
     par := case when is_ch then ch_par else op_par end;
+    -- "At par" is worth 3 in a ranked/scratch match. UNRANKED BOULDER is the
+    -- exception: the V-number IS your score (V5 = 5), so at-par (par 0 for
+    -- unranked) is worth 0 and every grade above just adds its number.
     pts := case when rec.res = 'Project' then 0
-           else greatest(0, 3 + floor(rec.gd - coalesce(par, rec.gd) + 0.5)::int) end;
+           else greatest(0, (case when not coalesce(m.ranked, true) and grp = 'boulder' then 0 else 3 end)
+                              + floor(rec.gd - coalesce(par, rec.gd) + 0.5)::int) end;
     if pts > 0 and rec.res = 'Flash' then pts := pts + 1; end if;
     if is_ch then ch_n := ch_n + 1; ch_pts := ch_pts + pts;
     else op_n := op_n + 1; op_pts := op_pts + pts; end if;

@@ -1235,10 +1235,12 @@
     const discs = MATCH_DISCS[live.rules.discipline]; if (!discs || !discs.includes(discipline)) return null;
     const d = gradeD(discipline, grade); if (d == null) return null;
     const me = matchMySide(live);
+    // Unranked boulder: the V-number IS your score (V5 = 5), so at-par is 0.
+    const atPar = (live.rules.ranked === false && live.rules.discipline === 'boulder') ? 0 : 3;
     // No par yet (no rating snapshot, nothing counted): the engine seeds your
-    // par FROM your first send, so it scores exactly at-par — 3, any grade.
-    if (me.par_d == null) return 3;
-    return Math.max(0, 3 + Math.round(d - me.par_d));
+    // par FROM your first send, so it scores exactly at-par, any grade.
+    if (me.par_d == null) return atPar;
+    return Math.max(0, atPar + Math.round(d - me.par_d));
   }
   // A side's most recent counting climb as a phrase for the turn handoff:
   // "flashed V9 (+10)" / "sent 5.11a (+3)" / "fell on V6". '' when none yet.
@@ -2754,17 +2756,24 @@
   }
 
   async function friendAct(fact, targetUid) {
-    if (!cloudOn() || !targetUid) return;
+    if (!cloudOn() || !targetUid) return null;
+    let result = null, failed = false;
     try {
-      if (fact === 'request') await sb.rpc('friend_request', { target: targetUid });
-      else if (fact === 'accept') await sb.rpc('friend_respond', { other: targetUid, accept: true });
-      else if (fact === 'decline') await sb.rpc('friend_respond', { other: targetUid, accept: false });
-      else if (fact === 'cancel') await sb.rpc('friend_cancel', { other: targetUid });
-      else if (fact === 'unfriend') await sb.rpc('unfriend', { other: targetUid });
-    } catch (e) { console.warn('Friend action failed:', e); }
+      const rpc = fact === 'request' ? sb.rpc('friend_request', { target: targetUid })
+        : fact === 'accept' ? sb.rpc('friend_respond', { other: targetUid, accept: true })
+        : fact === 'decline' ? sb.rpc('friend_respond', { other: targetUid, accept: false })
+        : fact === 'cancel' ? sb.rpc('friend_cancel', { other: targetUid })
+        : fact === 'unfriend' ? sb.rpc('unfriend', { other: targetUid })
+        : null;
+      if (rpc) { const { data, error } = await rpc; if (error) throw error; result = data; }
+    } catch (e) { console.warn('Friend action failed:', e); failed = true; }
     await loadFriends();
     await loadFeed();
-    if ($('#friend-search').value.trim().length >= 2) runFriendSearch();
+    // The search box only exists on the Friends screen; this runs from the
+    // leaderboard too, so guard it.
+    const fs = $('#friend-search');
+    if (fs && fs.value.trim().length >= 2) runFriendSearch();
+    return failed ? { error: true } : { result };
   }
 
   async function runFriendSearch() {
@@ -3259,11 +3268,13 @@
     const noun = mcState.discipline === 'boulder' ? 'problems' : 'routes';
     const discLabel = mcState.discipline === 'boulder' ? 'Bouldering'
       : (mcState.style === 'lead' ? 'Lead routes' : mcState.style === 'toprope' ? 'Top-rope routes' : 'Any roped routes');
-    const scratch = mcState.discipline === 'boulder' ? 'V0' : '5.10c';
+    const scratchScale = mcState.discipline === 'boulder'
+      ? 'your V-grade is your score (V5 = 5)'
+      : 'a 5.10c send is 3, +1 per grade above';
     const sum = $('#mc-summary');
     if (sum) sum.textContent = mcState.ranked
       ? `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Points vs your par: at par 3 · +1 per grade above · below 2/1 · far below or fall 0 · flash +1. Most points wins.`
-      : `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Unranked: no handicap, straight scoring — a ${scratch} send is 3, +1 per grade above, flash +1, fall 0. Whoever climbs harder wins · no elo at stake.`;
+      : `${discLabel} · best of ${mcState.length} ${noun}, turn by turn — you go first. Unranked: no handicap, straight scoring — ${scratchScale}, flash +1, fall 0. Whoever climbs harder wins · no elo at stake.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
@@ -3376,8 +3387,10 @@
     html += `<div class="h2h">${side(me, true, !resolved && me.score > them.score)}<div class="h2h-vs">vs</div>${side(them, false, !resolved && them.score > me.score)}</div>`;
     // How points work — visible while live so both players can strategize.
     if (unranked && !resolved && s.status !== 'pending') {
-      const scr = rules.discipline === 'boulder' ? 'V0' : '5.10c';
-      html += `<div class="h2h-guide">Unranked · straight scoring — a ${scr} send is 3 · +1 per grade above · flash +1 · fall 0. Whoever climbs harder wins · no elo at stake.</div>`;
+      const scale = rules.discipline === 'boulder'
+        ? 'your V-grade is your score — V5 is 5, V8 is 8'
+        : 'a 5.10c send is 3 · +1 per grade above';
+      html += `<div class="h2h-guide">Unranked · straight scoring — ${scale} · flash +1 · fall 0. Whoever climbs harder wins · no elo at stake.</div>`;
     } else if (parMode && !resolved && s.status !== 'pending' && me.par != null) {
       html += `<div class="h2h-guide">Par ${escapeHTML(me.par)} · send at par 3 · +1 per grade above · below par 2/1 · far below or fall 0 · flash +1 — most points wins.</div>`;
     } else if (parMode && !resolved && s.status !== 'pending') {
@@ -3692,7 +3705,20 @@
         box.innerHTML = `<p class="muted small">Add ${escapeHTML(row.display_name)} as a friend to see their sessions.</p>
           <p class="muted small" style="margin-top:6px"><a href="#" class="lb-add-friend" data-uid="${row.user_id}">Send a friend request →</a></p>`;
         const link = box.querySelector('.lb-add-friend');
-        if (link) link.addEventListener('click', (ev) => { ev.preventDefault(); lbModal.hidden = true; showView('friends'); friendAct('request', row.user_id); });
+        if (link) link.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          link.textContent = 'Sending…';
+          const r = await friendAct('request', row.user_id);
+          lbModal.hidden = true; showView('friends');
+          // Confirm the outcome — without this the request goes out silently and
+          // reads as "nothing happened".
+          // No trailing period — display names can already end in one ("Sam K.").
+          if (!r || r.error) showToast(`Couldn’t send the request to ${row.display_name} — try again`);
+          else if (r.result === 'accepted') showToast(`You’re now friends with ${row.display_name}! 🎉`);
+          else if (r.result === 'already_friends') showToast(`Already friends with ${row.display_name}`);
+          else if (r.result === 'already_requested') showToast(`Request to ${row.display_name} is already pending`);
+          else showToast(`Friend request sent to ${row.display_name}`);
+        });
         return;
       }
       // Any rope discipline reads grades off the shared YDS scale
