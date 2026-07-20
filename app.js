@@ -1879,6 +1879,12 @@
 
     $$('#quick-sheet .qs-result').forEach((b) => { b.disabled = !qsState.grade; });
 
+    // The "More detail" form lets you change discipline/attempts/grade in ways
+    // that may not count toward the match — during a live match we hide it and
+    // keep logging on the fast, match-aware path.
+    const detailBtn = $('#qs-detail');
+    if (detailBtn) detailBtn.hidden = !!qsLive;
+
     // Match strip: whose turn it is and whether this sheet's discipline counts.
     const note = $('#qs-match-note');
     if (note) {
