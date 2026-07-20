@@ -1237,6 +1237,13 @@
     const d = gradeD(discipline, grade); if (d == null) return null;
     return Math.max(0, 3 + Math.round(d - me.par_d));
   }
+  // A side's most recent counting climb as a phrase for the turn handoff:
+  // "flashed V9 (+10)" / "sent 5.11a (+3)" / "fell on V6". '' when none yet.
+  function matchLastLine(p) {
+    const l = p && p.last; if (!l || !l.grade) return '';
+    const verb = l.result === 'Flash' ? 'flashed' : l.result === 'Project' ? 'fell on' : 'sent';
+    return `${verb} ${l.grade}${l.points > 0 ? ` (+${l.points})` : ''}`;
+  }
 
   // THE scoring replay over an explicit climb list, grouped into sessions
   // (dates). Returns the converged rating plus per-session detail with each
@@ -1861,8 +1868,10 @@
       else {
         const me = matchMySide(live), them = matchTheirSide(live), bn = live.rules.best_n;
         note.hidden = false;
+        const theirLast = matchLastLine(them);
         if (bn && me.counted != null && me.counted >= bn) note.textContent = `Match · your ${bn} slots are full — climbs log as session only.`;
         else if (me.can_log === false) note.textContent = `Match · ${them.name}'s turn — climbs log as session only.`;
+        else if (theirLast) note.textContent = `Match · ${them.name} ${theirLast} — your turn.`;
         else note.textContent = 'Match · your turn — each grade shows its points, flash +1.';
       }
     }
@@ -3338,7 +3347,11 @@
     } else if (myFull) {
       html += `<div class="h2h-status">Your ${rules.best_n} ${noun} are locked in — match limit reached. New climbs won’t change your score.</div>`;
     } else if (parMode && s.turn) {
-      html += `<div class="h2h-status h2h-turn ${myTurn ? 'mine' : ''}">${myTurn ? 'Your turn — log a climb.' : `${escapeHTML(them.name)}’s turn…`}</div>`;
+      // The handoff tells you what they just did, so you know what to beat.
+      const theirLast = matchLastLine(them);
+      html += `<div class="h2h-status h2h-turn ${myTurn ? 'mine' : ''}">${myTurn
+        ? (theirLast ? `${escapeHTML(them.name)} ${escapeHTML(theirLast)} — your turn.` : 'Your turn — log a climb.')
+        : `${escapeHTML(them.name)}’s turn…`}</div>`;
     } else {
       html += `<div class="h2h-status">Live — only ${escapeHTML((rules.discipline === 'boulder' ? 'bouldering' : rules.style_label ? rules.style_label.split(' · ')[0].toLowerCase() : 'matching'))} climbs count. Log as usual.</div>`;
     }
@@ -3497,7 +3510,8 @@
     const noun = rules.discipline === 'boulder' ? 'problems' : 'routes';
     const prog = (rules.best_n && me.counted != null) ? `${Math.min(me.counted, rules.best_n)} of ${rules.best_n} ${noun}`
       : (me.counted != null ? `${me.counted} ${noun}` : '');
-    const turnHint = parMode && s.turn ? (me.can_log === true ? 'your turn' : `${them.name}’s turn`) : '';
+    const dockLast = matchLastLine(them);
+    const turnHint = parMode && s.turn ? (me.can_log === true ? (dockLast ? `${them.name} ${dockLast} · your turn` : 'your turn') : `${them.name}’s turn`) : '';
     const meta = [prog, turnHint, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
     const num = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
     c.innerHTML = `<span class="md-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
@@ -3534,7 +3548,8 @@
       const bn = (s && s.rules && s.rules.best_n) != null ? s.rules.best_n : a.best_n;
       const prog = me && me.counted != null ? (bn ? `${Math.min(me.counted, bn)} of ${bn} ${noun}` : `${me.counted} ${noun}`) : '';
       const myTurn = s && me.can_log === true;
-      const turnHint = s && parMode && s.turn ? (myTurn ? 'your turn' : `${them.name}’s turn`) : '';
+      const hubLast = s ? matchLastLine(them) : '';
+      const turnHint = s && parMode && s.turn ? (myTurn ? (hubLast ? `${them.name} ${hubLast} · your turn` : 'your turn') : `${them.name}’s turn`) : '';
       const meta = [prog, turnHint, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
       const fmtScore = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
       const youScore = s ? `<b class="${sc(me.score)}">${fmtScore(me.score)}</b>` : '<b>—</b>';

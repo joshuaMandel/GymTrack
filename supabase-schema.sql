@@ -1205,6 +1205,7 @@ declare
   ch_par numeric; op_par numeric; ch_pts int := 0; op_pts int := 0; ch_n int := 0; op_n int := 0;
   turn text := 'challenger'; ch_rel timestamptz; op_rel timestamptz;
   rec record; is_ch boolean; other_rel boolean; par numeric; pts int; ch_can boolean; op_can boolean;
+  ch_last jsonb; op_last jsonb;
   fg text; fd text;
 begin
   select * into m from public.matches where id = mid;
@@ -1243,7 +1244,7 @@ begin
   if not coalesce(m.ranked, true) then ch_par := 0; op_par := 0; end if;
   -- The walk.
   for rec in
-    select c.user_id, c.created_at, c.result as res, public.grade_d(c.discipline, c.grade) as gd
+    select c.user_id, c.created_at, c.result as res, c.grade, public.grade_d(c.discipline, c.grade) as gd
     from public.climbs c
     where (c.user_id = m.challenger or c.user_id = m.opponent)
       and c.created_at >= m.window_start
@@ -1272,6 +1273,12 @@ begin
     if pts > 0 and rec.res = 'Flash' then pts := pts + 1; end if;
     if is_ch then ch_n := ch_n + 1; ch_pts := ch_pts + pts;
     else op_n := op_n + 1; op_pts := op_pts + pts; end if;
+    -- Remember each side's most recent COUNTING climb so the turn handoff can
+    -- say what the opponent just did ("Bob flashed V9 (+10) — your turn").
+    -- Only counting climbs are exposed: they're part of the agreed match;
+    -- out-of-turn / non-matching climbs stay private session data.
+    if is_ch then ch_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts);
+    else op_last := jsonb_build_object('grade', rec.grade, 'result', rec.res, 'points', pts); end if;
     if n is not null and not other_rel then
       turn := case when is_ch then 'opponent' else 'challenger' end;
     end if;
@@ -1287,9 +1294,9 @@ begin
     -- Unranked: par_d 0 still drives the point math (and the client's pill
     -- chips), but there's no personal par to DISPLAY — par comes back null.
     'ch', jsonb_build_object('points', ch_pts, 'counted', ch_n, 'par_d', ch_par,
-      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, ch_par) end, 'can_log', ch_can),
+      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, ch_par) end, 'can_log', ch_can, 'last', ch_last),
     'op', jsonb_build_object('points', op_pts, 'counted', op_n, 'par_d', op_par,
-      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, op_par) end, 'can_log', op_can));
+      'par', case when coalesce(m.ranked, true) then public.par_grade(grp, op_par) end, 'can_log', op_can, 'last', op_last));
 end $$;
 revoke all on function public.match_play(uuid) from public, anon, authenticated;
 
@@ -1527,6 +1534,7 @@ begin
       'par', case when j is null then null else j->'ch'->>'par' end,
       'par_d', case when j is null then null else (j->'ch'->>'par_d')::numeric end,
       'can_log', case when j is null then null else coalesce((j->'ch'->>'can_log')::boolean, false) end,
+      'last', case when j is null then null else j->'ch'->'last' end,
       'elo', coalesce(public.climb_display_rating(m.challenger, coalesce(m.grp,'boulder')), public.climb_display_rating(m.challenger, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0)
                           when j is not null then coalesce((j->'ch'->>'points')::numeric, 0)
@@ -1539,6 +1547,7 @@ begin
       'par', case when j is null then null else j->'op'->>'par' end,
       'par_d', case when j is null then null else (j->'op'->>'par_d')::numeric end,
       'can_log', case when j is null then null else coalesce((j->'op'->>'can_log')::boolean, false) end,
+      'last', case when j is null then null else j->'op'->'last' end,
       'elo', coalesce(public.climb_display_rating(m.opponent, coalesce(m.grp,'boulder')), public.climb_display_rating(m.opponent, 'rope')),
       'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0)
                           when j is not null then coalesce((j->'op'->>'points')::numeric, 0)
