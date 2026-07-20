@@ -1,0 +1,9 @@
+{
+  "name": "@gymtrack/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared, DOM-free GymTrack logic (grades, ratings, scoring, formatting) used by the web app and the React Native app.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts"
+}
