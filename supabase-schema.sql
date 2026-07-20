@@ -998,17 +998,22 @@ $$;
 -- ============================================================================
 -- Head-to-head match game
 -- ============================================================================
--- Two friends compete in a climbing session. Each is really racing THEIR OWN
--- baseline: a match is scored with the EXISTING Send Score engine
--- (climb_send_scores_impl) — the match score is how many rating points that
--- climber's match-window climbs earned, i.e. the engine's own session delta
--- (send above your level → positive, coast on easy repeats → ~0, fall short →
--- negative; fails drag it via the existing penalty math). The winner is
--- whoever out-performed their own level the most. The chess outcome is a real
--- Elo step between the two players' ratings (Δ = 16·(outcome − E), reusing the
--- engine's own K and E), stored per match and added on top of the displayed
--- rating. The per-climb algorithm itself is NEVER modified; climbs are scored
--- once by the normal pipeline and the match adjustment is applied once on top.
+-- Two friends race turn by turn, each against THEIR OWN level. At accept, each
+-- player's rating snapshot converts to a personal "par" grade. The match is
+-- best-of-N slots (3/5/7/9), strict alternation with the challenger first: a
+-- matching-discipline climb logged on your turn consumes a slot and scores PAR
+-- POINTS — a pure function of grade vs your par, knowable before you climb:
+--   fall/project 0 (still burns the slot) · send max(0, 3 + round(D − parD))
+--   (3+ below par 0 — no farming trivial volume — 2 below 1, 1 below 2, at par
+--   3, +1 grade 4, …) · flash +1, only on a send that scored.
+-- Out-of-turn climbs stay ordinary session data. You log freely once the
+-- opponent has ended their session or filled their slots. Most points wins;
+-- an exact tie is a draw. The stake is a real Elo step between the two
+-- players' displayed ratings (Δ = 16·(outcome − E)), stored per match and
+-- added on top of the displayed rating. The per-climb Send Score algorithm is
+-- NEVER modified; climbs are scored once by the normal pipeline and the match
+-- adjustment is applied once on top. Legacy matches (created before rulesets,
+-- discipline null) keep the original engine-delta scoring end to end.
 
 create table if not exists public.matches (
   id           uuid primary key default gen_random_uuid(),
@@ -1021,7 +1026,7 @@ create table if not exists public.matches (
   ch_ended     boolean not null default false,
   op_ended     boolean not null default false,
   grp          text,                              -- dominant discipline (set at resolve)
-  ch_score     numeric, op_score numeric,         -- handicapped match scores (rating deltas)
+  ch_score     numeric, op_score numeric,         -- match scores (par points; legacy rows hold rating deltas)
   winner       text,                              -- 'challenger' | 'opponent' | 'draw'
   ch_delta     integer, op_delta integer,         -- elo adjustments applied (+X / −X)
   created_at   timestamptz not null default now(),
@@ -1048,10 +1053,16 @@ alter table public.matches add constraint matches_opponent_fkey
 
 -- Ruleset (configured by the challenger at creation; agreed to on accept; never
 -- changes after). discipline null = a legacy match created before rulesets — it
--- keeps the original auto-derived-group behavior. best_n null = open / session-
--- length (all matching climbs count); otherwise best-of-N counts your N hardest.
+-- keeps the original auto-derived-group behavior. best_n = the slot count: your
+-- first N counting climbs, logged turn by turn, are your match (null only on
+-- old open-session rows; new ruleset matches always carry 3/5/7/9).
 alter table public.matches add column if not exists discipline text;   -- 'boulder'|'lead'|'toprope'|'agnostic'
-alter table public.matches add column if not exists best_n integer;    -- null = open session length
+alter table public.matches add column if not exists best_n integer;    -- slots (3/5/7/9); null = legacy open
+-- When each side ended their session. The turn walk needs the INSTANT (not just
+-- the flag): a climb logged before the opponent ended must not retroactively
+-- become counting when scored after they ended.
+alter table public.matches add column if not exists ch_ended_at timestamptz;
+alter table public.matches add column if not exists op_ended_at timestamptz;
 alter table public.matches drop constraint if exists matches_discipline_chk;
 alter table public.matches add constraint matches_discipline_chk check (discipline is null or discipline in ('boulder','lead','toprope','agnostic'));
 alter table public.matches drop constraint if exists matches_best_n_chk;
@@ -1146,103 +1157,150 @@ returns text language sql immutable as $$
   end
 $$;
 
--- How many matching climbs a player has logged in the match window — drives the
--- "4 of 6" progress and the hard cap. Attempts burn slots: a project consumes
--- one of your best-of-N slots (and replays as a miss in the scorer).
-create or replace function public.match_counted(mid uuid, uid uuid)
-returns integer language sql stable security definer set search_path = public as $$
-  select count(*)::int from public.climbs c, public.matches m
-  where m.id = mid and c.user_id = uid and c.created_at >= m.window_start
-    and m.discipline is not null and c.discipline = any(public.match_disciplines(m.discipline))
-    and public.grade_d(c.discipline, c.grade) is not null
+-- Nearest grade name for a (possibly fractional) difficulty D — displays a
+-- player's par as a grade ("par V4" / "par 5.11a"). Ties resolve to the easier
+-- grade. Same arrays as grade_d.
+create or replace function public.par_grade(grp text, par_d numeric)
+returns text language sql immutable as $$
+  select case when par_d is null then null
+    when grp = 'boulder' then
+      (array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17'])
+        [least(19, greatest(1, floor(par_d + 0.5)::int + 2))]
+    else
+      (select t.g from unnest(
+         array['5.5','5.6','5.7','5.8','5.9','5.10a','5.10b','5.10c','5.10d','5.11a','5.11b','5.11c','5.11d','5.12a','5.12b','5.12c','5.12d','5.13a','5.13b','5.13c','5.13d','5.14a','5.14b','5.14c','5.14d','5.15a','5.15b','5.15c','5.15d'],
+         array[-4,-3.5,-3,-2.5,-2,-1,-0.5,0,0.5,1,1.5,2,2.5,3,3.7,4.3,5,6,6.7,7.3,8,9,9.7,10.3,11,12,13,14,15]::numeric[]) t(g, d)
+       order by abs(t.d - par_d), t.d limit 1)
+  end
 $$;
+
+-- THE match engine: one deterministic pass over BOTH players' matching climbs
+-- implementing turn-by-turn par-point scoring. Merged order (created_at, id);
+-- turn starts at the challenger. A climb COUNTS iff its owner hasn't ended at
+-- that instant, has free slots, and it's their turn — unless the opponent is
+-- "released" (ended_at <= that instant, or slots already full), after which
+-- alternation is over and they log freely. A counting climb consumes a slot,
+-- scores par points (fall 0 · send max(0, 3 + rnd(D − parD)) — 3+ grades below
+-- par is a warm-up worth nothing · flash +1 only on a send that scored, with
+-- rnd(x) = floor(x + 0.5) — MUST match JS Math.round; plpgsql round() differs
+-- at −0.5), and flips the turn. Out-of-turn climbs are ordinary session data.
+-- parD comes from the accept snapshot ((snap − 1000 − ropeOffset)/100, kept
+-- fractional) or seeds from the first matching send like the engine. best_n
+-- null (old open rows) = no turn gate, no cap. Returns null on legacy matches.
+create or replace function public.match_play(mid uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  m record; discs text[]; grp text; n int; off int;
+  ch_par numeric; op_par numeric; ch_pts int := 0; op_pts int := 0; ch_n int := 0; op_n int := 0;
+  turn text := 'challenger'; ch_rel timestamptz; op_rel timestamptz;
+  rec record; is_ch boolean; other_rel boolean; par numeric; pts int; ch_can boolean; op_can boolean;
+  fg text; fd text;
+begin
+  select * into m from public.matches where id = mid;
+  if not found or m.discipline is null then return null; end if;
+  discs := public.match_disciplines(m.discipline);
+  grp := public.match_group(m.discipline);
+  n := m.best_n;
+  off := case when grp = 'boulder' then 0 else 300 end;
+  -- Release instants (ended flags without a timestamp — deploy straddlers —
+  -- count as released from the window start; mildly lenient, window-bounded).
+  ch_rel := case when m.ch_ended then coalesce(m.ch_ended_at, m.window_start) end;
+  op_rel := case when m.op_ended then coalesce(m.op_ended_at, m.window_start) end;
+  -- Par per side: snapshot → fractional D; null snapshot → seed from the first
+  -- matching send (else first matching climb), the engine's own seeding rule.
+  ch_par := case when (case grp when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end) is not null
+    then ((case grp when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end) - 1000 - off) / 100.0 end;
+  op_par := case when (case grp when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) is not null
+    then ((case grp when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) - 1000 - off) / 100.0 end;
+  if ch_par is null and m.challenger is not null then
+    select c.grade, c.discipline into fg, fd from public.climbs c
+      where c.user_id = m.challenger and c.created_at >= m.window_start and c.discipline = any(discs)
+        and public.grade_d(c.discipline, c.grade) is not null
+      order by (c.result <> 'Project') desc, c.created_at, c.id limit 1;
+    if fg is not null then ch_par := public.grade_d(fd, fg); end if;
+  end if;
+  if op_par is null and m.opponent is not null then
+    select c.grade, c.discipline into fg, fd from public.climbs c
+      where c.user_id = m.opponent and c.created_at >= m.window_start and c.discipline = any(discs)
+        and public.grade_d(c.discipline, c.grade) is not null
+      order by (c.result <> 'Project') desc, c.created_at, c.id limit 1;
+    if fg is not null then op_par := public.grade_d(fd, fg); end if;
+  end if;
+  -- The walk.
+  for rec in
+    select c.user_id, c.created_at, c.result as res, public.grade_d(c.discipline, c.grade) as gd
+    from public.climbs c
+    where (c.user_id = m.challenger or c.user_id = m.opponent)
+      and c.created_at >= m.window_start
+      and c.discipline = any(discs)
+      and public.grade_d(c.discipline, c.grade) is not null
+    order by c.created_at, c.id
+  loop
+    is_ch := rec.user_id = m.challenger;
+    -- own side already ended at this instant → session-only
+    if is_ch and ch_rel is not null and rec.created_at >= ch_rel then continue; end if;
+    if not is_ch and op_rel is not null and rec.created_at >= op_rel then continue; end if;
+    -- own slots full → session-only
+    if n is not null and ((is_ch and ch_n >= n) or (not is_ch and op_n >= n)) then continue; end if;
+    -- turn gate (only while the opponent is not released)
+    if n is not null then
+      other_rel := case when is_ch
+        then (op_rel is not null and op_rel <= rec.created_at) or op_n >= n
+        else (ch_rel is not null and ch_rel <= rec.created_at) or ch_n >= n end;
+      if not other_rel and turn <> (case when is_ch then 'challenger' else 'opponent' end) then continue; end if;
+    else
+      other_rel := true; -- open rows: no alternation
+    end if;
+    par := case when is_ch then ch_par else op_par end;
+    pts := case when rec.res = 'Project' then 0
+           else greatest(0, 3 + floor(rec.gd - coalesce(par, rec.gd) + 0.5)::int) end;
+    if pts > 0 and rec.res = 'Flash' then pts := pts + 1; end if;
+    if is_ch then ch_n := ch_n + 1; ch_pts := ch_pts + pts;
+    else op_n := op_n + 1; op_pts := op_pts + pts; end if;
+    if n is not null and not other_rel then
+      turn := case when is_ch then 'opponent' else 'challenger' end;
+    end if;
+  end loop;
+  -- Current affordances (uses the live ended flags — a "now" question).
+  ch_can := m.status = 'active' and not m.ch_ended and (n is null or ch_n < n)
+        and (n is null or turn = 'challenger' or m.op_ended or op_n >= n);
+  op_can := m.status = 'active' and not m.op_ended and (n is null or op_n < n)
+        and (n is null or turn = 'opponent' or m.ch_ended or ch_n >= n);
+  return jsonb_build_object(
+    'group', grp,
+    'turn', case when n is null or m.status <> 'active' then null else turn end,
+    'ch', jsonb_build_object('points', ch_pts, 'counted', ch_n, 'par_d', ch_par,
+      'par', public.par_grade(grp, ch_par), 'can_log', ch_can),
+    'op', jsonb_build_object('points', op_pts, 'counted', op_n, 'par_d', op_par,
+      'par', public.par_grade(grp, op_par), 'can_log', op_can));
+end $$;
+revoke all on function public.match_play(uuid) from public, anon, authenticated;
+
+-- Slots a player has consumed (counting climbs only — out-of-turn climbs are
+-- invisible here). Drives the "2 of 5" progress and the abandon check.
+create or replace function public.match_counted(mid uuid, uid uuid)
+returns integer language plpgsql stable security definer set search_path = public as $$
+declare m record; j jsonb;
+begin
+  select challenger, discipline into m from public.matches where id = mid;
+  if not found or m.discipline is null then return 0; end if;
+  j := public.match_play(mid);
+  return coalesce((j->(case when uid = m.challenger then 'ch' else 'op' end)->>'counted')::int, 0);
+end $$;
 revoke all on function public.match_counted(uuid, uuid) from public, anon, authenticated;
 
--- Ruleset match score: replay the EXISTING Send Score Elo (shared ss_step) over
--- only the climbs that count. Open (best_n null) = all matching climbs, exactly
--- like a normal session filtered to the discipline. Best-of-N = your FIRST N
--- logged climbs, attempts included (a hard cap: every matching climb — send or
--- project — consumes a slot; a project replays as a miss, exactly as the engine
--- treats it in a normal session; once N are logged your side is locked). A
--- FLASH scores exactly like the send plus a flat +1 bonus point — the same
--- rule as the engine itself. Baseline is the group snapshot at accept
--- (unchanged handicap); if the player had no prior climbs in the group, seed
--- from their first matching climb like the engine does. Returns the rounded
--- rating delta — same units as match_score.
-create or replace function public.match_subset_score(uid uuid, grp text, discs text[], best_n int, wstart timestamptz, snapshot int)
-returns numeric language plpgsql stable security definer set search_path = public as $$
-declare
-  base_snap int := snapshot; r numeric; s_idx int; k numeric; cur_date date := null;
-  rec record; fg text; fd text;
-begin
-  if discs is null then return 0; end if;
-  if base_snap is null then
-    -- No prior rating in this group: seed from the first matching climb (a send
-    -- if there is one, else the first climb) — the engine's own seeding rule.
-    select c.grade, c.discipline into fg, fd from public.climbs c
-      where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
-        and public.grade_d(c.discipline, c.grade) is not null and c.result <> 'Project'
-      order by c.date, c.id limit 1;
-    if fg is null then
-      select c.grade, c.discipline into fg, fd from public.climbs c
-        where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
-          and public.grade_d(c.discipline, c.grade) is not null
-        order by c.date, c.id limit 1;
-    end if;
-    if fg is null then return 0; end if;
-    base_snap := round(1000 + (case when fd = 'Bouldering' then 0 else 300 end) + 100 * public.grade_d(fd, fg));
-  end if;
-  r := base_snap;
-  -- Session index at the window start (group sessions across all disciplines in
-  -- the group), so K matches what the engine would use for these climbs.
-  select coalesce(count(distinct c.date), 0) into s_idx from public.climbs c
-    where c.user_id = uid and c.created_at < wstart
-      and (case when grp = 'boulder' then c.discipline = 'Bouldering' else c.discipline <> 'Bouldering' end)
-      and public.grade_d(c.discipline, c.grade) is not null;
-  -- Select the counting climbs, replay them in the engine's chronological order.
-  for rec in
-    select x.cdate, x.res, x.route_r from (
-      select c.date as cdate, c.id as cid, c.result as res,
-        1000 + (case when c.discipline = 'Bouldering' then 0 else 300 end)
-             + 100 * public.grade_d(c.discipline, c.grade) as route_r,
-        row_number() over (order by c.date, c.id) as rnk
-      from public.climbs c
-      where c.user_id = uid and c.created_at >= wstart and c.discipline = any(discs)
-        and public.grade_d(c.discipline, c.grade) is not null
-    ) x
-    where best_n is null       -- open: every matching climb counts
-       or x.rnk <= best_n      -- best-of-N: your first N climbs, attempts included
-    order by x.cdate, x.cid
-  loop
-    if rec.cdate is distinct from cur_date then
-      if cur_date is not null then s_idx := s_idx + 1; end if;
-      cur_date := rec.cdate;
-      k := case when s_idx < 5 then 40 else 16 end;
-    end if;
-    r := public.ss_step(r, k, rec.route_r, rec.res <> 'Project');
-    if rec.res = 'Flash' then r := r + 1; end if; -- flash = the send + 1 point (same as the engine)
-  end loop;
-  return round(r) - base_snap;
-end $$;
-revoke all on function public.match_subset_score(uuid, text, text[], int, timestamptz, int) from public, anon, authenticated;
-
--- A player's handicapped match score = how far their match-window climbs moved
--- their rating (the EXISTING engine's session delta), summed across disciplines.
--- Baseline is the rating snapshot taken at accept; for a brand-new discipline
--- the baseline is the engine's own seed (first send's grade rating).
+-- A player's match score. Ruleset matches: PAR POINTS from the turn walk
+-- (match_play). Legacy matches: the original engine rating delta, summed
+-- across groups, exactly as before rulesets existed.
 create or replace function public.match_score(mid uuid, uid uuid)
 returns numeric language plpgsql stable security definer set search_path = public as $$
 declare m record; s numeric := 0; g text; cur int; snap int; seedg numeric; fg text; fd text;
 begin
   select * into m from public.matches where id = mid;
   if not found then return 0; end if;
-  -- Ruleset match: score only the counting climbs via the shared Elo core,
-  -- against the configured discipline's group snapshot (existing baseline).
   if m.discipline is not null then
-    g := public.match_group(m.discipline);
-    snap := case when uid = m.challenger then (case g when 'boulder' then m.ch_snap_boulder else m.ch_snap_rope end)
-                 else (case g when 'boulder' then m.op_snap_boulder else m.op_snap_rope end) end;
-    return public.match_subset_score(uid, g, public.match_disciplines(m.discipline), m.best_n, m.window_start, snap);
+    return coalesce((public.match_play(mid)
+      ->(case when uid = m.challenger then 'ch' else 'op' end)->>'points')::numeric, 0);
   end if;
   -- Legacy match (created before rulesets): original whole-group behavior.
   foreach g in array array['boulder','rope'] loop
@@ -1288,19 +1346,19 @@ revoke all on function public.post_match_result(uuid, uuid, text, integer, text,
 create or replace function public.match_resolve(mid uuid)
 returns void language plpgsql volatile security definer set search_path = public as $$
 declare m record; chs numeric; ops numeric; g text; ra int; rb int; ea numeric; kf numeric := 16; d int; win text;
-  chb int; chr int; opb int; opr int;
+  chb int; chr int; opb int; opr int; j jsonb;
 begin
   select * into m from public.matches where id = mid for update;
   if not found or m.status <> 'active' then return; end if;
   if m.discipline is not null then
-    -- Ruleset match: only climbs matching the discipline count; the group is the
-    -- one configured at creation, not auto-derived. Abandon if neither player
-    -- logged a single counting climb (non-matching climbs still recorded, just
-    -- irrelevant to the match).
+    -- Ruleset match: par points from the turn walk (one pass for both sides).
+    -- Abandon if neither player logged a single COUNTING climb (out-of-turn or
+    -- non-matching climbs are recorded but irrelevant to the match).
     g := public.match_group(m.discipline);
-    chb := public.match_counted(mid, m.challenger);
-    opb := public.match_counted(mid, m.opponent);
-    if coalesce(chb,0) + coalesce(opb,0) = 0 then
+    j := public.match_play(mid);
+    chb := coalesce((j->'ch'->>'counted')::int, 0);
+    opb := coalesce((j->'op'->>'counted')::int, 0);
+    if chb + opb = 0 then
       update public.matches set status = 'abandoned', resolved_at = now(), ch_score = 0, op_score = 0, grp = g where id = mid;
       return;
     end if;
@@ -1316,15 +1374,21 @@ begin
     end if;
     g := case when (coalesce(chb,0)+coalesce(opb,0)) >= (coalesce(chr,0)+coalesce(opr,0)) then 'boulder' else 'rope' end;
   end if;
-  chs := public.match_score(mid, m.challenger);
-  ops := public.match_score(mid, m.opponent);
-  -- Match scores are integer rating deltas. Even climbing exactly at your level
-  -- nudges the rating up a few points, so two equivalent sessions land a couple
-  -- points apart from noise, not skill. A ≤4-point gap is a virtual tie — this
-  -- sits well below a genuine edge (~half a grade of over-performance ≈ 8-12+)
-  -- and stops that noise from handing the underdog a full upset payout.
-  if abs(chs - ops) <= 4 then win := 'draw';
-  elsif chs > ops then win := 'challenger'; else win := 'opponent'; end if;
+  if m.discipline is not null then
+    -- Par points are exact small integers: any edge is a real edge, so only an
+    -- EXACT tie is a draw.
+    chs := coalesce((j->'ch'->>'points')::numeric, 0);
+    ops := coalesce((j->'op'->>'points')::numeric, 0);
+    if chs = ops then win := 'draw';
+    elsif chs > ops then win := 'challenger'; else win := 'opponent'; end if;
+  else
+    chs := public.match_score(mid, m.challenger);
+    ops := public.match_score(mid, m.opponent);
+    -- Legacy scores are engine rating deltas where a few points are noise, not
+    -- skill — a ≤4-point gap stays a virtual tie on those old rows.
+    if abs(chs - ops) <= 4 then win := 'draw';
+    elsif chs > ops then win := 'challenger'; else win := 'opponent'; end if;
+  end if;
   ra := coalesce(public.climb_display_rating(m.challenger, g), 1000);
   rb := coalesce(public.climb_display_rating(m.opponent, g), 1000);
   ea := 1 / (1 + power(10, (rb - ra) / 200.0));
@@ -1354,9 +1418,11 @@ begin
   if discipline is not null and discipline not in ('boulder','lead','toprope','agnostic') then
     raise exception 'invalid discipline';
   end if;
-  -- Matches are a best-of odd series: 3, 5, 7, or 9. (null stays allowed for the
-  -- legacy 1-arg call / older open-session matches; the app always sends one.)
+  -- Matches are a best-of odd series: 3, 5, 7, or 9 — and a ruleset match MUST
+  -- carry one (open ruleset matches would let min-1-point sends farm volume).
+  -- The bare 1-arg legacy call (both null) stays allowed for old harnesses.
   if best_n is not null and best_n not in (3,5,7,9) then raise exception 'invalid match length'; end if;
+  if discipline is not null and best_n is null then raise exception 'invalid match length'; end if;
   if not exists (select 1 from public.friendships f where f.status='accepted' and f.user_a=a and f.user_b=b) then
     raise exception 'can only challenge friends';
   end if;
@@ -1404,18 +1470,19 @@ begin
   select * into m from public.matches where id = mid for update;
   if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
   if m.status <> 'active' then return m.status; end if;
-  if me = m.challenger then update public.matches set ch_ended = true where id = mid; m.ch_ended := true; end if;
-  if me = m.opponent  then update public.matches set op_ended = true where id = mid; m.op_ended := true; end if;
+  if me = m.challenger then update public.matches set ch_ended = true, ch_ended_at = coalesce(ch_ended_at, now()) where id = mid; m.ch_ended := true; end if;
+  if me = m.opponent  then update public.matches set op_ended = true, op_ended_at = coalesce(op_ended_at, now()) where id = mid; m.op_ended := true; end if;
   if m.ch_ended and m.op_ended then perform public.match_resolve(mid); end if;
   return (select status from public.matches where id = mid);
 end $$;
 
 -- Live head-to-head state (participant only). Resolves on read if the time cap
--- has passed. Returns each side's live handicapped score, baseline, and elo —
--- numbers only, never the opponent's raw climbs.
+-- has passed. Returns each side's live score (par points), par grade, whose
+-- turn it is, per-side can_log, and elo — numbers only, never the opponent's
+-- raw climbs. Legacy matches keep the old shape (par/turn/can_log null).
 create or replace function public.match_state(mid uuid)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
-declare me uuid := auth.uid(); m record;
+declare me uuid := auth.uid(); m record; j jsonb := null;
 begin
   select * into m from public.matches where id = mid;
   if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
@@ -1423,25 +1490,37 @@ begin
     perform public.match_resolve(mid);
     select * into m from public.matches where id = mid;
   end if;
+  if m.discipline is not null then j := public.match_play(mid); end if;
   return jsonb_build_object(
     'id', m.id, 'status', m.status, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
     'winner', m.winner, 'group', m.grp,
+    'turn', case when j is null then null else j->>'turn' end,
     'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
       'style_label', public.match_rules_label(m.discipline, m.best_n)),
     'challenger', jsonb_build_object('name', public.user_display(m.challenger),
       'uid', m.challenger, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.challenger), 0),
       'baseline', coalesce(m.ch_snap_boulder, m.ch_snap_rope),
+      'par', case when j is null then null else j->'ch'->>'par' end,
+      'par_d', case when j is null then null else (j->'ch'->>'par_d')::numeric end,
+      'can_log', case when j is null then null else coalesce((j->'ch'->>'can_log')::boolean, false) end,
       'elo', coalesce(public.climb_display_rating(m.challenger, coalesce(m.grp,'boulder')), public.climb_display_rating(m.challenger, 'rope')),
-      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0) else public.match_score(mid, m.challenger) end, 1),
-      'counted', case when m.discipline is null then null else public.match_counted(mid, m.challenger) end,
+      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.ch_score,0)
+                          when j is not null then coalesce((j->'ch'->>'points')::numeric, 0)
+                          else public.match_score(mid, m.challenger) end, 1),
+      'counted', case when j is null then null else (j->'ch'->>'counted')::int end,
       'ended', m.ch_ended, 'delta', m.ch_delta),
     'opponent', jsonb_build_object('name', public.user_display(m.opponent),
       'uid', m.opponent, 'avatar_v', coalesce((select avatar_v from public.profiles where id = m.opponent), 0),
       'baseline', coalesce(m.op_snap_boulder, m.op_snap_rope),
+      'par', case when j is null then null else j->'op'->>'par' end,
+      'par_d', case when j is null then null else (j->'op'->>'par_d')::numeric end,
+      'can_log', case when j is null then null else coalesce((j->'op'->>'can_log')::boolean, false) end,
       'elo', coalesce(public.climb_display_rating(m.opponent, coalesce(m.grp,'boulder')), public.climb_display_rating(m.opponent, 'rope')),
-      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0) else public.match_score(mid, m.opponent) end, 1),
-      'counted', case when m.discipline is null then null else public.match_counted(mid, m.opponent) end,
+      'score', round(case when m.status in ('resolved','abandoned') then coalesce(m.op_score,0)
+                          when j is not null then coalesce((j->'op'->>'points')::numeric, 0)
+                          else public.match_score(mid, m.opponent) end, 1),
+      'counted', case when j is null then null else (j->'op'->>'counted')::int end,
       'ended', m.op_ended, 'delta', m.op_delta)
   );
 end $$;
