@@ -1819,16 +1819,19 @@
   }
 
   function renderQuickLog() {
-    // During a live match, only the match's discipline(s) can be logged — the
-    // other tabs lock so a mis-tap can't produce a climb that silently doesn't
-    // count. (Agnostic route matches keep both Sport and Top Rope open.)
+    // During a live match the discipline is already decided, so we don't offer
+    // the others at all: show only the discipline(s) that count, and when it's a
+    // single one, drop the chooser entirely (the match screen already states it).
+    // Agnostic route matches keep both Sport and Top Rope as a real chooser.
     const qsLive = matchLive();
     const qsAllowed = qsLive ? MATCH_DISCS[qsLive.rules.discipline] : null;
     if (qsAllowed && !qsAllowed.includes(qsState.discipline)) qsState.discipline = qsAllowed[0];
-    $('#qs-disciplines').innerHTML = ALL_DISCIPLINES.map((d) => {
-      const locked = qsAllowed && !qsAllowed.includes(d);
-      return `<button type="button" class="qs-tab${d === qsState.discipline ? ' is-active' : ''}" data-d="${d}"${locked ? ' disabled title="Locked during the match"' : ''}>${d === 'Bouldering' ? 'Boulder' : d}</button>`;
-    }).join('');
+    const qsDiscs = qsAllowed || ALL_DISCIPLINES;
+    const discRow = $('#qs-disciplines');
+    discRow.hidden = !!(qsAllowed && qsAllowed.length < 2);
+    discRow.innerHTML = qsDiscs.map((d) =>
+      `<button type="button" class="qs-tab${d === qsState.discipline ? ' is-active' : ''}" data-d="${d}">${d === 'Bouldering' ? 'Boulder' : d}</button>`
+    ).join('');
     $$('#qs-disciplines .qs-tab').forEach((b) => b.addEventListener('click', () => {
       qsState.discipline = b.dataset.d;
       if (!gradesFor(qsState.discipline).includes(qsState.grade)) qsState.grade = null;

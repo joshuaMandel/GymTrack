@@ -914,6 +914,7 @@ label.check input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accen
 }
 .sheet-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-right: 40px; }
 .qs-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.qs-tabs[hidden] { display: none; }
 .qs-tab {
   border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
   padding: 10px 14px; min-height: 40px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
