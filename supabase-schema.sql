@@ -1087,6 +1087,9 @@ alter table public.matches add column if not exists ranked boolean not null defa
 -- for solo demo/QA. They compute a score + elo delta so you can verify the math,
 -- but are excluded from your displayed rating and never post to the feed.
 alter table public.matches add column if not exists practice boolean not null default false;
+-- Whoever forfeited (tapped "Forfeit"): the match resolves at once with them as
+-- the loser, regardless of score and without waiting on the other player.
+alter table public.matches add column if not exists forfeited_by uuid references auth.users (id) on delete set null;
 alter table public.matches drop constraint if exists matches_discipline_chk;
 alter table public.matches add constraint matches_discipline_chk check (discipline is null or discipline in ('boulder','lead','toprope','agnostic'));
 alter table public.matches drop constraint if exists matches_best_n_chk;
@@ -1395,6 +1398,32 @@ declare m record; chs numeric; ops numeric; g text; ra int; rb int; ea numeric; 
 begin
   select * into m from public.matches where id = mid for update;
   if not found or m.status <> 'active' then return; end if;
+  -- FORFEIT: someone quit. It ends now with the forfeiter as the loser, whatever
+  -- the score, and without the opponent's involvement. (Never an abandon/draw.)
+  if m.forfeited_by is not null then
+    g := case when m.discipline is not null then public.match_group(m.discipline) else coalesce(m.grp, 'boulder') end;
+    if m.discipline is not null then
+      j := public.match_play(mid);
+      chs := coalesce((j->'ch'->>'points')::numeric, 0);
+      ops := coalesce((j->'op'->>'points')::numeric, 0);
+    else
+      chs := public.match_score(mid, m.challenger);
+      ops := public.match_score(mid, m.opponent);
+    end if;
+    win := case when m.forfeited_by = m.challenger then 'opponent' else 'challenger' end;
+    ra := coalesce(public.climb_display_rating(m.challenger, g), 1000);
+    rb := coalesce(public.climb_display_rating(m.opponent, g), 1000);
+    ea := 1 / (1 + power(10, (rb - ra) / 200.0));
+    d := round(kf * ((case win when 'challenger' then 1 else 0 end) - ea));
+    if not coalesce(m.ranked, true) then d := 0; end if;  -- unranked/practice never moves real elo
+    update public.matches set status = 'resolved', resolved_at = now(), grp = g,
+      ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
+    if not coalesce(m.practice, false) then
+      perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
+      perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+    end if;
+    return;
+  end if;
   if m.discipline is not null then
     -- Ruleset match: par points from the turn walk (one pass for both sides).
     -- Abandon if neither player logged a single COUNTING climb (out-of-turn or
@@ -1543,6 +1572,28 @@ begin
   return (select status from public.matches where id = mid);
 end $$;
 
+-- Forfeit: quit the match now and take the loss, without the opponent. Unlike
+-- match_end (a "done logging" release valve that waits for the other side), this
+-- resolves immediately with the caller recorded as the loser.
+create or replace function public.match_forfeit(mid uuid)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m record;
+begin
+  select * into m from public.matches where id = mid for update;
+  if not found or (m.challenger <> me and m.opponent <> me) then raise exception 'not your match'; end if;
+  if m.status <> 'active' then return m.status; end if;
+  update public.matches set forfeited_by = me,
+    ch_ended = case when m.challenger = me then true else ch_ended end,
+    op_ended = case when m.opponent = me then true else op_ended end,
+    ch_ended_at = case when m.challenger = me then coalesce(ch_ended_at, now()) else ch_ended_at end,
+    op_ended_at = case when m.opponent = me then coalesce(op_ended_at, now()) else op_ended_at end
+  where id = mid;
+  perform public.match_resolve(mid);
+  return (select status from public.matches where id = mid);
+end $$;
+revoke all on function public.match_forfeit(uuid) from public, anon;
+grant execute on function public.match_forfeit(uuid) to authenticated;
+
 -- Live head-to-head state (participant only). Resolves on read if the time cap
 -- has passed. Returns each side's live score (par points), par grade, whose
 -- turn it is, per-side can_log, and elo — numbers only, never the opponent's
@@ -1572,6 +1623,7 @@ begin
     'id', m.id, 'status', m.status, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
     'winner', m.winner, 'group', m.grp, 'practice', coalesce(m.practice, false),
+    'forfeited_by', m.forfeited_by,
     'turn', case when j is null then null else j->>'turn' end,
     'rules', jsonb_build_object('discipline', m.discipline, 'best_n', m.best_n,
       'ranked', coalesce(m.ranked, true),
