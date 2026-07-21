@@ -12,6 +12,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { SafeAreaView, Edge } from 'react-native-safe-area-context';
+import { CLIMB_COLORS } from '@gymtrack/core';
 import { colors, fonts, radius } from '../theme';
 
 export function Screen({
@@ -106,6 +107,40 @@ export function Chip({
   );
 }
 
+// Compact segmented control (metric / range toggles).
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={styles.seg}>
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            style={[styles.segBtn, active && styles.segBtnActive]}
+          >
+            <Text style={[styles.segLabel, active && styles.segLabelActive]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// A colored hold-route swatch (hollow when no color logged), matching the web.
+export function RouteDot({ color }: { color?: string }) {
+  const hex = color ? CLIMB_COLORS[color] : undefined;
+  return <View style={[styles.routeDot, hex ? { backgroundColor: hex } : styles.routeDotNone]} />;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1, paddingHorizontal: 20 },
@@ -139,4 +174,18 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipLabel: { fontFamily: fonts.bodyMed, fontSize: 14, color: colors.text },
   chipLabelActive: { color: colors.cream },
+  seg: {
+    flexDirection: 'row',
+    backgroundColor: colors.panel2,
+    borderRadius: radius.sm,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segBtn: { flex: 1, paddingVertical: 8, borderRadius: radius.row, alignItems: 'center' },
+  segBtnActive: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.border },
+  segLabel: { fontFamily: fonts.bodyMed, fontSize: 13, color: colors.muted },
+  segLabelActive: { color: colors.text },
+  routeDot: { width: 12, height: 12, borderRadius: 6 },
+  routeDotNone: { borderWidth: 1.5, borderColor: colors.mutedSoft, backgroundColor: 'transparent' },
 });

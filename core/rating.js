@@ -13,6 +13,37 @@ export const SS_ROPE_OFFSET = 300; // roped ratings sit a constant offset higher
 export const ratingGroup = (discipline) => (discipline === 'Bouldering' ? 'boulder' : 'rope');
 export const isSend = (r) => r !== 'Project';
 
+export const ALL_DISCIPLINES = ['Bouldering', 'Sport', 'Top Rope', 'Trad'];
+export const ROPE_DISCIPLINES = ['Sport', 'Top Rope', 'Trad'];
+
+// Hardest grade sent per session for one discipline (values are grade ranks).
+// Ported verbatim (app.js:1195).
+export function hardestSeries(discipline, sends) {
+  const byDate = {};
+  sends
+    .filter((c) => c.discipline === discipline)
+    .forEach((c) => {
+      const r = gradeRank(discipline, c.grade);
+      if (byDate[c.date] === undefined || r > byDate[c.date]) byDate[c.date] = r;
+    });
+  return {
+    label: discipline,
+    points: Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }))
+  };
+}
+
+// Sends per session for one discipline. Ported verbatim (app.js:1210).
+export function sendsSeries(discipline, sends) {
+  const byDate = {};
+  sends
+    .filter((c) => c.discipline === discipline)
+    .forEach((c) => { byDate[c.date] = (byDate[c.date] || 0) + 1; });
+  return {
+    label: discipline,
+    points: Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }))
+  };
+}
+
 export const routeRating = (discipline, grade) => SS_BASE + (discipline === 'Bouldering' ? 0 : SS_ROPE_OFFSET) + SS_STEP * gradeD(discipline, grade);
 export const sendExpected = (R, routeR) => 1 / (1 + Math.pow(10, (routeR - R) / SS_SPREAD));
 

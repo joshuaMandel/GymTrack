@@ -4,3 +4,5 @@ export * from './grades.js';
 export * from './rating.js';
 export * from './format.js';
 export * from './climbs.js';
+export * from './sessions.js';
+export * from './chart.js';
