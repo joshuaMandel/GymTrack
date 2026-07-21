@@ -10,12 +10,13 @@ type Handlers = {
   onFriendships: () => void;
   onActivity: (row: any) => void;
   onPoll: () => void; // fired every 8s while the socket is not live
+  onMatches?: () => void; // any change to the matches table
 };
 
-export function useSocialRealtime({ onFriendships, onActivity, onPoll }: Handlers) {
+export function useSocialRealtime({ onFriendships, onActivity, onPoll, onMatches }: Handlers) {
   const live = useRef(false);
-  const cbs = useRef({ onFriendships, onActivity, onPoll });
-  cbs.current = { onFriendships, onActivity, onPoll };
+  const cbs = useRef({ onFriendships, onActivity, onPoll, onMatches });
+  cbs.current = { onFriendships, onActivity, onPoll, onMatches };
 
   useEffect(() => {
     const channel = supabase
@@ -28,6 +29,9 @@ export function useSocialRealtime({ onFriendships, onActivity, onPoll }: Handler
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () =>
         cbs.current.onFriendships()
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () =>
+        cbs.current.onMatches?.()
       )
       .subscribe((status) => {
         live.current = status === 'SUBSCRIBED';

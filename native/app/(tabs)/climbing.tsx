@@ -24,6 +24,7 @@ import { Title, Subtitle, Body, Card, Segmented, RouteDot } from '../../componen
 import { LineChart } from '../../components/charts';
 import { colors, fonts, radius } from '../../theme';
 import { fetchMyClimbs, delClimb } from '../../lib/climbs';
+import { loadMatches } from '../../lib/matches';
 
 type Metric = 'rating' | 'hardest' | 'sends';
 type Range = 'all' | '30' | '60' | '90';
@@ -36,6 +37,7 @@ export default function Climbing() {
   const [metric, setMetric] = useState<Metric>('rating');
   const [range, setRange] = useState<Range>('all');
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [adj, setAdj] = useState<{ boulder: number; rope: number }>({ boulder: 0, rope: 0 });
 
   const load = useCallback(async () => {
     try {
@@ -44,6 +46,11 @@ export default function Climbing() {
       /* keep last */
     } finally {
       setLoading(false);
+    }
+    try {
+      setAdj((await loadMatches()).adj);
+    } catch {
+      /* ignore */
     }
   }, []);
 
@@ -54,8 +61,8 @@ export default function Climbing() {
   );
 
   const cutoff = range === 'all' ? null : daysAgoISO(parseInt(range, 10));
-  const boulder = climberRatingFromClimbs(climbs, 'boulder');
-  const rope = climberRatingFromClimbs(climbs, 'rope');
+  const boulder = climberRatingFromClimbs(climbs, 'boulder', adj);
+  const rope = climberRatingFromClimbs(climbs, 'rope', adj);
   const ratings = [
     { def: RATING_GROUPS[0], r: boulder },
     { def: RATING_GROUPS[1], r: rope },
