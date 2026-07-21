@@ -2,12 +2,13 @@ import { useCallback, useState } from 'react';
 import { View, StyleSheet, Pressable, RefreshControl, ScrollView } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { climberRatingFromClimbs, fmtDateShort, todayISO } from '@gymtrack/core';
+import { climberRatingFromClimbs, fmtDateShort, todayISO, daysAgoISO } from '@gymtrack/core';
 import type { Climb } from '@gymtrack/core';
 import { Title, Subtitle, Body, Display, Card } from '../../components/ui';
+import { Avatar } from '../../components/Avatar';
 import { colors, fonts, radius } from '../../theme';
 import { useAuth } from '../../lib/auth';
-import { supabase } from '../../lib/supabase';
+import { useSettings } from '../../lib/settings';
 import { fetchMyClimbs } from '../../lib/climbs';
 import { loadMatches, type MatchListRow, type MatchAdj } from '../../lib/matches';
 
@@ -18,6 +19,7 @@ function greeting(): string {
 
 export default function Home() {
   const { user } = useAuth();
+  const settings = useSettings();
   const [climbs, setClimbs] = useState<Climb[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +57,14 @@ export default function Home() {
   const primary = boulder.hasData || !rope.hasData ? boulder : rope;
   const primaryLabel = primary.group === 'boulder' ? 'Bouldering' : 'Roped';
 
-  const name = (user?.email || 'climber').split('@')[0];
+  const name = settings.display_name || (user?.email || 'climber').split('@')[0];
   const sends = climbs.filter((c) => c.result !== 'Project').length;
   const today = todayISO();
   const todayCount = climbs.filter((c) => c.date === today).length;
+  const hideRating = !!settings.hide_rating;
+  const weekCutoff = daysAgoISO(6);
+  const weekSessions = new Set(climbs.filter((c) => c.date >= weekCutoff).map((c) => c.date)).size;
+  const weeklyGoal = settings.weekly_goal || 3;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -75,8 +81,8 @@ export default function Home() {
               {climbs.length} climbs logged{todayCount ? ` · ${todayCount} today` : ''}
             </Subtitle>
           </View>
-          <Pressable onPress={() => supabase.auth.signOut()} style={styles.signOut} hitSlop={8}>
-            <Body style={{ color: colors.muted, fontSize: 13 }}>Sign out</Body>
+          <Pressable onPress={() => router.push('/profile')} hitSlop={8}>
+            <Avatar uid={user?.id || ''} name={name} size="md" />
           </Pressable>
         </View>
 
@@ -96,34 +102,50 @@ export default function Home() {
           </Pressable>
         ) : null}
 
-        {/* Send Score hero */}
-        <Card style={styles.hero}>
-          <Body style={styles.heroKicker}>{primaryLabel.toUpperCase()} · SEND SCORE</Body>
-          {primary.hasData && primary.rating != null ? (
-            <>
-              <Display style={styles.heroNum}>{primary.rating}</Display>
-              <Body style={styles.heroSub}>
-                {primary.provisional ? 'Provisional' : 'Established'} · {primary.sessions} session
-                {primary.sessions === 1 ? '' : 's'}
-                {primary.lastSessionDelta ? `  ${primary.lastSessionDelta > 0 ? '▲' : '▼'} ${Math.abs(primary.lastSessionDelta)}` : ''}
-              </Body>
-            </>
-          ) : (
-            <>
-              <Display style={[styles.heroNum, { color: colors.mutedSoft }]}>—</Display>
-              <Body style={styles.heroSub}>Log a climb to start your Send Score.</Body>
-            </>
-          )}
-        </Card>
+        {/* Hero — Send Score, or weekly sessions when the rating is hidden */}
+        {hideRating ? (
+          <Card style={styles.hero}>
+            <Body style={styles.heroKicker}>THIS WEEK</Body>
+            <Display style={styles.heroNum}>
+              {weekSessions}
+              <Display style={[styles.heroNum, { fontSize: 22, color: colors.mutedSoft }]}>{` / ${weeklyGoal}`}</Display>
+            </Display>
+            <Body style={styles.heroSub}>
+              {weekSessions >= weeklyGoal
+                ? 'Weekly goal reached — nice work.'
+                : `${weeklyGoal - weekSessions} more session${weeklyGoal - weekSessions === 1 ? '' : 's'} to hit your goal.`}
+            </Body>
+          </Card>
+        ) : (
+          <Card style={styles.hero}>
+            <Body style={styles.heroKicker}>{primaryLabel.toUpperCase()} · SEND SCORE</Body>
+            {primary.hasData && primary.rating != null ? (
+              <>
+                <Display style={styles.heroNum}>{primary.rating}</Display>
+                <Body style={styles.heroSub}>
+                  {primary.provisional ? 'Provisional' : 'Established'} · {primary.sessions} session
+                  {primary.sessions === 1 ? '' : 's'}
+                  {primary.lastSessionDelta ? `  ${primary.lastSessionDelta > 0 ? '▲' : '▼'} ${Math.abs(primary.lastSessionDelta)}` : ''}
+                </Body>
+              </>
+            ) : (
+              <>
+                <Display style={[styles.heroNum, { color: colors.mutedSoft }]}>—</Display>
+                <Body style={styles.heroSub}>Log a climb to start your Send Score.</Body>
+              </>
+            )}
+          </Card>
+        )}
 
         {/* Quick stats */}
         <View style={styles.statRow}>
           <Stat label="Total climbs" value={String(climbs.length)} />
           <Stat label="Sends" value={String(sends)} />
-          <Stat
-            label="Roped"
-            value={rope.hasData && rope.rating != null ? String(rope.rating) : '—'}
-          />
+          {hideRating ? (
+            <Stat label="This week" value={String(weekSessions)} />
+          ) : (
+            <Stat label="Roped" value={rope.hasData && rope.rating != null ? String(rope.rating) : '—'} />
+          )}
         </View>
 
         {/* Recent */}
@@ -174,7 +196,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: { paddingHorizontal: 20, paddingBottom: 40 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 8, marginBottom: 18 },
-  signOut: { paddingTop: 6, paddingLeft: 8 },
   matchBanner: {
     flexDirection: 'row',
     alignItems: 'center',

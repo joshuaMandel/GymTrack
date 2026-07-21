@@ -25,6 +25,7 @@ import { LineChart } from '../../components/charts';
 import { colors, fonts, radius } from '../../theme';
 import { fetchMyClimbs, delClimb } from '../../lib/climbs';
 import { loadMatches } from '../../lib/matches';
+import { useSettings } from '../../lib/settings';
 
 type Metric = 'rating' | 'hardest' | 'sends';
 type Range = 'all' | '30' | '60' | '90';
@@ -32,6 +33,8 @@ type Range = 'all' | '30' | '60' | '90';
 const gradeLabel = (arr: string[]) => (v: number) => arr[Math.round(v)] ?? '';
 
 export default function Climbing() {
+  const settings = useSettings();
+  const hideRating = !!settings.hide_rating;
   const [climbs, setClimbs] = useState<Climb[]>([]);
   const [loading, setLoading] = useState(true);
   const [metric, setMetric] = useState<Metric>('rating');
@@ -60,6 +63,8 @@ export default function Climbing() {
     }, [load])
   );
 
+  // With the rating hidden, drop the Send Score metric and never default to it.
+  const effMetric: Metric = hideRating && metric === 'rating' ? 'hardest' : metric;
   const cutoff = range === 'all' ? null : daysAgoISO(parseInt(range, 10));
   const boulder = climberRatingFromClimbs(climbs, 'boulder', adj);
   const rope = climberRatingFromClimbs(climbs, 'rope', adj);
@@ -113,7 +118,8 @@ export default function Climbing() {
         <Title>Progress</Title>
         <Subtitle style={{ marginTop: 4, marginBottom: 16 }}>Your Send Score and climbing history</Subtitle>
 
-        {/* Rating cards */}
+        {/* Rating cards (hidden by preference) */}
+        {!hideRating && (
         <View style={styles.ratingRow}>
           {ratings.map(({ def, r }) => (
             <Card key={def.key} style={styles.ratingCard}>
@@ -139,14 +145,15 @@ export default function Climbing() {
             </Card>
           ))}
         </View>
+        )}
 
         {/* Chart controls */}
         <View style={{ marginTop: 20, gap: 10 }}>
           <Segmented<Metric>
-            value={metric}
+            value={effMetric}
             onChange={setMetric}
             options={[
-              { label: 'Send Score', value: 'rating' },
+              ...(hideRating ? [] : [{ label: 'Send Score', value: 'rating' as Metric }]),
               { label: 'Hardest', value: 'hardest' },
               { label: 'Sends', value: 'sends' },
             ]}
@@ -165,7 +172,7 @@ export default function Climbing() {
 
         {/* Charts */}
         <Card style={{ marginTop: 12, paddingVertical: 12, paddingHorizontal: 8 }}>
-          {metric === 'rating' && (
+          {effMetric === 'rating' && (
             <LineChart
               series={ratings
                 .filter(({ r }) => r.hasData)
@@ -177,7 +184,7 @@ export default function Climbing() {
               fmt={(v) => fmtNum(Math.round(v))}
             />
           )}
-          {metric === 'sends' && (
+          {effMetric === 'sends' && (
             <LineChart
               series={(['Bouldering', 'Sport', 'Top Rope', 'Trad'] as const)
                 .map((d) => ({ ...sendsSeries(d, sends), color: DISC_COLORS[d] }))
@@ -185,7 +192,7 @@ export default function Climbing() {
               fmt={(v) => fmtNum(Math.round(v))}
             />
           )}
-          {metric === 'hardest' && (
+          {effMetric === 'hardest' && (
             <View style={{ gap: 16 }}>
               <View>
                 <Body style={styles.subchartTitle}>Bouldering (V scale)</Body>

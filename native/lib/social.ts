@@ -5,6 +5,7 @@ import { supabase } from './supabase';
 import type { FeedItem } from '@gymtrack/core';
 
 export type Me = { username: string | null; display_name: string | null };
+export type MeFull = Me & { id: string; avatar_v: number };
 
 export type Friend = {
   user_id: string;
@@ -63,6 +64,19 @@ export type FriendAct = 'request' | 'accept' | 'decline' | 'cancel' | 'unfriend'
 async function myUid(): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
   return data.user?.id ?? null;
+}
+
+// The signed-in climber's own profile row (handle, name, avatar version).
+export async function getMe(): Promise<MeFull | null> {
+  const uid = await myUid();
+  if (!uid) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('username, display_name, avatar_v')
+    .eq('id', uid)
+    .maybeSingle();
+  const row = (data as { username: string | null; display_name: string | null; avatar_v: number | null } | null) || null;
+  return { id: uid, username: row?.username ?? null, display_name: row?.display_name ?? null, avatar_v: row?.avatar_v ?? 0 };
 }
 
 export async function loadFriends(): Promise<{ me: Me | null; list: Friend[]; requests: FriendRequest[] }> {

@@ -10,3 +10,4 @@ export * from './avatar.js';
 export * from './feed.js';
 export * from './leaderboard.js';
 export * from './matches.js';
+export * from './profile.js';

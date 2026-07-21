@@ -169,3 +169,11 @@ export function matchMySide(s: MatchState): MatchSide;
 export function matchTheirSide(s: MatchState): MatchSide;
 export function matchPointsFor(state: MatchState | null, discipline: string, grade: string): number | null;
 export function matchLastLine(side: MatchSide | null | undefined): string;
+
+// --- profile ---
+export function longestStreak(climbs: Climb[]): number;
+export interface ProfileStats {
+  sessions: number; sends: number; boulderRank: number; routeRank: number;
+  hardestBoulder: string | null; hardestRoute: string | null; longest: number;
+}
+export function climbingProfileStats(climbs: Climb[]): ProfileStats;
