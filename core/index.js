@@ -6,3 +6,6 @@ export * from './format.js';
 export * from './climbs.js';
 export * from './sessions.js';
 export * from './chart.js';
+export * from './avatar.js';
+export * from './feed.js';
+export * from './leaderboard.js';
