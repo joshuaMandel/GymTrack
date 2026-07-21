@@ -40,9 +40,13 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="friends" />
             <Stack.Screen name="leaderboard" />
+            <Stack.Screen name="matches" />
+            <Stack.Screen name="h2h" />
             <Stack.Screen name="edit-climb" options={{ presentation: 'modal' }} />
             <Stack.Screen name="lb-summary" options={{ presentation: 'modal' }} />
             <Stack.Screen name="set-handle" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="match-create" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="match-log" options={{ presentation: 'modal' }} />
           </Stack>
         </AuthProvider>
       </SafeAreaProvider>

@@ -92,6 +92,9 @@ export default function Feed() {
       <View style={styles.header}>
         <Title>Feed</Title>
         <View style={styles.headerBtns}>
+          <Pressable style={styles.iconBtn} onPress={() => router.push('/matches')}>
+            <Ionicons name="git-compare-outline" size={20} color={colors.text} />
+          </Pressable>
           <Pressable style={styles.iconBtn} onPress={() => router.push('/leaderboard')}>
             <Ionicons name="trophy-outline" size={20} color={colors.text} />
           </Pressable>

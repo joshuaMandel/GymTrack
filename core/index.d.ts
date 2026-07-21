@@ -75,6 +75,7 @@ export function daysAgoISO(days: number): string;
 export function fmtNum(n: number): string;
 export function fmtDate(iso: string): string;
 export function fmtDateShort(iso: string): string;
+export function fmtRemaining(iso: string): string;
 export function ago(iso: string): string;
 
 // --- climbs ---
@@ -140,3 +141,30 @@ export function summarizePyramid(
   byGradeRows: { grade: string; result: string; n: number }[],
   disc: string
 ): Pyramid;
+
+// --- matches ---
+export type MatchDiscipline = 'boulder' | 'lead' | 'toprope' | 'agnostic';
+export const MATCH_DISCS: Record<MatchDiscipline, string[]>;
+
+export interface MatchLast { grade: string; result: string; points: number; at?: string; }
+export interface MatchSide {
+  name: string; uid: string; avatar_v?: number; is_bot?: boolean;
+  baseline?: number | null; par?: string | null; par_d?: number | null;
+  can_log?: boolean; last?: MatchLast | null; elo?: number | null;
+  score?: number; counted?: number; ended?: boolean; delta?: number | null;
+}
+export interface MatchRules {
+  discipline: MatchDiscipline | null; best_n: number | null; ranked: boolean; style_label?: string;
+}
+export interface MatchState {
+  id: string; status: 'pending' | 'active' | 'resolved' | 'abandoned' | 'canceled';
+  window_start?: string; window_end?: string; i_am: 'challenger' | 'opponent';
+  winner?: 'challenger' | 'opponent' | 'draw' | null; group?: string | null;
+  practice?: boolean; forfeited_by?: string | null;
+  turn?: 'challenger' | 'opponent' | null; rules: MatchRules;
+  challenger: MatchSide; opponent: MatchSide;
+}
+export function matchMySide(s: MatchState): MatchSide;
+export function matchTheirSide(s: MatchState): MatchSide;
+export function matchPointsFor(state: MatchState | null, discipline: string, grade: string): number | null;
+export function matchLastLine(side: MatchSide | null | undefined): string;

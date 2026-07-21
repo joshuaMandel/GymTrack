@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { View, StyleSheet, Pressable, RefreshControl, ScrollView } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { climberRatingFromClimbs, fmtDateShort, todayISO } from '@gymtrack/core';
 import type { Climb } from '@gymtrack/core';
@@ -9,6 +9,7 @@ import { colors, fonts, radius } from '../../theme';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 import { fetchMyClimbs } from '../../lib/climbs';
+import { loadMatches, type MatchListRow, type MatchAdj } from '../../lib/matches';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -20,6 +21,8 @@ export default function Home() {
   const [climbs, setClimbs] = useState<Climb[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeMatch, setActiveMatch] = useState<MatchListRow | null>(null);
+  const [adj, setAdj] = useState<MatchAdj>({ boulder: 0, rope: 0 });
 
   const load = useCallback(async () => {
     try {
@@ -30,6 +33,14 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+    // Matches are supplementary — never block the climb view on them.
+    try {
+      const m = await loadMatches();
+      setActiveMatch(m.active);
+      setAdj(m.adj);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   // Refetch whenever Home regains focus (e.g. after logging a climb).
@@ -39,8 +50,8 @@ export default function Home() {
     }, [load])
   );
 
-  const boulder = climberRatingFromClimbs(climbs, 'boulder');
-  const rope = climberRatingFromClimbs(climbs, 'rope');
+  const boulder = climberRatingFromClimbs(climbs, 'boulder', adj);
+  const rope = climberRatingFromClimbs(climbs, 'rope', adj);
   const primary = boulder.hasData || !rope.hasData ? boulder : rope;
   const primaryLabel = primary.group === 'boulder' ? 'Bouldering' : 'Roped';
 
@@ -68,6 +79,22 @@ export default function Home() {
             <Body style={{ color: colors.muted, fontSize: 13 }}>Sign out</Body>
           </Pressable>
         </View>
+
+        {/* Active match banner */}
+        {activeMatch ? (
+          <Pressable onPress={() => router.push({ pathname: '/h2h', params: { mid: activeMatch.id } })}>
+            <Card style={styles.matchBanner}>
+              <View style={styles.liveDot} />
+              <View style={{ flex: 1 }}>
+                <Body style={{ fontFamily: fonts.bodyMed, color: colors.cream }}>
+                  Match vs {activeMatch.opponent_name || 'Climber'}
+                </Body>
+                <Body style={{ color: colors.mutedSoft, fontSize: 12 }}>{activeMatch.rules_label || 'In progress'} · tap to play</Body>
+              </View>
+              <Body style={{ color: colors.cream, fontSize: 18 }}>›</Body>
+            </Card>
+          </Pressable>
+        ) : null}
 
         {/* Send Score hero */}
         <Card style={styles.hero}>
@@ -148,6 +175,16 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 20, paddingBottom: 40 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 8, marginBottom: 18 },
   signOut: { paddingTop: 6, paddingLeft: 8 },
+  matchBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.accent2,
+    borderColor: colors.accent2,
+    marginBottom: 12,
+    paddingVertical: 12,
+  },
+  liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#7ee06a' },
   hero: { backgroundColor: colors.ink, borderColor: colors.ink, marginBottom: 14 },
   heroKicker: { color: colors.mutedSoft, fontSize: 11, letterSpacing: 1, fontFamily: fonts.bodyMed },
   heroNum: { color: colors.cream, marginTop: 4 },
