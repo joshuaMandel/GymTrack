@@ -15,3 +15,14 @@ export const climbRow = (c) => {
 };
 
 export const fromClimb = (r) => ({ id: r.id, ...climbRow(r), color: r.color || '', created_at: r.created_at });
+
+// Hold-color name → hex (app.js:1573) and per-discipline series color
+// (app.js:1508). Data only; the swatch/dot is a render concern in the client.
+export const CLIMB_COLORS = {
+  Red: '#d64545', Orange: '#f59e2c', Yellow: '#eac54f', Green: '#3a7d44',
+  Blue: '#3b82c4', Purple: '#8b5cf6', Pink: '#ec6aa0', Black: '#16181d',
+  White: '#f5f2ea', Gray: '#9aa0a8', Brown: '#8a6240',
+};
+export const DISC_COLORS = {
+  Bouldering: '#1f3a5f', Sport: '#f59e2c', 'Top Rope': '#16181d', Trad: '#3a7d44',
+};

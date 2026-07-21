@@ -31,3 +31,14 @@ export async function addClimb(entry: NewClimb): Promise<Climb> {
   if (error) throw error;
   return fromClimb(data);
 }
+
+export async function updateClimb(id: string, entry: NewClimb): Promise<Climb> {
+  const { data, error } = await supabase.from('climbs').update(climbRow(entry)).eq('id', id).select().single();
+  if (error) throw error;
+  return fromClimb(data);
+}
+
+export async function delClimb(id: string): Promise<void> {
+  const { error } = await supabase.from('climbs').delete().eq('id', id);
+  if (error) throw error;
+}

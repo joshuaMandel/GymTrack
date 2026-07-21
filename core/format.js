@@ -7,6 +7,13 @@ export const uid = () => Date.now().toString(36) + Math.random().toString(36).sl
 export const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const todayISO = () => isoOf(new Date());
 
+// Local calendar date N days ago (app.js:4523) — used for chart range cutoffs.
+export function daysAgoISO(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return isoOf(d);
+}
+
 export const fmtNum = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
 
 export function fmtDate(iso) {
