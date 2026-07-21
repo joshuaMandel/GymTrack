@@ -41,6 +41,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="friends" />
             <Stack.Screen name="leaderboard" />
+            <Stack.Screen name="profile" />
             <Stack.Screen name="matches" />
             <Stack.Screen name="h2h" />
             <Stack.Screen name="edit-climb" options={{ presentation: 'modal' }} />
