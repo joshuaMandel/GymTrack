@@ -47,6 +47,15 @@ export function sendsSeries(discipline, sends) {
 export const routeRating = (discipline, grade) => SS_BASE + (discipline === 'Bouldering' ? 0 : SS_ROPE_OFFSET) + SS_STEP * gradeD(discipline, grade);
 export const sendExpected = (R, routeR) => 1 / (1 + Math.pow(10, (routeR - R) / SS_SPREAD));
 
+// How hard a send is relative to YOUR level → celebration intensity 1..3
+// (app.js:2175 maMagnitude). Pass your Send Score for the discipline's group.
+export function sendMagnitude(discipline, grade, myRating) {
+  const base = SS_BASE + (discipline === 'Bouldering' ? 0 : SS_ROPE_OFFSET);
+  const R = myRating || base;
+  const delta = routeRating(discipline, grade) - R;
+  return delta >= 60 ? 3 : delta >= -40 ? 2 : 1;
+}
+
 export const RATING_GROUPS = [
   { key: 'boulder', label: 'Bouldering', scale: 'V-scale', color: '#1f3a5f' },
   { key: 'rope', label: 'Roped', scale: 'YDS', color: '#f59e2c' }

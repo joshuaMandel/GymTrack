@@ -15,6 +15,7 @@ import { Avatar } from '../components/Avatar';
 import { colors, fonts, radius } from '../theme';
 import { matchState, botMove } from '../lib/matches';
 import { useSocialRealtime } from '../lib/realtime';
+import { playMatchAnim } from '../lib/matchAnim';
 
 export default function H2H() {
   const { mid } = useLocalSearchParams<{ mid: string }>();
@@ -72,6 +73,23 @@ export default function H2H() {
   }, [refresh]);
 
   useSocialRealtime({ onFriendships: () => {}, onActivity: () => {}, onPoll: () => {}, onMatches: refresh });
+
+  // Receive moment: fire when the opponent's last counting climb changes.
+  const prevLastAt = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!s) return;
+    const them = matchTheirSide(s);
+    const at = them.last?.at ?? null;
+    if (prevLastAt.current !== undefined && at && at !== prevLastAt.current) {
+      playMatchAnim({
+        type: 'receive',
+        variant: them.last?.result === 'Project' ? 'fail' : 'send',
+        grade: them.last?.grade,
+        from: them.name,
+      });
+    }
+    prevLastAt.current = at;
+  }, [s]);
 
   async function doForfeit() {
     try {

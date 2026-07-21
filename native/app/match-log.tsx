@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { View, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { gradesFor, todayISO, MATCH_DISCS, matchPointsFor, matchMySide, type MatchState } from '@gymtrack/core';
+import { gradesFor, todayISO, MATCH_DISCS, matchPointsFor, matchMySide, sendMagnitude, type MatchState } from '@gymtrack/core';
 import { Title, Subtitle, Body, Button, Chip } from '../components/ui';
 import { colors, fonts, radius } from '../theme';
 import { addClimb } from '../lib/climbs';
 import { matchState } from '../lib/matches';
+import { playMatchAnim } from '../lib/matchAnim';
 
 const RESULTS = ['Send', 'Flash', 'Project'] as const;
 
@@ -42,6 +43,15 @@ export default function MatchLog() {
     setError(null);
     try {
       await addClimb({ date: todayISO(), discipline, grade, attempts: 1, result });
+      // Fire the send/fail moment when this climb counts (your turn).
+      if (myTurn && state) {
+        playMatchAnim({
+          type: result === 'Project' ? 'fail' : 'send',
+          grade,
+          discipline,
+          magnitude: sendMagnitude(discipline, grade, matchMySide(state).elo ?? null),
+        });
+      }
       router.back(); // h2h behind picks it up on next poll
     } catch (e: any) {
       setError(e?.message || 'Could not save');

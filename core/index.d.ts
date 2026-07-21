@@ -45,6 +45,7 @@ export function hardestSeries(discipline: string, sends: Climb[]): Series;
 export function sendsSeries(discipline: string, sends: Climb[]): Series;
 export function routeRating(discipline: string, grade: string): number;
 export function sendExpected(R: number, routeR: number): number;
+export function sendMagnitude(discipline: string, grade: string, myRating?: number | null): 1 | 2 | 3;
 
 export interface RatingGroupDef { key: RatingGroupKey; label: string; scale: string; color: string; }
 export const RATING_GROUPS: RatingGroupDef[];

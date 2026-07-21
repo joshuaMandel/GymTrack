@@ -11,6 +11,7 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { Archivo_400Regular, Archivo_600SemiBold } from '@expo-google-fonts/archivo';
 import { AuthProvider } from '../lib/auth';
+import { MatchAnim } from '../components/MatchAnim';
 import { colors } from '../theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -48,6 +49,7 @@ export default function RootLayout() {
             <Stack.Screen name="match-create" options={{ presentation: 'modal' }} />
             <Stack.Screen name="match-log" options={{ presentation: 'modal' }} />
           </Stack>
+          <MatchAnim />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
