@@ -108,3 +108,35 @@ export interface LineScale {
   x: (i: number) => number; y: (v: number) => number; lines: ScaledLine[];
 }
 export function lineScale(series: Series[], W: number, H?: number): LineScale | null;
+
+// --- avatar ---
+export const AVATAR_PALETTE: string[];
+export function avatarColorFor(uid: string): string;
+export function avatarInitial(name: string): string;
+
+// --- feed ---
+export interface FeedPayload {
+  opponent?: string; result?: 'won' | 'lost' | 'draw'; delta?: number; group?: string;
+  my_score?: number; opp_score?: number; match_id?: string;
+  sends?: number; flashes?: number; attempts?: number; hardest?: string;
+  hardest_discipline?: string; new_hardest?: boolean;
+  sets?: number; volume?: number; exercises?: number; unit?: string; top_exercise?: string;
+}
+export interface FeedItem {
+  id: string; user_id: string; username?: string | null; display_name?: string | null;
+  kind: 'climb_session' | 'lift_session' | 'match_result';
+  occurred_on?: string; created_at: string; payload: FeedPayload;
+}
+export interface FeedLine {
+  ico: 'bolt' | 'barbell' | 'mountain'; cls: string; main: string; sub: string;
+  delta?: number; pr?: boolean;
+}
+export function feedLine(it: FeedItem): FeedLine;
+
+// --- leaderboard ---
+export interface PyramidGrade { grade: string; sends: number; flash: number; project: number; }
+export interface Pyramid { grades: PyramidGrade[]; totalSends: number; totalFlash: number; hardest: string | null; }
+export function summarizePyramid(
+  byGradeRows: { grade: string; result: string; n: number }[],
+  disc: string
+): Pyramid;
