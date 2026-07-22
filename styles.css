@@ -1452,6 +1452,87 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .h2h-prog-bar span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .3s ease; }
 .h2h-prog-lbl { margin-top: 3px; font-weight: 600; }
 
+/* ---- monster-battle arena (SendOff) — original retro-battler styling ---- */
+.arena { position: relative; display: flex; flex-direction: column; gap: 20px; padding: 20px 14px 22px; margin: 2px 0 12px; border-radius: var(--radius-sm);
+  background: linear-gradient(#dfeaf4, #e9eef4 49%, #efe6d3 49%, #f4ecda);
+  border: 2.5px solid var(--ink); overflow: hidden; box-shadow: inset 0 0 0 2px var(--panel), 0 3px 0 rgba(22,24,29,.16); }
+.arena::before { /* horizon ridge */ content: ''; position: absolute; left: 0; right: 0; top: 49%; height: 2px; background: color-mix(in srgb, var(--ink) 24%, transparent); }
+.arena-row { display: flex; align-items: flex-end; gap: 12px; position: relative; z-index: 1; }
+.arena-row.foe, .arena-row.hero { justify-content: space-between; }
+.arena-ava { position: relative; flex: 0 0 auto; }
+.arena-ava .av { width: 82px; height: 82px; box-shadow: 0 0 0 3px var(--panel), 0 0 0 5.5px var(--ink), 0 6px 14px rgba(22,24,29,.28); }
+.arena-ava .av-ini { font-size: 33px; }
+.arena-ava::after { /* retro platform disc */ content: ''; position: absolute; left: 50%; bottom: -11px; transform: translateX(-50%); width: 80px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 15%, transparent); border: 2px solid color-mix(in srgb, var(--ink) 32%, transparent); }
+.bt-plate { flex: 1 1 auto; max-width: 61%; background: var(--panel); border: 2.5px solid var(--ink); border-radius: 10px; padding: 8px 11px 9px; box-shadow: 0 3px 0 rgba(22,24,29,.18); }
+.bt-plate::after { content: 'HP'; display: none; }
+.bt-nm { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-family: var(--font-disp); font-weight: 700; font-size: 14px; color: var(--ink); }
+.bt-lv { font-family: var(--font-body, inherit); font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.bt-hpbar { margin-top: 5px; height: 12px; border-radius: 7px; background: var(--panel-2); border: 1.5px solid var(--ink); overflow: hidden; padding: 1.5px; }
+.bt-hpbar > span { display: block; height: 100%; border-radius: 5px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+.bt-hpbar.hp-hi > span { background: linear-gradient(180deg, #57c86a, #3a7d44); }
+.bt-hpbar.hp-mid > span { background: linear-gradient(180deg, #f2c14e, #e0952c); }
+.bt-hpbar.hp-lo > span { background: linear-gradient(180deg, #e2574c, #c0392b); }
+.bt-hprow { display: flex; justify-content: space-between; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.bt-hp { font-family: var(--font-disp); color: var(--ink); }
+.bt-narr { margin: 2px 0 10px; padding: 11px 13px; background: var(--panel); border: 1.5px solid var(--ink); border-radius: 12px;
+  box-shadow: 0 2px 0 rgba(22,24,29,.14); font-size: 13.5px; line-height: 1.45; color: var(--text); min-height: 20px; }
+.bt-narr.mine { border-color: var(--accent-2); box-shadow: 0 2px 0 color-mix(in srgb, var(--accent-2) 40%, transparent); font-weight: 600; }
+.bt-narr.won { border-color: var(--good); color: var(--good); font-weight: 700; text-align: center; font-family: var(--font-disp); font-size: 18px; }
+.bt-narr.lost { border-color: var(--danger); color: var(--danger); font-weight: 700; text-align: center; font-family: var(--font-disp); font-size: 18px; }
+.bt-narr.draw { text-align: center; font-weight: 700; font-family: var(--font-disp); font-size: 16px; color: var(--muted); }
+/* hit reactions (added briefly by JS, then removed) — no persistent idle cost */
+.arena-ava.bt-hit { animation: btHit .32s ease; }
+.arena-ava.bt-miss { animation: btMiss .5s ease; }
+.arena-ava.bt-faint { animation: btFaint .7s ease forwards; }
+.arena.bt-shake { animation: btShake .34s ease; }
+@keyframes btHit { 0%,100% { transform: translate(0,0); } 30% { transform: translate(0,-8px) scale(1.06); } 60% { transform: translate(0,2px); } }
+@keyframes btMiss { 0%,100% { transform: translate(0,0); } 20% { transform: translate(-5px,0) rotate(-6deg); } 60% { transform: translate(5px,2px) rotate(5deg); } }
+@keyframes btFaint { to { transform: translateY(14px) rotate(-12deg); opacity: .25; } }
+@keyframes btShake { 0%,100% { transform: translate(0,0); } 20% { transform: translate(-6px,3px); } 40% { transform: translate(6px,-2px); } 60% { transform: translate(-4px,2px); } 80% { transform: translate(4px,-1px); } }
+/* floating damage number */
+.bt-dmg { position: absolute; z-index: 3; font-family: var(--font-disp); font-weight: 700; font-size: 30px; color: var(--danger); text-shadow: 0 2px 0 rgba(255,255,255,.7); pointer-events: none; }
+.bt-dmg.crit { font-size: 42px; color: #c0392b; -webkit-text-stroke: 1.5px var(--cream); }
+.bt-dmg.miss { color: var(--muted); font-size: 22px; }
+/* move-name banner: original attack flavor floating off the attacker */
+.bt-move { position: absolute; z-index: 3; transform: translate(-50%,0); font-family: var(--font-disp); font-weight: 700; font-size: 11px; letter-spacing: .5px; white-space: nowrap; color: var(--cream); background: var(--ink); border: 1.5px solid var(--cream); box-shadow: 0 0 0 1.5px var(--ink); border-radius: 6px; padding: 2px 8px; pointer-events: none; }
+.bt-move.big { font-size: 12.5px; color: var(--ink); background: #ffd23f; border-color: var(--ink); box-shadow: 0 0 0 1.5px var(--cream), 0 2px 6px rgba(22,24,29,.3); }
+/* impact spark at the contact point — a CSS starburst, event-driven only */
+.bt-spark { position: absolute; z-index: 3; width: 40px; height: 40px; pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #fff 0 16%, #ffd23f 17% 34%, transparent 44%); }
+.bt-spark::before, .bt-spark::after { content: ''; position: absolute; inset: 0; background:
+  conic-gradient(from 0deg, transparent 0 8%, #fff 9% 11%, transparent 12% 33%, #ffd23f 34% 36%, transparent 37% 58%, #fff 59% 61%, transparent 62% 83%, #ffd23f 84% 86%, transparent 87%); }
+.bt-spark::after { transform: rotate(45deg); opacity: .8; }
+.bt-spark.big { width: 60px; height: 60px; }
+/* KO payoff: white flash, stamped verdict, central VS badge */
+.arena.bt-flash::after { content: ''; position: absolute; inset: 0; background: #fff; animation: btFlash .5s ease; pointer-events: none; z-index: 4; }
+@keyframes btFlash { 0% { opacity: 0; } 12% { opacity: .82; } 100% { opacity: 0; } }
+.bt-ko { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 5; pointer-events: none; }
+.bt-ko span { font-family: var(--font-disp); font-weight: 700; font-size: 46px; letter-spacing: 3px; color: var(--cream); background: var(--danger); padding: 6px 22px 8px; border: 4px solid var(--ink); border-radius: 7px; box-shadow: 0 7px 0 rgba(22,24,29,.42); transform: rotate(-7deg); animation: btKo .85s cubic-bezier(.2,1.5,.35,1); }
+@keyframes btKo { 0% { transform: rotate(-7deg) scale(2.6); opacity: 0; } 34% { transform: rotate(-7deg) scale(.92); opacity: 1; } 48% { transform: rotate(-7deg) scale(1.04); } 60% { transform: rotate(-7deg) scale(1); } 84% { opacity: 1; } 100% { opacity: 0; } }
+/* turn glow: the active fighter's avatar rings + pulses */
+.arena-ava.is-turn .av { box-shadow: 0 0 0 3px var(--panel), 0 0 0 5.5px var(--accent-2), 0 0 20px 4px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 6px 14px rgba(22,24,29,.28); }
+.arena-ava.hero.is-turn::before { content: '▶ YOUR TURN'; position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-family: var(--font-disp); font-weight: 700; font-size: 9px; letter-spacing: .5px; color: var(--cream); background: var(--accent-2); border: 1.5px solid var(--ink); border-radius: 6px; padding: 1px 6px; white-space: nowrap; z-index: 3; }
+/* miss: a quick desaturating dim over the arena */
+.arena.bt-dim::after { content: ''; position: absolute; inset: 0; background: rgba(22,24,29,.18); animation: btDim .45s ease; pointer-events: none; z-index: 4; }
+@keyframes btDim { 0%,100% { opacity: 0; } 30% { opacity: 1; } }
+/* victory banner pops in, plus a burst of confetti behind it */
+.bt-narr.won, .bt-narr.lost { animation: btResult .5s cubic-bezier(.2,1.4,.4,1); }
+@keyframes btResult { 0% { transform: scale(.7); opacity: 0; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
+.bt-burst { position: absolute; left: 50%; top: 46%; width: 0; height: 0; z-index: 3; pointer-events: none; }
+.bt-burst i { position: absolute; width: 9px; height: 9px; border-radius: 2px; opacity: 0; }
+.arena-vs { position: absolute; left: 50%; top: 49%; transform: translate(-50%,-50%) rotate(-6deg); z-index: 2; font-family: var(--font-disp); font-weight: 700; font-size: 14px; color: var(--cream); background: var(--ink); border: 2px solid var(--cream); box-shadow: 0 0 0 2px var(--ink); border-radius: 8px; padding: 2px 9px; letter-spacing: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .arena-ava.bt-hit, .arena-ava.bt-miss, .arena-ava.bt-faint, .arena.bt-shake, .arena.bt-flash::after, .bt-ko span, .arena.bt-dim::after, .bt-narr.won, .bt-narr.lost { animation: none; }
+  .arena.bt-flash::after, .arena.bt-dim::after, .bt-burst, .bt-spark, .bt-move { display: none; }
+  .bt-hpbar > span, .md-mini > span { transition: none; }
+}
+/* compact battle bar in the persistent dock */
+.md-hprow { display: flex; align-items: center; gap: 7px; }
+.md-hpnm { font-size: 10px; font-weight: 700; color: var(--muted); width: 30px; flex: 0 0 auto; text-align: right; }
+.md-mini { flex: 1; height: 7px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--ink); overflow: hidden; padding: 1px; }
+.md-mini > span { display: block; height: 100%; border-radius: 4px; transition: width .45s cubic-bezier(.4,0,.2,1); }
+.md-mini.hp-hi > span { background: #3a7d44; } .md-mini.hp-mid > span { background: #e0952c; } .md-mini.hp-lo > span { background: #c0392b; }
+
 /* ============================================================================
    Match animations — a stick-figure "moment" fired only during a live match,
    after the climb is already saved. SVG + CSS keyframes (no library, no canvas,

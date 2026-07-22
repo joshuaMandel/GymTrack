@@ -1218,6 +1218,17 @@ $$;
 -- parD comes from the accept snapshot ((snap − 1000 − ropeOffset)/100, kept
 -- fractional) or seeds from the first matching send like the engine. best_n
 -- null (old open rows) = no turn gate, no cap. Returns null on legacy matches.
+-- Battle-mode damage ladder (mirrors core ladderDamage): a send's rung value,
+-- floored at 1. Boulder floor V0 → 1 (+1 per grade); route floor 5.7 → 1 (+1 per
+-- letter). Unknown grades (array_position null) fall to the floor of 1.
+create or replace function public.battle_damage(grp text, grade text)
+returns int language sql immutable set search_path = public as $$
+  select greatest(1, case when grp = 'boulder'
+    then array_position(array['VB','V0','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13','V14','V15','V16','V17'], grade) - 1
+    else array_position(array['5.5','5.6','5.7','5.8','5.9','5.10a','5.10b','5.10c','5.10d','5.11a','5.11b','5.11c','5.11d','5.12a','5.12b','5.12c','5.12d','5.13a','5.13b','5.13c','5.13d','5.14a','5.14b','5.14c','5.14d','5.15a','5.15b','5.15c','5.15d'], grade) - 2 end);
+$$;
+revoke all on function public.battle_damage(text, text) from public, anon, authenticated;
+
 create or replace function public.match_play(mid uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
@@ -1287,14 +1298,11 @@ begin
     else
       other_rel := true; -- open rows: no alternation
     end if;
-    par := case when is_ch then ch_par else op_par end;
-    -- "At par" is worth 3 in a ranked/scratch match. UNRANKED BOULDER is the
-    -- exception: the V-number IS your score (V5 = 5), so at-par (par 0 for
-    -- unranked) is worth 0 and every grade above just adds its number.
-    pts := case when rec.res = 'Project' then 0
-           else greatest(0, (case when not coalesce(m.ranked, true) and grp = 'boulder' then 0 else 3 end)
-                              + floor(rec.gd - coalesce(par, rec.gd) + 0.5)::int) end;
-    if pts > 0 and rec.res = 'Flash' then pts := pts + 1; end if;
+    -- Battle mode: damage = the raw grade ladder, NO handicap. A send or flash
+    -- deals its rung's value; a project (fail) is a miss (0). Mirrors core
+    -- ladderDamage() and the client point pills. (par is left computed above for
+    -- display only — it no longer affects scoring.)
+    pts := case when rec.res = 'Project' then 0 else public.battle_damage(grp, rec.grade) end;
     if is_ch then ch_n := ch_n + 1; ch_pts := ch_pts + pts;
     else op_n := op_n + 1; op_pts := op_pts + pts; end if;
     -- Remember each side's most recent COUNTING climb so the turn handoff can
@@ -1615,6 +1623,15 @@ begin
   if j is not null and m.status = 'active' and m.best_n is not null
      and (m.ch_ended or coalesce((j->'ch'->>'counted')::int, 0) >= m.best_n)
      and (m.op_ended or coalesce((j->'op'->>'counted')::int, 0) >= m.best_n) then
+    perform public.match_resolve(mid);
+    select * into m from public.matches where id = mid;
+    j := public.match_play(mid);
+  end if;
+  -- Battle KO: a side faints the instant the OTHER side's damage reaches its HP
+  -- pool (best_n × 8). Resolve early — the most-damage winner logic still holds.
+  if j is not null and m.status = 'active' and m.best_n is not null
+     and (coalesce((j->'ch'->>'points')::int, 0) >= m.best_n * 8
+          or coalesce((j->'op'->>'points')::int, 0) >= m.best_n * 8) then
     perform public.match_resolve(mid);
     select * into m from public.matches where id = mid;
     j := public.match_play(mid);
