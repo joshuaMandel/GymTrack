@@ -1,4 +1,4 @@
-# 🏋️ GymTrack
+# 🧗 SendOff
 
 A simple website for tracking **gym progress** — with **weightlifting** and
 **rock climbing** tracked separately. Works offline on one device out of the

@@ -1,5 +1,5 @@
 /* ============================================================================
-   GymTrack — Supabase configuration
+   SendOff — Supabase configuration
    ----------------------------------------------------------------------------
    Paste your project's values below. Find them in your Supabase dashboard:
      Project Settings → Data API (and → API Keys)
