@@ -192,3 +192,9 @@ export function pendingCount(ops: QueueOp[]): number;
 export function enqueueAdd(ops: QueueOp[], id: string, entry: Partial<Climb>): QueueOp[];
 export function enqueueUpd(ops: QueueOp[], id: string, entry: Partial<Climb>): QueueOp[];
 export function enqueueDel(ops: QueueOp[], id: string): QueueOp[];
+
+// --- battle mode ---
+export const HP_PER_SLOT: number;
+export function hpMax(bestN: number): number;
+export function ladderDamage(discipline: string, grade: string): number;
+export function climbDamage(discipline: string, grade: string, result: string): number;

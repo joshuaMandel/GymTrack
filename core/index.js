@@ -12,3 +12,4 @@ export * from './leaderboard.js';
 export * from './matches.js';
 export * from './profile.js';
 export * from './climbQueue.js';
+export * from './battle.js';

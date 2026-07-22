@@ -1275,19 +1275,21 @@
   }
   const matchMySide = (s) => (s.i_am === 'challenger' ? s.challenger : s.opponent);
   const matchTheirSide = (s) => (s.i_am === 'challenger' ? s.opponent : s.challenger);
-  // What a SEND of this grade is worth for me right now (flash = +1 more when
-  // it scores): max(0, 3 + round(D − parD)). Null when it wouldn't count.
+  // Battle-mode damage ladder (mirrors core ladderDamage + SQL battle_damage): a
+  // send's rung value, floored at 1. Boulder floor V0 → 1 (+1/grade); route floor
+  // 5.7 → 1 (+1/letter). NO handicap — the raw grade is the damage.
+  function battleDamage(discipline, grade) {
+    const rank = gradeRank(discipline, grade);
+    if (rank < 0) return 1;
+    const raw = discipline === 'Bouldering' ? rank : rank - 1;
+    return Math.max(1, raw);
+  }
+  // The damage a SEND of this grade would deal right now — the point-pill value.
+  // Null when the climb wouldn't count (wrong discipline / no live match).
   function matchPointsFor(discipline, grade) {
     const live = matchLive(); if (!live) return null;
     const discs = MATCH_DISCS[live.rules.discipline]; if (!discs || !discs.includes(discipline)) return null;
-    const d = gradeD(discipline, grade); if (d == null) return null;
-    const me = matchMySide(live);
-    // Unranked boulder: the V-number IS your score (V5 = 5), so at-par is 0.
-    const atPar = (live.rules.ranked === false && live.rules.discipline === 'boulder') ? 0 : 3;
-    // No par yet (no rating snapshot, nothing counted): the engine seeds your
-    // par FROM your first send, so it scores exactly at-par, any grade.
-    if (me.par_d == null) return atPar;
-    return Math.max(0, atPar + Math.round(d - me.par_d));
+    return battleDamage(discipline, grade);
   }
   // A side's most recent counting climb as a phrase for the turn handoff:
   // "flashed V9 (+10)" / "sent 5.11a (+3)" / "fell on V6". '' when none yet.

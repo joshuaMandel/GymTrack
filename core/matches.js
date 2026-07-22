@@ -1,7 +1,7 @@
 // Head-to-head match helpers — ported from app.js:1269-1298. All pure. Scoring
 // is server-authoritative (match_play); these only read the live match_state and
 // preview a send's value. `matchLive()` (which read globals) stays in the client.
-import { gradeD } from './grades.js';
+import { ladderDamage } from './battle.js';
 
 // backend discipline → the climbs.discipline values that count in the match.
 export const MATCH_DISCS = {
@@ -14,22 +14,15 @@ export const MATCH_DISCS = {
 export const matchMySide = (s) => (s.i_am === 'challenger' ? s.challenger : s.opponent);
 export const matchTheirSide = (s) => (s.i_am === 'challenger' ? s.opponent : s.challenger);
 
-// What a SEND of this grade is worth for me right now: max(0, atPar + round(D −
-// parD)). `state` is the live match_state (or null). Null when it wouldn't count.
-// Parameterized from app.js:1280 (the web read matchLive()/mdState globals).
+// Battle mode: the damage a SEND of this grade would deal — the raw grade ladder,
+// no handicap (mirrors the server). `state` is the live match_state (or null).
+// Null when the climb wouldn't count (wrong discipline / no live match).
 export function matchPointsFor(state, discipline, grade) {
   const live = state && state.status === 'active' && state.rules && state.rules.discipline != null ? state : null;
   if (!live) return null;
   const discs = MATCH_DISCS[live.rules.discipline];
   if (!discs || !discs.includes(discipline)) return null;
-  const d = gradeD(discipline, grade);
-  if (d == null) return null;
-  const me = matchMySide(live);
-  // Unranked boulder: the V-number IS your score (V5 = 5), so at-par is 0.
-  const atPar = (live.rules.ranked === false && live.rules.discipline === 'boulder') ? 0 : 3;
-  // No par yet: the engine seeds par from your first send, so it scores at-par.
-  if (me.par_d == null) return atPar;
-  return Math.max(0, atPar + Math.round(d - me.par_d));
+  return ladderDamage(discipline, grade);
 }
 
 // A side's most recent counting climb as a phrase for the turn handoff:
