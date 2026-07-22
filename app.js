@@ -3608,127 +3608,95 @@
     const nm = pool[h % pool.length];
     return grade ? `${grade} · ${nm}` : nm;
   }
-  function battleHit(side, dmg, opts) {
+  // Lift a climber up the wall when THEY score. `side` is who climbed ('hero' =
+  // you, 'foe' = them). The re-render already set the rope/climber to the new
+  // height; we replay it from the pre-send level so it visibly rises, pop a
+  // "+gain", announce the move, and top out at the anchor. Reduced motion →
+  // no-op (the re-render already placed the climber; CSS kills the transition).
+  function climbRise(side, gain, opts) {
     opts = opts || {};
     if (!motionOK()) return;
-    const arena = $('.arena'); if (!arena) return;
-    const target = arena.querySelector('.arena-ava.' + side);
-    const attacker = arena.querySelector('.arena-ava.' + (side === 'foe' ? 'hero' : 'foe'));
-    const bar = arena.querySelector('.bt-hpbar[data-side="' + side + '"] > span');
-    const hpFull = parseInt(arena.dataset.hpfull || '0', 10);
-    const ar = arena.getBoundingClientRect();
-    // Unit vector attacker → target, so the strike travels along the line
-    // between the two fighters (hero below → foe above, and vice-versa).
-    let ux = 0, uy = side === 'foe' ? -1 : 1, tr = null, atr = null;
-    if (target) tr = target.getBoundingClientRect();
-    if (attacker) atr = attacker.getBoundingClientRect();
-    if (tr && atr) {
-      const dx = (tr.left + tr.width / 2) - (atr.left + atr.width / 2);
-      const dy = (tr.top + tr.height / 2) - (atr.top + atr.height / 2);
-      const len = Math.hypot(dx, dy) || 1; ux = dx / len; uy = dy / len;
-    }
-    // ---- MISS: attacker lunges and whiffs, arena dims + stumbles ----
+    const wall = $('.wall'); if (!wall) return;
+    const lane = wall.querySelector('.climb-lane.' + (side === 'hero' ? 'me' : 'foe'));
+    if (!lane) return;
+    const climber = lane.querySelector('.cl-climber');
+    const rope = lane.querySelector('.cl-rope');
+    const summit = parseInt(wall.dataset.summit || '0', 10);
+    const wr = wall.getBoundingClientRect();
+    const clientX = climber ? (() => { const r = climber.getBoundingClientRect(); return r.left - wr.left + r.width / 2; })() : 0;
+    // ---- SLIP (a fall): the climber swings off, gains nothing ----
     if (opts.miss) {
-      if (target) {
-        const dn = document.createElement('div'); dn.className = 'bt-dmg miss'; dn.textContent = 'MISS';
-        dn.style.left = (tr.left - ar.left + tr.width / 2 - 18) + 'px'; dn.style.top = (tr.top - ar.top + 4) + 'px';
-        arena.appendChild(dn);
-        mAnim(dn, { transform: ['translateY(2px) scale(.6)', 'translateY(-6px) scale(1.1)', 'translateY(-30px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.9, easing: [0.2, 1, 0.4, 1] });
+      if (climber) {
+        climber.classList.add('cl-slip'); maTimers.push(setTimeout(() => climber.classList.remove('cl-slip'), 640));
+        const r = climber.getBoundingClientRect();
+        const dn = document.createElement('div'); dn.className = 'bt-dmg miss'; dn.textContent = 'SLIP';
+        dn.style.left = (clientX - 18) + 'px'; dn.style.top = (r.top - wr.top - 6) + 'px';
+        wall.appendChild(dn);
+        mAnim(dn, { transform: ['translateY(0) scale(.6)', 'translateY(8px) scale(1)', 'translateY(22px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.9, easing: 'ease-out' });
         maTimers.push(setTimeout(() => dn.remove(), 950));
       }
-      arena.classList.add('bt-dim', 'bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-dim', 'bt-shake'), 470));
-      if (attacker) { attacker.classList.add('bt-miss'); maTimers.push(setTimeout(() => attacker.classList.remove('bt-miss'), 520)); }
       return;
     }
-    // ---- HIT: a real strike sequence — windup → lunge → impact hold → recoil ----
-    // Timings are chosen so the attacker is AT the target when IMPACT fires and
-    // then HOLDS there briefly (a hitstop) — that hold is what makes a strike
-    // read as a strike instead of a number ticking.
-    const big = dmg >= 10;
-    const LUNGE_MS = 560, IMPACT = 250; // reach the foe at 250ms, hold, then recover
-    // Freeze the HP bar at its PRE-damage level now, so it doesn't show the
-    // drained value during the wind-up; it drains at impact below.
-    let drainTo = null;
-    if (bar && hpFull) {
-      drainTo = parseFloat(bar.style.width) || 0; // post-damage width from the render
-      const preePct = Math.min(100, drainTo + 100 * dmg / hpFull);
-      bar.style.transition = 'none'; bar.style.width = preePct + '%'; void bar.offsetWidth;
-    }
-    // Move-name banner announces from arena-centre (clear of the turn pill).
+    const big = gain >= 10;
+    // Freeze the rope + climber at the PRE-send height, then let them rise to the
+    // rendered (new) height — so the ascent visibly plays out. Height is driven
+    // by the lane's --h var (climber bottom + rope height are calc()'d off it).
+    const newPct = parseFloat(lane.style.getPropertyValue('--h')) || 0;
+    const risePct = summit ? 100 * gain / summit : 0;
+    const oldPct = Math.max(0, newPct - risePct);
+    if (rope) rope.style.transition = 'none';
+    if (climber) climber.style.transition = 'none';
+    lane.style.setProperty('--h', oldPct);
+    if (climber) void climber.offsetWidth; // reflow so the rise animates from the old level
+    if (rope) rope.style.transition = '';
+    if (climber) climber.style.transition = '';
+    requestAnimationFrame(() => { lane.style.setProperty('--h', newPct); });
+    // The climber hops as it pulls onto the next hold.
+    if (climber) mAnim(climber, { transform: ['translateY(6px) scale(1)', `translateY(${big ? -12 : -8}px) scale(1.08)`, 'translateY(0) scale(1)'] }, { duration: 0.5, easing: [0.3, 1.3, 0.4, 1] });
+    // Move-name banner announces from wall-centre.
     {
       const mv = document.createElement('div'); mv.className = 'bt-move' + (big ? ' big' : '');
-      mv.textContent = battleMove(opts.grade, dmg);
-      mv.style.top = (ar.height * 0.46 + (side === 'foe' ? 20 : -34)) + 'px';
-      arena.appendChild(mv);
+      mv.textContent = battleMove(opts.grade, gain);
+      mv.style.top = (wr.height * 0.5 + (side === 'hero' ? 6 : -30)) + 'px';
+      wall.appendChild(mv);
       const half = mv.offsetWidth / 2 + 6;
-      mv.style.left = Math.max(half, Math.min(ar.width - half, ar.width / 2)) + 'px';
+      mv.style.left = Math.max(half, Math.min(wr.width - half, wr.width / 2)) + 'px';
       mAnim(mv, { opacity: [0, 1, 1, 0], transform: ['translate(-50%,8px) scale(.85)', 'translate(-50%,-2px) scale(1)', 'translate(-50%,-4px) scale(1)', 'translate(-50%,-12px) scale(.95)'] }, { duration: 1.0, easing: 'ease-out' });
       maTimers.push(setTimeout(() => mv.remove(), 1050));
     }
-    // Attacker: small wind-up (pull back) → commit a big lunge into the target →
-    // HOLD at contact (hitstop) → spring home. The doubled peak keyframe = hold.
-    if (attacker) {
-      const L = big ? 46 : 36;
-      mAnim(attacker, { transform: [
-        'translate(0,0)',
-        `translate(${-ux * 11}px,${-uy * 11}px)`,        // wind-up
-        `translate(${ux * L}px,${uy * L}px) scale(1.07)`, // reach the foe
-        `translate(${ux * L}px,${uy * L}px) scale(1.07)`, // hold (hitstop)
-        'translate(0,0)'                                   // recover
-      ] }, { duration: LUNGE_MS / 1000, easing: 'ease-out', offset: [0, 0.16, 0.45, 0.6, 1] });
+    // "+gain" floats up beside the climber; a chalk spark where they grab on.
+    if (climber) {
+      const r = climber.getBoundingClientRect();
+      const cy = r.top - wr.top + r.height / 2;
+      const sp = document.createElement('div'); sp.className = 'bt-spark' + (big ? ' big' : '');
+      sp.style.left = clientX + 'px'; sp.style.top = cy + 'px'; wall.appendChild(sp);
+      mAnim(sp, { opacity: [1, 1, 0], transform: ['translate(-50%,-50%) scale(.2) rotate(0deg)', 'translate(-50%,-50%) scale(1.25) rotate(30deg)', 'translate(-50%,-50%) scale(1.5) rotate(50deg)'] }, { duration: 0.44, easing: 'ease-out' });
+      maTimers.push(setTimeout(() => sp.remove(), 480));
+      const dn = document.createElement('div'); dn.className = 'bt-dmg gain' + (big ? ' crit' : '');
+      dn.textContent = '+' + gain;
+      dn.style.left = (clientX + 20) + 'px'; dn.style.top = (cy - 14) + 'px'; wall.appendChild(dn);
+      mAnim(dn, { transform: ['translateY(8px) scale(.6)', 'translateY(-4px) scale(1.15)', 'translateY(-34px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.95, easing: [0.2, 1, 0.4, 1] });
+      maTimers.push(setTimeout(() => dn.remove(), 1000));
     }
-    // Impact beat, fired when the attacker reaches the target.
-    maTimers.push(setTimeout(() => {
-      if (target) {
-        const tr2 = target.getBoundingClientRect();
-        // Contact point: the target's edge facing the attacker.
-        const cx = tr2.left - ar.left + tr2.width / 2 - ux * tr2.width * 0.42;
-        const cy = tr2.top - ar.top + tr2.height / 2 - uy * tr2.height * 0.42;
-        const sp = document.createElement('div'); sp.className = 'bt-spark' + (big ? ' big' : '');
-        sp.style.left = cx + 'px'; sp.style.top = cy + 'px';
-        arena.appendChild(sp);
-        mAnim(sp, { opacity: [1, 1, 0], transform: ['translate(-50%,-50%) scale(.2) rotate(0deg)', 'translate(-50%,-50%) scale(1.3) rotate(35deg)', 'translate(-50%,-50%) scale(1.6) rotate(55deg)'] }, { duration: 0.44, easing: 'ease-out' });
-        maTimers.push(setTimeout(() => sp.remove(), 480));
-        // Target knocks back hard along the strike line + squashes, holds the
-        // recoil pose, then settles — reads as taking the hit.
-        const K = big ? 17 : 11;
-        mAnim(target, { transform: [
-          'translate(0,0) scale(1,1)',
-          `translate(${ux * K}px,${uy * K}px) scale(1.12,.86)`, // squash on impact
-          `translate(${ux * K * 0.7}px,${uy * K * 0.7}px) scale(1,1)`,
-          'translate(0,0) scale(1,1)'
-        ] }, { duration: 0.6, easing: [0.2, 0.9, 0.3, 1], offset: [0, 0.16, 0.4, 1] });
-        // Damage number pops at the contact point.
-        const dn = document.createElement('div'); dn.className = 'bt-dmg' + (big ? ' crit' : '');
-        dn.textContent = '-' + dmg;
-        dn.style.left = (cx - 18) + 'px'; dn.style.top = (cy - 18) + 'px';
-        arena.appendChild(dn);
-        mAnim(dn, { transform: ['translateY(2px) scale(.6)', 'translateY(-6px) scale(1.15)', 'translateY(-36px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.95, easing: [0.2, 1, 0.4, 1] });
-        maTimers.push(setTimeout(() => dn.remove(), 1000));
-      }
-      // Now drain the bar from its held pre-damage level down to the new value.
-      if (bar && hpFull && drainTo != null) { bar.style.transition = ''; requestAnimationFrame(() => { bar.style.width = drainTo + '%'; }); }
-      arena.classList.add('bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-shake'), big ? 420 : 300));
-    }, IMPACT));
-    if (!opts.ko) return;
-    // KO payoff is delayed to land right after the finishing strike connects.
-    maTimers.push(setTimeout(() => battleKO(arena, side), IMPACT + 90));
+    if (big) { wall.classList.add('bt-shake'); maTimers.push(setTimeout(() => wall.classList.remove('bt-shake'), 360)); }
+    if (opts.top) maTimers.push(setTimeout(() => climbTop(side), 320));
   }
-  // Knockout payoff: white flash + hard shake + a stamped "K.O.!" + the faint,
-  // fired right after the finishing strike connects.
-  function battleKO(arena, side) {
-    const target = arena.querySelector('.arena-ava.' + side);
-    arena.classList.add('bt-shake', 'bt-flash');
-    maTimers.push(setTimeout(() => arena.classList.remove('bt-shake', 'bt-flash'), 540));
-    const ko = document.createElement('div'); ko.className = 'bt-ko'; ko.innerHTML = '<span>K.O.!</span>';
-    arena.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 950));
-    if (target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 260));
-    // My knockout (I emptied the foe's bar) → a burst of confetti to celebrate.
-    if (side === 'foe') {
+  // Top-out payoff: white flash + shake + a stamped "TOP OUT!" + confetti when
+  // it's you, fired as the climber pulls over the anchor.
+  function climbTop(side) {
+    const wall = $('.wall'); if (!wall) return;
+    const lane = wall.querySelector('.climb-lane.' + (side === 'hero' ? 'me' : 'foe'));
+    wall.classList.add('bt-shake', 'bt-flash');
+    maTimers.push(setTimeout(() => wall.classList.remove('bt-shake', 'bt-flash'), 540));
+    const ko = document.createElement('div'); ko.className = 'bt-ko top'; ko.innerHTML = '<span>TOP OUT!</span>';
+    wall.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 1050));
+    if (lane) lane.classList.add('topped');
+    // Your top-out → a burst of confetti to celebrate.
+    if (side === 'hero') {
       const burst = document.createElement('div'); burst.className = 'bt-burst';
       const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
       for (let i = 0; i < 20; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
-      arena.appendChild(burst);
+      wall.appendChild(burst);
       [...burst.children].forEach((it, i) => { const ang = (i / 20) * Math.PI * 2, dist = 58 + (i % 4) * 22;
         mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.15, easing: [0.2, 0.7, 0.3, 1] }); });
       maTimers.push(setTimeout(() => burst.remove(), 1250));
@@ -3766,46 +3734,50 @@
     if (s.practice) html += `<div class="h2h-practice">🤖 Practice SendOff — the challenger bot fights on its own. Doesn’t affect your Send Score.</div>`;
 
     if (arena) {
-      // ---- monster-battle arena: two facing climbers, each with an HP bar ----
-      // Your damage (me.score) drains the FOE's bar; their damage drains yours.
-      const hpOf = (foeDmg) => Math.max(0, hpFull - foeDmg);
-      const plate = (p, isMe, foeDmg) => {
-        const hp = hpOf(foeDmg), pct = hpFull ? Math.round(100 * hp / hpFull) : 0;
-        const tone = pct > 50 ? 'hp-hi' : pct > 20 ? 'hp-mid' : 'hp-lo';
-        const used = p.counted != null ? Math.min(p.counted, rules.best_n) : 0;
-        return `<div class="bt-plate ${isMe ? 'me' : ''}">
-          <div class="bt-nm">${escapeHTML(p.name)}${isMe ? ' (you)' : ''}<span class="bt-lv">SS ${p.elo != null ? p.elo : '—'}</span></div>
-          <div class="bt-hpbar ${tone}" data-side="${isMe ? 'hero' : 'foe'}"><span style="width:${pct}%"></span></div>
-          <div class="bt-hprow"><span class="bt-hp" data-side="${isMe ? 'hero' : 'foe'}">${hp}/${hpFull}</span><span class="bt-moves">${used}/${rules.best_n} ${noun}</span></div>
+      // ---- The Wall: a race up to the anchor. Each send lifts YOUR OWN climber
+      // by its grade value (points = height climbed); first to the anchor
+      // (best_n × 8) tops out, otherwise the higher climber wins at the bell.
+      // Same scoring as before — just shown as an ascent, not a health bar.
+      const summit = hpFull; // the anchor height = best_n × 8
+      const pctOf = (pts) => summit ? Math.min(100, Math.round(100 * (pts || 0) / summit)) : 0;
+      const firstNm = (nm) => escapeHTML((nm || '').split(' ')[0]);
+      const liveTurn = !resolved && s.status === 'active';
+      const lane = (p, isMe) => {
+        const pts = p.score || 0, pct = pctOf(pts);
+        const turnCls = liveTurn && ((isMe && myTurn) || (!isMe && s.turn && !myTurn && !myFull)) ? ' is-turn' : '';
+        const topped = summit && pts >= summit;
+        return `<div class="climb-lane ${isMe ? 'me' : 'foe'}${turnCls}${topped ? ' topped' : ''}" data-side="${isMe ? 'hero' : 'foe'}" style="--h:${pct}">
+          <div class="cl-head">${firstNm(p.name)}${isMe ? ' (you)' : ''}<span class="cl-ss">SS ${p.elo != null ? p.elo : '—'}</span></div>
+          <div class="cl-rope"></div>
+          <div class="cl-climber" data-side="${isMe ? 'hero' : 'foe'}">
+            <span class="cl-pts">${pts}</span>
+            <span class="cl-ava">${avatarHTML(p.uid, p.name, 'md', p.avatar_v)}</span>
+          </div>
         </div>`;
       };
-      const liveTurn = !resolved && s.status === 'active';
-      const heroTurn = liveTurn && myTurn ? ' is-turn' : '';
-      const foeTurn = liveTurn && s.turn && !myTurn && !myFull ? ' is-turn' : '';
-      html += `<div class="arena" data-hpfull="${hpFull}">
-        <div class="arena-row foe">${plate(them, false, me.score)}<div class="arena-ava foe${foeTurn}" data-avaside="foe">${avatarHTML(them.uid, them.name, 'lg', them.avatar_v)}</div></div>
-        <div class="arena-row hero"><div class="arena-ava hero${heroTurn}" data-avaside="hero">${avatarHTML(me.uid, me.name, 'lg', me.avatar_v)}</div>${plate(me, true, them.score)}</div>
-        <div class="arena-vs">VS</div>
+      html += `<div class="wall" data-summit="${summit}">
+        <div class="wall-anchor"><span class="wa-tag">⚑ ANCHOR</span><span class="wa-tgt">reach ${summit} to top out</span></div>
+        <div class="wall-field">${lane(me, true)}${lane(them, false)}</div>
       </div>`;
 
-      // Narration text-box (retro dialog): result → out-of-moves → turn handoff.
-      const foeName = escapeHTML(them.name), foeFirst = escapeHTML((them.name || '').split(' ')[0]);
+      // Narration text-box: result → out-of-moves → turn handoff.
+      const foeName = escapeHTML(them.name), foeFirst = firstNm(them.name);
       if (resolved) {
         const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
         const iForfeited = s.forfeited_by && s.forfeited_by === me.uid;
         const theyForfeited = s.forfeited_by && s.forfeited_by === them.uid;
-        const resultText = s.status === 'abandoned' ? 'The SendOff fizzled — nobody landed a hit.'
-          : iForfeited ? 'You fled the battle.'
-          : theyForfeited ? `${foeName} fled the battle — you win! 🏆`
-          : r === 'won' ? `${foeName} fainted! You win! 🏆` : r === 'lost' ? `You fainted! ${foeName} wins.` : 'Draw — both climbers still standing.';
+        const resultText = s.status === 'abandoned' ? 'The SendOff fizzled — nobody left the ground.'
+          : iForfeited ? 'You backed off the wall.'
+          : theyForfeited ? `${foeName} backed off — you win! 🏆`
+          : r === 'won' ? `You climbed higher — you win! 🏔️` : r === 'lost' ? `${foeName} topped out ahead of you.` : 'Dead heat — matched to the hold.';
         html += `<div class="bt-narr ${r}">${resultText}</div>`;
         if (s.practice && s.status !== 'abandoned') html += `<div class="h2h-elochange">Practice — ${me.delta ? `would’ve been ${me.delta > 0 ? '+' : ''}${me.delta} Send Score, but ` : ''}your real score is untouched</div>`;
         else if (me.delta) html += `<div class="h2h-elochange" style="color:${me.delta > 0 ? 'var(--good)' : 'var(--danger)'}">${me.delta > 0 ? '+' : ''}${me.delta} Send Score · ${foeName} ${them.delta > 0 ? '+' : ''}${them.delta}</div>`;
         else if (unranked && s.status !== 'abandoned') html += `<div class="h2h-elochange">Unranked — no Send Score on the line</div>`;
       } else if (s.status === 'pending') {
-        html += `<div class="bt-narr">Waiting for ${foeName} to answer the challenge…</div>`;
+        html += `<div class="bt-narr">Waiting for ${foeName} to rope up…</div>`;
       } else if (myFull) {
-        html += `<div class="bt-narr">Out of moves — your ${rules.best_n} ${noun} are in. Hold on while ${foeFirst} finishes.</div>`;
+        html += `<div class="bt-narr">You’re tapped out — your ${rules.best_n} ${noun} are in. Hold on while ${foeFirst} keeps climbing.</div>`;
       } else {
         // Deterministic per-turn copy variety (stable for the render diff-guard).
         const turnIdx = (me.counted || 0) + (them.counted || 0);
@@ -3813,17 +3785,17 @@
         const l = them.last;
         let foeLast = '';
         if (l && l.grade) {
-          if (l.result === 'Project') foeLast = `${foeName} ${pick(['whiffed', 'blew', 'came off'])} ${escapeHTML(l.grade)} — no damage.`;
-          else { const v = l.points || 0, verb = v >= 10 ? pick(['CRUSHED', 'obliterated', 'demolished']) : v >= 6 ? pick(['nailed', 'stuck', 'powered up']) : pick(['sent', 'ticked', 'dispatched']); foeLast = `${foeName} ${verb} ${escapeHTML(l.grade)} for ${v}!`; }
+          if (l.result === 'Project') foeLast = `${foeName} ${pick(['slipped off', 'peeled off', 'came off'])} ${escapeHTML(l.grade)} — no gain.`;
+          else { const v = l.points || 0, verb = v >= 10 ? pick(['CRUSHED', 'raced up', 'flew up']) : v >= 6 ? pick(['sent', 'stuck', 'powered up']) : pick(['ticked', 'nabbed', 'clipped']); foeLast = `${foeName} ${verb} ${escapeHTML(l.grade)} for +${v}!`; }
         }
-        const prompts = ['⚔ Your move — hit back with a hard send!', '⚔ Your turn — send big to bite their HP!', '⚔ Fire back — harder grade, bigger hit!'];
+        const prompts = ['🧗 Your turn — send hard to climb higher!', '🧗 Your move — a harder grade lifts you more!', '🧗 Chalk up — reel in a big send!'];
         const line = myTurn ? (foeLast ? `${foeLast} ${pick(prompts)}` : pick(prompts)) : `${foeName} ${pick(['is eyeing the wall…', 'chalks up…', 'reads the next line…'])}`;
         html += `<div class="bt-narr ${myTurn ? 'mine' : ''}">${line}</div>`;
       }
-      // Rules cheat-sheet only before the first attack, then it gets out of the way.
+      // Rules cheat-sheet only before the first send, then it gets out of the way.
       if (!resolved && s.status === 'active' && (me.counted || 0) === 0 && (them.counted || 0) === 0) {
-        const scale = rules.discipline === 'boulder' ? 'a V0 hits for 1, each grade up hits harder (V8 → 9)' : '5.7 hits for 1, each grade up hits harder (5.12a → 12)';
-        html += `<div class="h2h-guide">Every send is an attack — ${scale}. A fall misses. Empty your foe’s ${hpFull} HP for a knockout, or deal the most damage before time runs out.</div>`;
+        const scale = rules.discipline === 'boulder' ? 'a V0 lifts you 1, each grade up lifts more (V8 → 9)' : '5.7 lifts you 1, each grade up lifts more (5.12a → 12)';
+        html += `<div class="h2h-guide">Every send hauls you up the wall — ${scale}. A fall stays put. First to the ${summit}-point anchor tops out, or climb highest before time runs out.</div>`;
       }
     } else {
       // ---- legacy scoreboard (null-discipline matches) ----
@@ -3848,7 +3820,7 @@
         ? `<button class="btn primary" id="h2h-log" disabled>Limit reached · ${rules.best_n} of ${rules.best_n}</button>`
         : (parMode && s.turn && !myTurn && !me.ended)
           ? `<button class="btn primary" id="h2h-log" disabled>${escapeHTML(them.name)}’s turn…</button>`
-          : arena ? `<button class="btn primary" id="h2h-log">⚔ Attack</button>` : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
+          : arena ? `<button class="btn primary" id="h2h-log">🧗 Send</button>` : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
       // Second action: forfeit (quit now, take the loss, no waiting on them) —
       // but if you've already used all your slots there's nothing to give up, so
       // it's just "waiting for them to finish". A tap arms an inline confirm.
@@ -3874,17 +3846,18 @@
     h2hLastHtml = html;
     body.innerHTML = html;
     sweepAvatars();
-    // Battle FX: if a side's damage rose since the last poll, play the hit (or a
-    // whiff when a slot was used but nothing scored). KO faints at an empty bar.
+    // Climb FX: if a side's points rose since the last poll, lift THEIR OWN
+    // climber up the wall (or a slip when a slot was used but nothing counted).
+    // Reaching the anchor tops out.
     if (arena && h2hPrev && h2hPrev.id === s.id && h2hPrev.status === 'active') {
       const pMe = h2hPrev.i_am === 'challenger' ? h2hPrev.challenger : h2hPrev.opponent;
       const pThem = h2hPrev.i_am === 'challenger' ? h2hPrev.opponent : h2hPrev.challenger;
-      const dFoe = (me.score || 0) - (pMe.score || 0), cFoe = (me.counted || 0) - (pMe.counted || 0);
-      const dHero = (them.score || 0) - (pThem.score || 0), cHero = (them.counted || 0) - (pThem.counted || 0);
-      if (dFoe > 0) battleHit('foe', dFoe, { ko: me.score >= hpFull, grade: me.last && me.last.grade });
-      else if (cFoe > 0) battleHit('foe', 0, { miss: true });
-      if (dHero > 0) battleHit('hero', dHero, { ko: them.score >= hpFull, grade: them.last && them.last.grade });
-      else if (cHero > 0) battleHit('hero', 0, { miss: true });
+      const dMe = (me.score || 0) - (pMe.score || 0), cMe = (me.counted || 0) - (pMe.counted || 0);
+      const dThem = (them.score || 0) - (pThem.score || 0), cThem = (them.counted || 0) - (pThem.counted || 0);
+      if (dMe > 0) climbRise('hero', dMe, { top: me.score >= hpFull, grade: me.last && me.last.grade });
+      else if (cMe > 0) climbRise('hero', 0, { miss: true });
+      if (dThem > 0) climbRise('foe', dThem, { top: them.score >= hpFull, grade: them.last && them.last.grade });
+      else if (cThem > 0) climbRise('foe', 0, { miss: true });
     }
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
     // Forfeit is a two-tap confirm (arm → confirm), re-rendered from the stored
@@ -3897,7 +3870,7 @@
 
   // Test hook: drive the battle arena / animations with mock state (headless
   // Playwright can't reach an authed match_state). Guarded, no side effects.
-  if (typeof window !== 'undefined') window.__battle = { renderH2H, get playMatchAnim() { return playMatchAnim; }, get battleHit() { return typeof battleHit === 'function' ? battleHit : null; } };
+  if (typeof window !== 'undefined') window.__battle = { renderH2H, get playMatchAnim() { return playMatchAnim; }, get climbRise() { return typeof climbRise === 'function' ? climbRise : null; } };
 
   /* ---------------- Persistent active-match dock ----------------
      A docked bar (music-player style) shown on Home + Rock Climbing while a
@@ -4030,18 +4003,19 @@
     const dockLast = matchLastLine(them);
     const turnHint = parMode && s.turn ? (me.can_log === true ? (dockLast ? `${them.name} ${dockLast} · your turn` : 'your turn') : `${them.name}’s turn`) : '';
     const meta = [prog, turnHint, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
-    // Arena matches (best_n → HP pool) show two mini HP bars + the last hit;
-    // legacy null-discipline rows keep the old "X vs Y" score line.
+    // Arena matches (best_n → anchor height) show two mini ascent bars — each
+    // fills with that climber's OWN points toward the top; leader is greener.
+    // Legacy null-discipline rows keep the old "X vs Y" score line.
     const arena = parMode && rules.best_n != null && me.score != null;
     if (arena) {
-      const hpFull = (rules.best_n || 0) * 8;
-      const foePct = Math.max(0, Math.round(100 * (hpFull - me.score) / hpFull));
-      const myPct = Math.max(0, Math.round(100 * (hpFull - them.score) / hpFull));
-      const tone = (p) => p > 50 ? 'hp-hi' : p > 20 ? 'hp-mid' : 'hp-lo';
+      const summit = (rules.best_n || 0) * 8;
+      const myPct = Math.min(100, Math.round(100 * (me.score || 0) / summit));
+      const foePct = Math.min(100, Math.round(100 * (them.score || 0) / summit));
+      const tone = (p) => p > 66 ? 'hp-hi' : p > 33 ? 'hp-mid' : 'hp-lo';
       c.innerHTML = `<span class="md-ico"><svg class="ico"><use href="#i-bolt"/></svg></span>
         <span class="md-body">
-          <span class="md-hprow"><span class="md-hpnm">You</span><span class="md-mini ${tone(myPct)}"><span style="width:${myPct}%"></span></span></span>
-          <span class="md-hprow"><span class="md-hpnm">${escapeHTML((them.name || '').split(' ')[0])}</span><span class="md-mini ${tone(foePct)}"><span style="width:${foePct}%"></span></span></span>
+          <span class="md-hprow"><span class="md-hpnm">You</span><span class="md-mini asc ${tone(myPct)}"><span style="width:${myPct}%"></span></span></span>
+          <span class="md-hprow"><span class="md-hpnm">${escapeHTML((them.name || '').split(' ')[0])}</span><span class="md-mini asc ${tone(foePct)}"><span style="width:${foePct}%"></span></span></span>
           <span class="md-line2">${escapeHTML(meta)}${mdStale ? ' <span class="md-stale">· offline</span>' : ''}</span>
         </span>`;
     } else {
