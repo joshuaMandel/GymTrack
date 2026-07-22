@@ -3034,7 +3034,7 @@
 
   // Called from refresh(): (re)load friends + feed and ensure a subscription.
   function initFriends() {
-    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; matchesLoaded = false; isAdmin = false; const ae = $('#admin-entry'); if (ae) ae.hidden = true; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchHub(); renderMatchDock(); return; }
+    if (!cloudOn()) { unsubscribeRealtime(); stopFeedPoll(); friends = { me: null, list: [], requests: [] }; feedItems = []; feedStatus = 'idle'; matches = { incoming: [], outgoing: [], active: null, history: [] }; matchAdj = { boulder: 0, rope: 0 }; matchesLoaded = false; isAdmin = false; canPractice = false; const ae = $('#admin-entry'); if (ae) ae.hidden = true; renderFriendsScreen(); renderFeeds(); renderMatchesPanel(); renderMatchHub(); renderMatchDock(); return; }
     if (!matchesLoaded) renderMatchHub(); // first load → hub skeleton until matches arrive
     loadFriends();
     loadFeed();
@@ -3212,18 +3212,22 @@
      admin_is(); this just hides the entry and renders the list + delete for
      the owner. A non-admin who forces the view is bounced back to Home.
      ====================================================================== */
-  let isAdmin = false, adminPage = 0, adminQ = '', adminRows = [], adminDelUid = null, adminSearchT = null;
+  let isAdmin = false, canPractice = false, adminPage = 0, adminQ = '', adminRows = [], adminDelUid = null, adminSearchT = null;
   const ADMIN_PAGE = 20;
   // joined / last_active come back as full timestamptz strings (not date-only),
   // so format them directly rather than via fmtDate (which assumes YYYY-MM-DD).
   const adminDate = (ts) => { const d = new Date(ts); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); };
   async function loadAdminFlag() {
-    if (!cloudOn()) { isAdmin = false; const e = $('#admin-entry'); if (e) e.hidden = true; return; }
+    if (!cloudOn()) { isAdmin = false; canPractice = false; const e = $('#admin-entry'); if (e) e.hidden = true; return; }
     try { const { data, error } = await sb.rpc('admin_is'); isAdmin = !error && data === true; }
     catch (e) { isAdmin = false; }
+    // Practice access is a strict subset of admin (owner + allowlist), so an
+    // allowlisted non-admin gets the Practice button but no admin screen.
+    try { const { data, error } = await sb.rpc('practice_is'); canPractice = !error && data === true; }
+    catch (e) { canPractice = isAdmin; }
     const entry = $('#admin-entry'); if (entry) entry.hidden = !isAdmin;
     if (!isAdmin && $('#view-admin') && $('#view-admin').classList.contains('is-active')) showView('dashboard');
-    if (typeof renderMatchHub === 'function') renderMatchHub(); // reveal the owner-only Practice button
+    if (typeof renderMatchHub === 'function') renderMatchHub(); // reveal the Practice button
   }
   async function renderAdmin() {
     const list = $('#admin-list'); if (!list) return;
@@ -4068,8 +4072,8 @@
     const els = [$('#match-hub-dash'), $('#match-hub-climb')].filter(Boolean);
     if (!els.length) return;
     if (!CONFIGURED || !cloudOn()) { els.forEach((e) => { e.hidden = true; e.innerHTML = ''; e.__hubHtml = ''; }); renderMatchDock(); return; }
-    // Owner-only: a solo practice match against the bot, to verify the flow.
-    const practiceBtn = isAdmin ? '<button type="button" class="btn ghost sm" data-hubpractice>🤖 Practice</button>' : '';
+    // Owner + practice allowlist: a solo practice match against the bot.
+    const practiceBtn = canPractice ? '<button type="button" class="btn ghost sm" data-hubpractice>🤖 Practice</button>' : '';
     let html = '';
     if (!matchesLoaded) {
       html = `<div class="hub-card hub-skel" aria-hidden="true"><span class="skel skel-ico"></span><span class="skel-lines"><span class="skel skel-line"></span><span class="skel skel-line short"></span></span><span class="skel skel-btn"></span></div>`;
