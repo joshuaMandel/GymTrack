@@ -3623,8 +3623,15 @@
       bar.style.transition = ''; requestAnimationFrame(() => { bar.style.width = newPct + '%'; });
     }
     if (target) { target.classList.add('bt-hit'); maTimers.push(setTimeout(() => target.classList.remove('bt-hit'), 340)); }
-    if (dmg >= 10) { arena.classList.add('bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-shake'), 360)); }
-    if (opts.ko && target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 260));
+    if (dmg >= 10 && !opts.ko) { arena.classList.add('bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-shake'), 360)); }
+    if (opts.ko) {
+      // Knockout payoff: white flash + hard shake + a stamped "K.O.!" + the faint.
+      arena.classList.add('bt-shake', 'bt-flash');
+      maTimers.push(setTimeout(() => arena.classList.remove('bt-shake', 'bt-flash'), 540));
+      const ko = document.createElement('div'); ko.className = 'bt-ko'; ko.innerHTML = '<span>K.O.!</span>';
+      arena.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 950));
+      if (target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 300));
+    }
   }
 
   function renderH2H(s) {
@@ -3674,6 +3681,7 @@
       html += `<div class="arena" data-hpfull="${hpFull}">
         <div class="arena-row foe">${plate(them, false, me.score)}<div class="arena-ava foe" data-avaside="foe">${avatarHTML(them.uid, them.name, 'lg', them.avatar_v)}</div></div>
         <div class="arena-row hero"><div class="arena-ava hero" data-avaside="hero">${avatarHTML(me.uid, me.name, 'lg', me.avatar_v)}</div>${plate(me, true, them.score)}</div>
+        <div class="arena-vs">VS</div>
       </div>`;
 
       // Narration text-box (retro dialog): result → out-of-moves → turn handoff.
@@ -3696,15 +3704,20 @@
         html += `<div class="bt-narr">Out of moves — your ${rules.best_n} ${noun} are in. Hold on while ${foeFirst} finishes.</div>`;
       } else {
         const l = them.last;
-        const foeLast = l && l.grade ? (l.result === 'Project' ? `${foeName} whiffed ${escapeHTML(l.grade)}` : `${foeName} hit ${escapeHTML(l.grade)} for ${l.points}`) : '';
+        let foeLast = '';
+        if (l && l.grade) {
+          if (l.result === 'Project') foeLast = `${foeName} whiffed ${escapeHTML(l.grade)} — no damage.`;
+          else { const v = l.points || 0, verb = v >= 10 ? 'CRUSHED' : v >= 6 ? 'nailed' : 'sent'; foeLast = `${foeName} ${verb} ${escapeHTML(l.grade)} for ${v}!`; }
+        }
         const line = myTurn
-          ? (foeLast ? `${foeLast}. Your move — send to strike back!` : 'Your move — log a send to attack!')
-          : `${foeName} is sizing up a route…`;
+          ? (foeLast ? `${foeLast} ⚔ Your move — hit back with a hard send!` : '⚔ Your move — log a send to attack!')
+          : `${foeName} is eyeing the wall…`;
         html += `<div class="bt-narr ${myTurn ? 'mine' : ''}">${line}</div>`;
       }
-      if (!resolved && s.status !== 'pending') {
-        const scale = rules.discipline === 'boulder' ? 'a V0 hits for 1, and every grade up hits harder (V8 → 9)' : '5.7 hits for 1, and every grade up hits harder (5.12a → 12)';
-        html += `<div class="h2h-guide">Every send is an attack — ${scale}. A fall misses. Empty your foe’s ${hpFull} HP for a knockout, or deal the most damage before the window closes.</div>`;
+      // Rules cheat-sheet only before the first attack, then it gets out of the way.
+      if (!resolved && s.status === 'active' && (me.counted || 0) === 0 && (them.counted || 0) === 0) {
+        const scale = rules.discipline === 'boulder' ? 'a V0 hits for 1, each grade up hits harder (V8 → 9)' : '5.7 hits for 1, each grade up hits harder (5.12a → 12)';
+        html += `<div class="h2h-guide">Every send is an attack — ${scale}. A fall misses. Empty your foe’s ${hpFull} HP for a knockout, or deal the most damage before time runs out.</div>`;
       }
     } else {
       // ---- legacy scoreboard (null-discipline matches) ----
