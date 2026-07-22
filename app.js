@@ -3497,7 +3497,7 @@
       ? 'your grade is your score: V0 is worth 1, V5 is 6, V8 is 9, and so on up'
       : 'your grade is your score: 5.7 is worth 1 and each letter harder is worth 1 more (5.12a is 12)';
     const sum = $('#mc-summary');
-    if (sum) sum.textContent = `${intro} Each send lifts you up the wall — ${ladder}. A flash counts the same as a send; a fall scores 0. First to the top or highest when time runs out wins. No ratings, nothing on the line but bragging rights.`;
+    if (sum) sum.textContent = `${intro} You each get ${mcState.length} rounds. Each send lifts you up the wall — ${ladder}. A flash counts the same as a send; a fall scores 0. Whoever’s highest once all rounds are climbed wins. No ratings, nothing on the line but bragging rights.`;
   }
   async function sendMatchChallenge() {
     const st = $('#mc-status'); const btn = $('#mc-send');
@@ -3674,28 +3674,19 @@
       maTimers.push(setTimeout(() => dn.remove(), 1000));
     }
     if (big) { wall.classList.add('bt-shake'); maTimers.push(setTimeout(() => wall.classList.remove('bt-shake'), 360)); }
-    if (opts.top) maTimers.push(setTimeout(() => climbTop(side), 320));
   }
-  // Top-out payoff: white flash + shake + a stamped "TOP OUT!" + confetti when
-  // it's you, fired as the climber pulls over the anchor.
-  function climbTop(side) {
+  // Win payoff: a burst of confetti on the wall when the match resolves in your
+  // favour (fired from renderH2H on the active → resolved-win transition).
+  function climbCelebrate() {
+    if (!motionOK()) return;
     const wall = $('.wall'); if (!wall) return;
-    const lane = wall.querySelector('.climb-lane.' + (side === 'hero' ? 'me' : 'foe'));
-    wall.classList.add('bt-shake', 'bt-flash');
-    maTimers.push(setTimeout(() => wall.classList.remove('bt-shake', 'bt-flash'), 540));
-    const ko = document.createElement('div'); ko.className = 'bt-ko top'; ko.innerHTML = '<span>TOP OUT!</span>';
-    wall.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 1050));
-    if (lane) lane.classList.add('topped');
-    // Your top-out → a burst of confetti to celebrate.
-    if (side === 'hero') {
-      const burst = document.createElement('div'); burst.className = 'bt-burst';
-      const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
-      for (let i = 0; i < 20; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
-      wall.appendChild(burst);
-      [...burst.children].forEach((it, i) => { const ang = (i / 20) * Math.PI * 2, dist = 58 + (i % 4) * 22;
-        mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.15, easing: [0.2, 0.7, 0.3, 1] }); });
-      maTimers.push(setTimeout(() => burst.remove(), 1250));
-    }
+    const burst = document.createElement('div'); burst.className = 'bt-burst';
+    const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
+    for (let i = 0; i < 24; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
+    wall.appendChild(burst);
+    [...burst.children].forEach((it, i) => { const ang = (i / 24) * Math.PI * 2, dist = 60 + (i % 4) * 24;
+      mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.2, easing: [0.2, 0.7, 0.3, 1] }); });
+    maTimers.push(setTimeout(() => burst.remove(), 1300));
   }
 
   function renderH2H(s) {
@@ -3716,30 +3707,33 @@
     // climbs no longer count toward the match.
     const myFull = !!(rules.best_n && me.counted != null && me.counted >= rules.best_n);
     const myTurn = me.can_log === true;
-    // Battle arena applies to every ruleset SendOff (a best_n → an HP pool of
-    // best_n × 8, mirroring core hpMax). Legacy null-discipline rows fall back
-    // to the old scoreboard.
+    // The Wall arena applies to every ruleset SendOff. Legacy null-discipline
+    // rows fall back to the old scoreboard.
     const arena = rules.best_n != null && me.score != null;
-    const hpFull = (rules.best_n || 0) * 8;
     // Rules banner — always visible so the agreed ruleset is unambiguous.
     let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}${s.practice ? ' · practice' : ''}</span></div>` : '';
     if (s.practice) html += `<div class="h2h-practice">🤖 Practice SendOff — the challenger bot fights on its own. Doesn’t affect your Send Score.</div>`;
 
     if (arena) {
       // ---- The Wall: a race up to the anchor. Each send lifts YOUR OWN climber
-      // by its grade value (points = height climbed); first to the anchor
-      // (best_n × 8) tops out, otherwise the higher climber wins at the bell.
-      // Same scoring as before — just shown as an ascent, not a health bar.
-      const summit = hpFull; // the anchor height = best_n × 8
+      // by its grade value (points = height climbed). It's a best-of-N ROUNDS
+      // race: each climber gets best_n turns, and whoever is HIGHER once the
+      // rounds are done wins — no points threshold, no clock. The wall's height
+      // is just a scale (best_n × 10) so climbers rise into it; reaching the top
+      // is not a win. Same scoring — the number is the truth, the wall shows it.
+      const rounds = rules.best_n || 0;
+      const summit = rounds * 10; // wall scale only (NOT a win threshold)
       const pctOf = (pts) => summit ? Math.min(100, Math.round(100 * (pts || 0) / summit)) : 0;
       const firstNm = (nm) => escapeHTML((nm || '').split(' ')[0]);
       const liveTurn = !resolved && s.status === 'active';
+      const leader = (me.score || 0) > (them.score || 0) ? 'hero' : (them.score || 0) > (me.score || 0) ? 'foe' : '';
       const lane = (p, isMe) => {
         const pts = p.score || 0, pct = pctOf(pts);
         const turnCls = liveTurn && ((isMe && myTurn) || (!isMe && s.turn && !myTurn && !myFull)) ? ' is-turn' : '';
-        const topped = summit && pts >= summit;
-        return `<div class="climb-lane ${isMe ? 'me' : 'foe'}${turnCls}${topped ? ' topped' : ''}" data-side="${isMe ? 'hero' : 'foe'}" style="--h:${pct}">
-          <div class="cl-head">${firstNm(p.name)}${isMe ? ' (you)' : ''}</div>
+        const used = p.counted != null ? Math.min(p.counted, rounds) : 0;
+        const ahead = leader === (isMe ? 'hero' : 'foe') ? ' ahead' : '';
+        return `<div class="climb-lane ${isMe ? 'me' : 'foe'}${turnCls}${ahead}" data-side="${isMe ? 'hero' : 'foe'}" style="--h:${pct}">
+          <div class="cl-head">${firstNm(p.name)}${isMe ? ' (you)' : ''}<span class="cl-rd">${used}/${rounds}</span></div>
           <div class="cl-rope"></div>
           <div class="cl-climber" data-side="${isMe ? 'hero' : 'foe'}">
             <span class="cl-pts">${pts}</span>
@@ -3748,7 +3742,7 @@
         </div>`;
       };
       html += `<div class="wall" data-summit="${summit}">
-        <div class="wall-anchor"><span class="wa-tag">⚑ ANCHOR</span><span class="wa-tgt">reach ${summit} to top out</span></div>
+        <div class="wall-anchor"><span class="wa-tag">⚑ BEST OF ${rounds}</span><span class="wa-tgt">highest climber wins</span></div>
         <div class="wall-field">${lane(me, true)}${lane(them, false)}</div>
       </div>`;
 
@@ -3761,7 +3755,7 @@
         const resultText = s.status === 'abandoned' ? 'The SendOff fizzled — nobody left the ground.'
           : iForfeited ? 'You backed off the wall.'
           : theyForfeited ? `${foeName} backed off — you win! 🏆`
-          : r === 'won' ? `You climbed higher — you win! 🏔️` : r === 'lost' ? `${foeName} topped out ahead of you.` : 'Dead heat — matched to the hold.';
+          : r === 'won' ? `You climbed higher — you win! 🏔️` : r === 'lost' ? `${foeName} climbed higher — they win.` : 'Dead heat — matched to the hold.';
         html += `<div class="bt-narr ${r}">${resultText}</div>`;
         // Final height each climber reached — the raw in-game score. No ratings.
         if (s.status !== 'abandoned') html += `<div class="h2h-elochange">Final: you ${me.score || 0} · ${foeName} ${them.score || 0}${s.practice ? ' · practice' : ''}</div>`;
@@ -3786,7 +3780,7 @@
       // Rules cheat-sheet only before the first send, then it gets out of the way.
       if (!resolved && s.status === 'active' && (me.counted || 0) === 0 && (them.counted || 0) === 0) {
         const scale = rules.discipline === 'boulder' ? 'a V0 lifts you 1, each grade up lifts more (V8 → 9)' : '5.7 lifts you 1, each grade up lifts more (5.12a → 12)';
-        html += `<div class="h2h-guide">Every send hauls you up the wall — ${scale}. A fall stays put. First to the ${summit}-point anchor tops out, or climb highest before time runs out.</div>`;
+        html += `<div class="h2h-guide">You each get ${rounds} rounds. Every send hauls you up the wall — ${scale}; a fall stays put. Whoever’s highest once all rounds are climbed wins.</div>`;
       }
     } else {
       // ---- legacy scoreboard (null-discipline matches) ----
@@ -3839,16 +3833,21 @@
     sweepAvatars();
     // Climb FX: if a side's points rose since the last poll, lift THEIR OWN
     // climber up the wall (or a slip when a slot was used but nothing counted).
-    // Reaching the anchor tops out.
     if (arena && h2hPrev && h2hPrev.id === s.id && h2hPrev.status === 'active') {
       const pMe = h2hPrev.i_am === 'challenger' ? h2hPrev.challenger : h2hPrev.opponent;
       const pThem = h2hPrev.i_am === 'challenger' ? h2hPrev.opponent : h2hPrev.challenger;
       const dMe = (me.score || 0) - (pMe.score || 0), cMe = (me.counted || 0) - (pMe.counted || 0);
       const dThem = (them.score || 0) - (pThem.score || 0), cThem = (them.counted || 0) - (pThem.counted || 0);
-      if (dMe > 0) climbRise('hero', dMe, { top: me.score >= hpFull, grade: me.last && me.last.grade });
+      if (dMe > 0) climbRise('hero', dMe, { grade: me.last && me.last.grade });
       else if (cMe > 0) climbRise('hero', 0, { miss: true });
-      if (dThem > 0) climbRise('foe', dThem, { top: them.score >= hpFull, grade: them.last && them.last.grade });
+      if (dThem > 0) climbRise('foe', dThem, { grade: them.last && them.last.grade });
       else if (cThem > 0) climbRise('foe', 0, { miss: true });
+    }
+    // Win payoff: when the match resolves in your favour (rounds all climbed,
+    // you're higher), celebrate with a confetti burst on the wall.
+    if (arena && resolved && s.winner && s.winner !== 'draw' && h2hPrev && h2hPrev.status === 'active'
+        && ((s.winner === 'challenger') === (s.i_am === 'challenger'))) {
+      climbCelebrate();
     }
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());
     // Forfeit is a two-tap confirm (arm → confirm), re-rendered from the stored
@@ -3993,13 +3992,13 @@
       : (me.counted != null ? `${me.counted} ${noun}` : '');
     const dockLast = matchLastLine(them);
     const turnHint = parMode && s.turn ? (me.can_log === true ? (dockLast ? `${them.name} ${dockLast} · your turn` : 'your turn') : `${them.name}’s turn`) : '';
-    const meta = [prog, turnHint, fmtRemaining(s.window_end)].filter(Boolean).join(' · ');
+    const meta = [prog, turnHint].filter(Boolean).join(' · ');
     // Arena matches (best_n → anchor height) show two mini ascent bars — each
     // fills with that climber's OWN points toward the top; leader is greener.
     // Legacy null-discipline rows keep the old "X vs Y" score line.
     const arena = parMode && rules.best_n != null && me.score != null;
     if (arena) {
-      const summit = (rules.best_n || 0) * 8;
+      const summit = (rules.best_n || 0) * 10;
       const myPct = Math.min(100, Math.round(100 * (me.score || 0) / summit));
       const foePct = Math.min(100, Math.round(100 * (them.score || 0) / summit));
       const tone = (p) => p > 66 ? 'hp-hi' : p > 33 ? 'hp-mid' : 'hp-lo';
@@ -4059,7 +4058,7 @@
       // (the opponent's-last-climb handoff lives on the full match screen + dock,
       // which have room). A long line here clips the avatars off the card edges.
       const turnHint = s && parMode && s.turn ? (myTurn ? 'your turn' : `${them.name}’s turn`) : '';
-      const meta = [prog, turnHint, s ? fmtRemaining(s.window_end) : ''].filter(Boolean).join(' · ') || 'syncing…';
+      const meta = [prog, turnHint].filter(Boolean).join(' · ') || 'syncing…';
       const fmtScore = (v) => parMode ? `${v}` : `${v > 0 ? '+' : ''}${v}`;
       const youScore = s ? `<b class="${sc(me.score)}">${fmtScore(me.score)}</b>` : '<b>—</b>';
       const themName = s ? escapeHTML(them.name) : escapeHTML(a.opponent_name);

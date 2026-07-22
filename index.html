@@ -17,8 +17,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
   <!-- Shown in the on-page build footer so you can tell when a new deploy lands -->
-  <meta name="build" content="2026-07-22e" />
-  <link rel="stylesheet" href="styles.css?v=2026-07-22e" />
+  <meta name="build" content="2026-07-22f" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-22f" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -1034,10 +1034,10 @@
   <!-- Motion (motion.dev) — vanilla animation engine, vendored same-origin and
        precached by the SW for offline. Loaded before app.js so window.Motion is
        ready when the app boots; app.js degrades gracefully if it's ever absent. -->
-  <script src="vendor/motion.min.js?v=2026-07-22e"></script>
+  <script src="vendor/motion.min.js?v=2026-07-22f"></script>
   <!-- versioned like app.js/styles.css: the SW precaches assets cache-first,
        so an untagged config would serve stale (old client IDs) after deploys -->
-  <script src="supabase-config.js?v=2026-07-22e"></script>
-  <script src="app.js?v=2026-07-22e"></script>
+  <script src="supabase-config.js?v=2026-07-22f"></script>
+  <script src="app.js?v=2026-07-22f"></script>
 </body>
 </html>

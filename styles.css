@@ -1469,7 +1469,8 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .climb-lane.is-turn { border-color: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 32%, transparent); }
 .cl-head { position: absolute; left: 0; right: 0; top: 4px; text-align: center; z-index: 1;
   font-family: var(--font-disp); font-weight: 700; font-size: 11px; color: var(--ink); }
-.cl-ss { display: block; font-family: var(--font-body, inherit); font-size: 9px; font-weight: 700; color: var(--muted); }
+.cl-rd { display: block; font-family: var(--font-body, inherit); font-size: 9.5px; font-weight: 700; color: var(--muted); letter-spacing: .3px; }
+.climb-lane.ahead .cl-rd { color: var(--good); }
 /* the rope trails from the ground up to the climber; height rides the --h var */
 .cl-rope { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: 5px; border-radius: 3px 3px 0 0;
   height: calc(6px + (100% - 66px) * var(--h) / 100 + 28px);
@@ -1483,7 +1484,9 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .cl-pts { display: inline-block; font-family: var(--font-disp); font-weight: 700; font-size: 12px; color: var(--ink);
   background: var(--panel); border: 1.5px solid var(--ink); border-radius: 6px; padding: 0 5px; margin-bottom: 2px; box-shadow: 0 1.5px 0 rgba(22,24,29,.2); }
 .climb-lane.is-turn .cl-climber .av { box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--accent-2), 0 0 16px 3px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 4px 9px rgba(22,24,29,.28); }
-.climb-lane.topped .cl-climber .av { box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--good), 0 0 18px 4px color-mix(in srgb, var(--good) 60%, transparent); }
+/* the current leader's climber gets a subtle green ring (who's higher) */
+.climb-lane.ahead .cl-climber .av { box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--good), 0 0 14px 3px color-mix(in srgb, var(--good) 45%, transparent), 0 4px 9px rgba(22,24,29,.28); }
+.climb-lane.is-turn.ahead .cl-climber .av { box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--accent-2), 0 0 16px 3px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 4px 9px rgba(22,24,29,.28); }
 .cl-climber.cl-slip { animation: clSlip .62s ease; }
 @keyframes clSlip { 0%,100% { transform: translateX(-50%) rotate(0); } 25% { transform: translate(-66%,4px) rotate(-11deg); } 60% { transform: translate(-38%,7px) rotate(10deg); } }
 .bt-narr { margin: 10px 0 10px; padding: 11px 13px; background: var(--panel); border: 1.5px solid var(--ink); border-radius: 12px;
