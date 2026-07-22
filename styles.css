@@ -1452,6 +1452,58 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .h2h-prog-bar span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .3s ease; }
 .h2h-prog-lbl { margin-top: 3px; font-weight: 600; }
 
+/* ---- monster-battle arena (SendOff) — original retro-battler styling ---- */
+.arena { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 16px 14px 18px; margin: 2px 0 12px; border-radius: var(--radius-sm);
+  background: linear-gradient(160deg, #eaf1f7 0%, #f3efe6 55%, #f7f0e2 100%);
+  border: 1px solid var(--border); overflow: hidden; }
+.arena::before { /* horizon line under the foe */ content: ''; position: absolute; left: 0; right: 0; top: 47%; height: 1px; background: var(--hairline); }
+.arena-row { display: flex; align-items: flex-end; gap: 12px; position: relative; z-index: 1; }
+.arena-row.foe { justify-content: space-between; }
+.arena-row.hero { justify-content: space-between; }
+.arena-ava { position: relative; flex: 0 0 auto; }
+.arena-ava .av { width: 84px; height: 84px; box-shadow: var(--shadow-fab); }
+.arena-ava .av-ini { font-size: 34px; }
+.arena-ava::after { /* ground shadow ellipse */ content: ''; position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); width: 66px; height: 12px; border-radius: 50%; background: rgba(22,24,29,.14); filter: blur(1px); }
+.bt-plate { flex: 1 1 auto; max-width: 62%; background: var(--panel); border: 1.5px solid var(--ink); border-radius: 12px; padding: 8px 11px; box-shadow: 0 2px 0 rgba(22,24,29,.14); }
+.bt-nm { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-family: var(--font-disp); font-weight: 700; font-size: 14px; color: var(--ink); }
+.bt-lv { font-family: var(--font-body, inherit); font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.bt-hpbar { margin-top: 5px; height: 12px; border-radius: 7px; background: var(--panel-2); border: 1.5px solid var(--ink); overflow: hidden; padding: 1.5px; }
+.bt-hpbar > span { display: block; height: 100%; border-radius: 5px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+.bt-hpbar.hp-hi > span { background: linear-gradient(180deg, #57c86a, #3a7d44); }
+.bt-hpbar.hp-mid > span { background: linear-gradient(180deg, #f2c14e, #e0952c); }
+.bt-hpbar.hp-lo > span { background: linear-gradient(180deg, #e2574c, #c0392b); }
+.bt-hprow { display: flex; justify-content: space-between; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.bt-hp { font-family: var(--font-disp); color: var(--ink); }
+.bt-narr { margin: 2px 0 10px; padding: 11px 13px; background: var(--panel); border: 1.5px solid var(--ink); border-radius: 12px;
+  box-shadow: 0 2px 0 rgba(22,24,29,.14); font-size: 13.5px; line-height: 1.45; color: var(--text); min-height: 20px; }
+.bt-narr.mine { border-color: var(--accent-2); box-shadow: 0 2px 0 color-mix(in srgb, var(--accent-2) 40%, transparent); font-weight: 600; }
+.bt-narr.won { border-color: var(--good); color: var(--good); font-weight: 700; text-align: center; font-family: var(--font-disp); font-size: 18px; }
+.bt-narr.lost { border-color: var(--danger); color: var(--danger); font-weight: 700; text-align: center; font-family: var(--font-disp); font-size: 18px; }
+.bt-narr.draw { text-align: center; font-weight: 700; font-family: var(--font-disp); font-size: 16px; color: var(--muted); }
+/* hit reactions (added briefly by JS, then removed) — no persistent idle cost */
+.arena-ava.bt-hit { animation: btHit .32s ease; }
+.arena-ava.bt-miss { animation: btMiss .5s ease; }
+.arena-ava.bt-faint { animation: btFaint .7s ease forwards; }
+.arena.bt-shake { animation: btShake .34s ease; }
+@keyframes btHit { 0%,100% { transform: translate(0,0); } 30% { transform: translate(0,-8px) scale(1.06); } 60% { transform: translate(0,2px); } }
+@keyframes btMiss { 0%,100% { transform: translate(0,0); } 20% { transform: translate(-5px,0) rotate(-6deg); } 60% { transform: translate(5px,2px) rotate(5deg); } }
+@keyframes btFaint { to { transform: translateY(14px) rotate(-12deg); opacity: .25; } }
+@keyframes btShake { 0%,100% { transform: translate(0,0); } 20% { transform: translate(-6px,3px); } 40% { transform: translate(6px,-2px); } 60% { transform: translate(-4px,2px); } 80% { transform: translate(4px,-1px); } }
+/* floating damage number */
+.bt-dmg { position: absolute; z-index: 3; font-family: var(--font-disp); font-weight: 700; font-size: 30px; color: var(--danger); text-shadow: 0 2px 0 rgba(255,255,255,.7); pointer-events: none; }
+.bt-dmg.crit { font-size: 40px; color: #c0392b; }
+.bt-dmg.miss { color: var(--muted); font-size: 22px; }
+@media (prefers-reduced-motion: reduce) {
+  .arena-ava.bt-hit, .arena-ava.bt-miss, .arena-ava.bt-faint, .arena.bt-shake { animation: none; }
+  .bt-hpbar > span, .md-mini > span { transition: none; }
+}
+/* compact battle bar in the persistent dock */
+.md-hprow { display: flex; align-items: center; gap: 7px; }
+.md-hpnm { font-size: 10px; font-weight: 700; color: var(--muted); width: 30px; flex: 0 0 auto; text-align: right; }
+.md-mini { flex: 1; height: 7px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--ink); overflow: hidden; padding: 1px; }
+.md-mini > span { display: block; height: 100%; border-radius: 4px; transition: width .45s cubic-bezier(.4,0,.2,1); }
+.md-mini.hp-hi > span { background: #3a7d44; } .md-mini.hp-mid > span { background: #e0952c; } .md-mini.hp-lo > span { background: #c0392b; }
+
 /* ============================================================================
    Match animations — a stick-figure "moment" fired only during a live match,
    after the climb is already saved. SVG + CSS keyframes (no library, no canvas,
