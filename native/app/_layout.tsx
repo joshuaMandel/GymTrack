@@ -12,6 +12,7 @@ import {
 import { Archivo_400Regular, Archivo_600SemiBold } from '@expo-google-fonts/archivo';
 import { AuthProvider } from '../lib/auth';
 import { MatchAnim } from '../components/MatchAnim';
+import { startSyncTriggers } from '../lib/net';
 import { colors } from '../theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -27,6 +28,9 @@ export default function RootLayout() {
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
   }, [fontsLoaded, fontError]);
+
+  // Flush any queued offline climb writes on reconnect / foreground / startup.
+  useEffect(() => startSyncTriggers(), []);
 
   if (!fontsLoaded && !fontError) return null;
 

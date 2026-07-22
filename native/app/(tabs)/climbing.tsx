@@ -23,7 +23,7 @@ import type { Climb, Series } from '@gymtrack/core';
 import { Title, Subtitle, Body, Card, Segmented, RouteDot } from '../../components/ui';
 import { LineChart } from '../../components/charts';
 import { colors, fonts, radius } from '../../theme';
-import { fetchMyClimbs, delClimb } from '../../lib/climbs';
+import { fetchMyClimbs, delClimb, flushClimbQueue } from '../../lib/climbs';
 import { loadMatches } from '../../lib/matches';
 import { useSettings } from '../../lib/settings';
 
@@ -43,6 +43,7 @@ export default function Climbing() {
   const [adj, setAdj] = useState<{ boulder: number; rope: number }>({ boulder: 0, rope: 0 });
 
   const load = useCallback(async () => {
+    flushClimbQueue(); // opportunistically sync anything queued offline
     try {
       setClimbs(await fetchMyClimbs());
     } catch {
@@ -268,6 +269,11 @@ export default function Climbing() {
                         {c.attempts > 1 ? (
                           <Body style={{ color: colors.muted, fontSize: 12 }}>{c.attempts} tries</Body>
                         ) : null}
+                        {c.pending ? (
+                          <View style={styles.syncTag}>
+                            <Body style={styles.syncTagText}>syncing</Body>
+                          </View>
+                        ) : null}
                         <View style={{ flex: 1 }} />
                         {p ? (
                           <Body style={[styles.scPts, { color: p.pts >= 0 ? colors.good : colors.danger }]}>
@@ -365,6 +371,8 @@ const styles = StyleSheet.create({
   badgeSend: { backgroundColor: colors.goodTint },
   badgeProject: { backgroundColor: colors.accentTint },
   badgeText: { fontFamily: fonts.bodyMed, fontSize: 11, color: colors.text },
+  syncTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.accentTint },
+  syncTagText: { fontFamily: fonts.bodyMed, fontSize: 10, color: colors.accentText },
   scPts: { fontFamily: fonts.bodyMed, fontSize: 13 },
   rowAction: { padding: 5 },
 });

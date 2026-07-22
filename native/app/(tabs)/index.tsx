@@ -9,7 +9,7 @@ import { Avatar } from '../../components/Avatar';
 import { colors, fonts, radius } from '../../theme';
 import { useAuth } from '../../lib/auth';
 import { useSettings } from '../../lib/settings';
-import { fetchMyClimbs } from '../../lib/climbs';
+import { fetchMyClimbs, flushClimbQueue } from '../../lib/climbs';
 import { loadMatches, type MatchListRow, type MatchAdj } from '../../lib/matches';
 
 function greeting(): string {
@@ -27,6 +27,7 @@ export default function Home() {
   const [adj, setAdj] = useState<MatchAdj>({ boulder: 0, rope: 0 });
 
   const load = useCallback(async () => {
+    flushClimbQueue(); // push anything logged offline; the merged fetch shows it either way
     try {
       setError(null);
       setClimbs(await fetchMyClimbs());
@@ -61,6 +62,7 @@ export default function Home() {
   const sends = climbs.filter((c) => c.result !== 'Project').length;
   const today = todayISO();
   const todayCount = climbs.filter((c) => c.date === today).length;
+  const pendingN = climbs.filter((c) => c.pending).length;
   const hideRating = !!settings.hide_rating;
   const weekCutoff = daysAgoISO(6);
   const weekSessions = new Set(climbs.filter((c) => c.date >= weekCutoff).map((c) => c.date)).size;
@@ -80,6 +82,14 @@ export default function Home() {
             <Subtitle style={{ marginTop: 4 }}>
               {climbs.length} climbs logged{todayCount ? ` · ${todayCount} today` : ''}
             </Subtitle>
+            {pendingN > 0 ? (
+              <View style={styles.pendingPill}>
+                <View style={styles.pendingDot} />
+                <Body style={styles.pendingText}>
+                  {pendingN} climb{pendingN === 1 ? '' : 's'} waiting to sync
+                </Body>
+              </View>
+            ) : null}
           </View>
           <Pressable onPress={() => router.push('/profile')} hitSlop={8}>
             <Avatar uid={user?.id || ''} name={name} size="md" />
@@ -196,6 +206,19 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: { paddingHorizontal: 20, paddingBottom: 40 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 8, marginBottom: 18 },
+  pendingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentTint,
+  },
+  pendingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent },
+  pendingText: { color: colors.accentText, fontSize: 12, fontFamily: fonts.bodyMed },
   matchBanner: {
     flexDirection: 'row',
     alignItems: 'center',

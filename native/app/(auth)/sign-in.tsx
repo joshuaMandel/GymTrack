@@ -2,18 +2,34 @@ import { useState } from 'react';
 import { View, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Screen, Title, Subtitle, Body, Button } from '../../components/ui';
 import { supabase } from '../../lib/supabase';
+import { appleAvailable, googleAvailable, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { colors, fonts, radius } from '../../theme';
 
-// Email → 6-digit code sign-in. Mirrors the web app's OTP flow (app.js:4658):
-// signInWithOtp({ email }) then verifyOtp({ email, token, type:'email' }). No
-// deep-linking needed — the user types the code, so this works on-device today.
-// (Native Google/Apple sign-in comes in a later milestone.)
+// Sign-in. Native Google/Apple use the platform ID-token flow (socialAuth) and
+// only appear on a configured dev/EAS build — on web both are unavailable, so
+// nothing extra renders. The always-available fallback is the web app's OTP flow
+// (app.js:4658): signInWithOtp({ email }) then verifyOtp({ email, token,
+// type:'email' }); the user types the emailed 6-digit code (no deep link needed).
 export default function SignIn() {
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [status, setStatus] = useState<{ msg: string; err?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  async function social(fn: () => Promise<void>, label: string) {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await fn(); // success → onAuthStateChange(SIGNED_IN) redirects
+    } catch (err: any) {
+      if (err?.message !== 'CANCELLED') {
+        setStatus({ msg: `${label} sign-in failed: ${err?.message || String(err)}`, err: true });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function sendCode() {
     const e = email.trim();
@@ -66,6 +82,23 @@ export default function SignIn() {
         <Subtitle style={{ marginTop: 6, marginBottom: 28 }}>
           Track climbs, build your Send Score, challenge friends.
         </Subtitle>
+
+        {step === 'email' && (appleAvailable || googleAvailable) ? (
+          <View style={{ marginBottom: 20 }}>
+            {appleAvailable ? (
+              <Button label="Continue with Apple" onPress={() => social(signInWithApple, 'Apple')} disabled={busy} />
+            ) : null}
+            {appleAvailable && googleAvailable ? <View style={{ height: 10 }} /> : null}
+            {googleAvailable ? (
+              <Button label="Continue with Google" variant="ghost" onPress={() => social(signInWithGoogle, 'Google')} disabled={busy} />
+            ) : null}
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Body style={styles.dividerText}>or use email</Body>
+              <View style={styles.dividerLine} />
+            </View>
+          </View>
+        ) : null}
 
         {step === 'email' ? (
           <>
@@ -146,4 +179,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   status: { marginTop: 18, fontSize: 14 },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText: { color: colors.mutedSoft, fontSize: 13 },
 });
