@@ -1524,7 +1524,7 @@ begin
   if not accept then
     update public.matches set status = 'declined' where id = mid; return 'declined';
   end if;
-  update public.matches set status = 'active', window_start = now(), window_end = now() + interval '4 hours',
+  update public.matches set status = 'active', window_start = now(), window_end = now() + interval '7 days',
     ch_snap_boulder = public.impl_rating(m.challenger, 'boulder'), ch_snap_rope = public.impl_rating(m.challenger, 'rope'),
     op_snap_boulder = public.impl_rating(m.opponent, 'boulder'),  op_snap_rope = public.impl_rating(m.opponent, 'rope')
   where id = mid;
@@ -1617,15 +1617,9 @@ begin
     select * into m from public.matches where id = mid;
     j := public.match_play(mid);
   end if;
-  -- Battle KO: a side faints the instant the OTHER side's damage reaches its HP
-  -- pool (best_n × 8). Resolve early — the most-damage winner logic still holds.
-  if j is not null and m.status = 'active' and m.best_n is not null
-     and (coalesce((j->'ch'->>'points')::int, 0) >= m.best_n * 8
-          or coalesce((j->'op'->>'points')::int, 0) >= m.best_n * 8) then
-    perform public.match_resolve(mid);
-    select * into m from public.matches where id = mid;
-    j := public.match_play(mid);
-  end if;
+  -- A SendOff is a best-of-N rounds race: it ends only when both climbers have
+  -- played all their rounds (handled just above) — NOT at any points threshold
+  -- and not on a clock. The window is only a long backstop for abandoned games.
   return jsonb_build_object(
     'id', m.id, 'status', m.status, 'window_start', m.window_start, 'window_end', m.window_end,
     'i_am', case when me = m.challenger then 'challenger' else 'opponent' end,
@@ -1728,7 +1722,7 @@ begin
   insert into public.matches (challenger, opponent, status, discipline, best_n, ranked, practice,
       window_start, window_end, ch_snap_boulder, ch_snap_rope, op_snap_boulder, op_snap_rope)
     values (me, bot, 'active', discipline, best_n, coalesce(ranked, true), true,
-      now(), now() + interval '4 hours',
+      now(), now() + interval '7 days',
       public.impl_rating(me, 'boulder'), public.impl_rating(me, 'rope'),
       coalesce(public.impl_rating(me, 'boulder'), 1400), coalesce(public.impl_rating(me, 'rope'), 1300))
     returning id into mid;
