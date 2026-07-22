@@ -1,6 +1,6 @@
 {
-  "name": "GymTrack — Climbing",
-  "short_name": "GymTrack",
+  "name": "SendOff — Climbing",
+  "short_name": "SendOff",
   "description": "Track your climbing, build your Send Score, and climb the leaderboard — synced across devices.",
   "start_url": "./",
   "scope": "./",

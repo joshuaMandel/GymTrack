@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GymTrack — weightlifting & rock climbing progress tracker
+   SendOff — weightlifting & rock climbing progress tracker
 
    Storage has two modes:
      • Local  (signed out / not configured) — data in localStorage, this device.
@@ -1944,7 +1944,7 @@
       recent = state.climbs
         .filter((c) => qsAllowed.includes(c.discipline) && c.created_at && new Date(c.created_at).getTime() >= start)
         .slice(-3).reverse();
-      recentLabel = 'This match';
+      recentLabel = 'This SendOff';
       // Match scoring re-derives the whole turn-walk from the current climbs, so
       // deleting a mid-sequence climb could un-count the OPPONENT's next climb.
       // Only your latest climb is safe to remove, and only while it's still the
@@ -1997,11 +1997,11 @@
         const me = matchMySide(live), them = matchTheirSide(live), bn = live.rules.best_n;
         note.hidden = false;
         const theirLast = matchLastLine(them);
-        if (bn && me.counted != null && me.counted >= bn) note.textContent = `Match · your ${bn} slots are full — climbs log as session only.`;
-        else if (me.can_log === false) note.textContent = `Match · ${them.name}'s turn — climbs log as session only.`;
-        else if (me.par_d == null) note.textContent = 'Match · your turn — your first send sets your par: any send scores 3, flash +1.';
-        else if (theirLast) note.textContent = `Match · ${them.name} ${theirLast} — your turn.`;
-        else note.textContent = 'Match · your turn — each grade shows its points, flash +1.';
+        if (bn && me.counted != null && me.counted >= bn) note.textContent = `SendOff · your ${bn} slots are full — climbs log as session only.`;
+        else if (me.can_log === false) note.textContent = `SendOff · ${them.name}'s turn — climbs log as session only.`;
+        else if (me.par_d == null) note.textContent = 'SendOff · your turn — your first send sets your par: any send scores 3, flash +1.';
+        else if (theirLast) note.textContent = `SendOff · ${them.name} ${theirLast} — your turn.`;
+        else note.textContent = 'SendOff · your turn — each grade shows its points, flash +1.';
       }
     }
   }
@@ -2032,7 +2032,7 @@
       if (live && inDisc && !willCount) {
         const me = matchMySide(live), them = matchTheirSide(live), bn = live.rules.best_n;
         toastMsg += bn && me.counted != null && me.counted >= bn
-          ? ' — session only (match slots full)'
+          ? ' — session only (SendOff slots full)'
           : ` — session only (${them.name}'s turn)`;
       }
       showToast(toastMsg, () => {
@@ -2090,7 +2090,7 @@
           if (!safe) {
             renderQuickLog();
             if (h2hMid) refreshH2H();
-            showToast('Can’t remove — the match has moved on');
+            showToast('Can’t remove — the SendOff has moved on');
             return;
           }
         }
@@ -2823,7 +2823,7 @@
       const opp = escapeHTML(p.opponent || 'a friend');
       const verb = p.result === 'won' ? `beat ${opp}` : p.result === 'lost' ? `lost to ${opp}` : `drew with ${opp}`;
       const chg = p.delta ? ` · <span class="${p.delta > 0 ? 'pr-flag' : ''}" style="${p.delta < 0 ? 'color:var(--danger);font-weight:700' : ''}">${p.delta > 0 ? '+' : ''}${p.delta}</span>` : '';
-      return { ico: 'i-bolt', cls: '', main: `${who} ${verb}`, sub: `Head-to-head match${chg}` };
+      return { ico: 'i-bolt', cls: '', main: `${who} ${verb}`, sub: `SendOff${chg}` };
     }
     if (it.kind === 'lift_session') {
       const parts = [`${p.exercises || 0} exercise${p.exercises === 1 ? '' : 's'}`];
@@ -3382,7 +3382,7 @@
       const changed = matchAdj.boulder !== (a.boulder || 0) || matchAdj.rope !== (a.rope || 0);
       matchAdj = { boulder: a.boulder || 0, rope: a.rope || 0 };
       if (changed) { renderClimberRating(); renderRatingHero(); } // keep hero/cards in step with the leaderboard
-    } catch (e) { console.warn('Matches unavailable:', e); }
+    } catch (e) { console.warn('SendOffs unavailable:', e); }
     matchesLoaded = true; // even on error: the hub falls back to its idle state
     renderMatchesPanel();
     renderMatchHub();  // hub first — its card gates the dock
@@ -3421,7 +3421,7 @@
         <div><div class="feed-main">vs ${escapeHTML(m.opponent_name)}</div><div class="feed-sub">${m.status === 'abandoned' ? 'no climbs logged' : `you ${res}`}</div></div></div>
         <div class="feed-actions"><span class="match-badge ${res}">${lbl}${m.my_delta ? ` ${m.my_delta > 0 ? '+' : ''}${m.my_delta}` : ''}</span></div></li>`;
     });
-    list.innerHTML = html || '<li class="empty">No matches yet — challenge a friend below.</li>';
+    list.innerHTML = html || '<li class="empty">No SendOffs yet — challenge a friend below.</li>';
   }
 
   // ----- Match creation: pick the ruleset, then send the challenge -----
@@ -3511,7 +3511,7 @@
       await loadMatches();
       if (data) openH2H(data);
     } catch (e) {
-      if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = /already in progress/i.test(errMsg(e)) ? 'You already have a match going with them.' : errMsg(e); }
+      if (st) { st.hidden = false; st.className = 'auth-status err'; st.textContent = /already in progress/i.test(errMsg(e)) ? 'You already have a SendOff going with them.' : errMsg(e); }
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -3547,7 +3547,7 @@
       if (act === 'accept') { await sb.rpc('match_respond', { mid, accept: true }); await loadMatches(); openH2H(mid); }
       else if (act === 'decline') { await sb.rpc('match_respond', { mid, accept: false }); await loadMatches(); }
       else if (act === 'cancelm') { await sb.rpc('match_cancel', { mid }); await loadMatches(); }
-    } catch (e) { console.warn('Match action failed:', e); loadMatches(); }
+    } catch (e) { console.warn('SendOff action failed:', e); loadMatches(); }
   }
   // Forfeit: quit now and take the loss, without waiting on the opponent.
   async function forfeitMatch() {
@@ -3565,7 +3565,7 @@
   async function refreshH2H() {
     if (!h2hMid || !cloudOn()) return;
     try { const { data, error } = await sb.rpc('match_state', { mid: h2hMid }); if (error) throw error; renderH2H(data); maybeBotMove(data); }
-    catch (e) { console.warn('Match state unavailable:', e); }
+    catch (e) { console.warn('SendOff state unavailable:', e); }
   }
   // Practice matches: when it's the bot's turn, nudge it to take its move (the
   // server logs one climb and the next poll shows it). A short "thinking" delay
@@ -3612,7 +3612,7 @@
     const myTurn = me.can_log === true;
     // Rules banner — always visible so the agreed ruleset is unambiguous.
     let html = rules.style_label ? `<div class="h2h-rules"><svg class="ico"><use href="#i-bolt"/></svg><span>${escapeHTML(rules.style_label)}${s.practice ? ' · practice' : ''}</span></div>` : '';
-    if (s.practice) html += `<div class="h2h-practice">🤖 Practice match — the bot plays its own turns. Doesn’t affect your Send Score.</div>`;
+    if (s.practice) html += `<div class="h2h-practice">🤖 Practice SendOff — the bot plays its own turns. Doesn’t affect your Send Score.</div>`;
     // Best-of-N progress: "4 of 6 problems logged" per side, or a plain count for
     // an open session. counted is null on legacy (pre-ruleset) matches.
     if (!resolved && s.status === 'active' && me.counted != null) {
@@ -3625,7 +3625,7 @@
       const r = s.status === 'abandoned' ? 'draw' : (s.winner === 'draw' ? 'draw' : ((s.winner === 'challenger') === iAmCh ? 'won' : 'lost'));
       const iForfeited = s.forfeited_by && s.forfeited_by === me.uid;
       const theyForfeited = s.forfeited_by && s.forfeited_by === them.uid;
-      const resultText = s.status === 'abandoned' ? 'Match abandoned'
+      const resultText = s.status === 'abandoned' ? 'SendOff abandoned'
         : iForfeited ? 'You forfeited'
         : theyForfeited ? `${escapeHTML(them.name)} forfeited — you win 🏆`
         : r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : 'Draw';
@@ -3636,7 +3636,7 @@
     } else if (s.status === 'pending') {
       html += `<div class="h2h-status">Waiting for ${escapeHTML(them.name)} to accept your challenge…</div>`;
     } else if (myFull) {
-      html += `<div class="h2h-status">Your ${rules.best_n} ${noun} are locked in — match limit reached. New climbs won’t change your score.</div>`;
+      html += `<div class="h2h-status">Your ${rules.best_n} ${noun} are locked in — SendOff limit reached. New climbs won’t change your score.</div>`;
     } else if (parMode && s.turn) {
       // The handoff tells you what they just did, so you know what to beat.
       const theirLast = matchLastLine(them);
@@ -3676,7 +3676,7 @@
         endBtn = `<button class="btn ghost" id="h2h-end">Forfeit</button>`;
       }
       html += `<div class="h2h-actions">${logBtn}${endBtn}</div>`;
-      if (h2hForfeitArm) html += `<div class="h2h-guide">Forfeiting ends the match right now and hands ${escapeHTML((them.name || '').split(' ')[0])} the win — no waiting for them to finish.</div>`;
+      if (h2hForfeitArm) html += `<div class="h2h-guide">Forfeiting ends the SendOff right now and hands ${escapeHTML((them.name || '').split(' ')[0])} the win — no waiting for them to finish.</div>`;
     } else if (resolved) {
       html += `<div class="h2h-actions"><button class="btn primary" id="h2h-done">Done</button></div>`;
     }
@@ -3815,7 +3815,7 @@
       matchDock.classList.add('resolved');
       if (logBtn) logBtn.hidden = true;
       c.innerHTML = `<span class="md-ico ${r}"><svg class="ico"><use href="#i-bolt"/></svg></span>
-        <span class="md-body"><span class="md-line1"><b>${r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : s.status === 'abandoned' ? 'Match abandoned' : 'Draw'}</b></span>
+        <span class="md-body"><span class="md-line1"><b>${r === 'won' ? 'You won 🏆' : r === 'lost' ? 'You lost' : s.status === 'abandoned' ? 'SendOff abandoned' : 'Draw'}</b></span>
         <span class="md-line2">vs ${escapeHTML(them.name)}${me.delta ? ` · ${me.delta > 0 ? '+' : ''}${me.delta} Send Score` : ''}</span></span>`;
       return;
     }
@@ -3871,7 +3871,7 @@
       const them = s ? (iAmCh ? s.opponent : s.challenger) : null;
       const parMode = !!(((s && s.rules && s.rules.discipline) || a.discipline) != null);
       const sc = (v) => (parMode ? '' : v > 0 ? 'pos' : v < 0 ? 'neg' : '');
-      const rules = (s && s.rules && s.rules.style_label) || a.rules_label || 'Head-to-head';
+      const rules = (s && s.rules && s.rules.style_label) || a.rules_label || 'SendOff';
       const noun = ((s && s.rules && s.rules.discipline) || a.discipline) === 'boulder' ? 'problems' : 'routes';
       const bn = (s && s.rules && s.rules.best_n) != null ? s.rules.best_n : a.best_n;
       const prog = me && me.counted != null ? (bn ? `${Math.min(me.counted, bn)} of ${bn} ${noun}` : `${me.counted} ${noun}`) : '';
@@ -3907,14 +3907,14 @@
       const m = matches.incoming[0];
       html = `<div class="hub-card hub-idle">
         <div class="hub-body"><div class="hub-idle-title">${escapeHTML(m.opponent_name)} challenged you</div>
-        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · ${m.ranked === false ? 'no elo at stake' : 'winner takes elo'}</div></div>
+        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'SendOff')} · ${m.ranked === false ? 'no elo at stake' : 'winner takes elo'}</div></div>
         <div class="hub-cta-zone"><button type="button" class="btn primary" data-mact="accept" data-mid="${m.id}">Accept</button><button type="button" class="btn ghost sm" data-mact="decline" data-mid="${m.id}">Decline</button></div>
       </div>`;
     } else if (matches.outgoing.length) {
       const m = matches.outgoing[0];
       html = `<div class="hub-card hub-idle">
         <div class="hub-body"><div class="hub-idle-title">Challenge sent to ${escapeHTML(m.opponent_name)}</div>
-        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'Head-to-head')} · waiting for them to accept</div></div>
+        <div class="hub-idle-sub">${escapeHTML(m.rules_label || 'SendOff')} · waiting for them to accept</div></div>
         <div class="hub-cta-zone"><button type="button" class="btn ghost sm" data-mact="cancelm" data-mid="${m.id}">Cancel</button></div>
       </div>`;
     } else if (!friends.list.length) {
@@ -4535,7 +4535,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `gymtrack-${todayISO()}.json`;
+    a.download = `sendoff-${todayISO()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   });
@@ -4551,7 +4551,7 @@
         data = JSON.parse(reader.result);
         if (!Array.isArray(data.lifts) || !Array.isArray(data.climbs)) throw new Error('bad format');
       } catch (err) {
-        alert('Could not import: the file is not a valid GymTrack export.');
+        alert('Could not import: the file is not a valid SendOff export.');
         return;
       }
       withSync(async () => {
@@ -5336,7 +5336,7 @@
     document.querySelectorAll('.view').forEach((v) => {
       let f = v.querySelector(':scope > .build-badge');
       if (!f) { f = document.createElement('footer'); f.className = 'build-badge'; v.appendChild(f); }
-      f.textContent = `GymTrack · build ${build}`;
+      f.textContent = `SendOff · build ${build}`;
       f.title = 'App version — bumps on every deploy';
     });
   }

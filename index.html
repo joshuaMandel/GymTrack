@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>GymTrack — Climbing Progress &amp; Send Score</title>
+  <title>SendOff — Climbing Progress &amp; Send Score</title>
   <meta name="description" content="Track your climbing, build your Send Score, and climb the leaderboard with friends." />
   <link rel="manifest" href="manifest.webmanifest" />
   <meta name="theme-color" content="#f3efe6" />
@@ -11,14 +11,14 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="GymTrack" />
+  <meta name="apple-mobile-web-app-title" content="SendOff" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Archivo:wght@400;500;600;700;800&display=swap" />
   <!-- ?v= busts stale browser caches; every deploy bumps it AND sw.js's SW_VERSION (same string) -->
   <!-- Shown in the on-page build footer so you can tell when a new deploy lands -->
-  <meta name="build" content="2026-07-20p" />
-  <link rel="stylesheet" href="styles.css?v=2026-07-20p" />
+  <meta name="build" content="2026-07-22a" />
+  <link rel="stylesheet" href="styles.css?v=2026-07-22a" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23fdf8ef'/><g transform='translate(-3.5,3.5) scale(0.93)'><path d='M20 29 L20 23 Q20 18 25 18 L31 18 Q36 18 36 23 L36 29' fill='none' stroke='%23f59e2c' stroke-width='6' stroke-linecap='round'/><circle cx='28' cy='40' r='15' fill='%23f59e2c'/><path d='M32 55 L52 17 L72 55 Z' fill='%231f3a5f'/><path d='M32.34 54.36 L42.29 35.44 A15 15 0 0 1 32.34 54.36 Z' fill='%2316181d'/></g></svg>" />
 </head>
 <body class="booting">
@@ -55,7 +55,7 @@
     <div class="topbar-inner">
       <div class="brand">
         <svg class="brand-mark" aria-hidden="true"><use href="#i-kbpeak"/></svg>
-        <h1>gymtrack</h1>
+        <h1>sendoff</h1>
       </div>
       <nav class="tabs" role="tablist" aria-label="Trackers">
         <button class="tab is-active" role="tab" data-view="dashboard">Home</button>
@@ -270,7 +270,7 @@
     <div class="modal wn-modal" role="dialog" aria-modal="true" aria-labelledby="wn-title">
       <button class="modal-close" id="wn-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
       <h2 id="wn-title">What's new</h2>
-      <p class="muted small">GymTrack got a big upgrade today:</p>
+      <p class="muted small">SendOff got a big upgrade today:</p>
       <div class="wn-list">
         <div class="wn-row lift-only">
           <span class="wn-ico t-orange"><svg class="ico"><use href="#i-barbell"/></svg></span>
@@ -364,7 +364,7 @@
   <div class="modal-overlay" id="match-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="match-title">
       <button class="modal-close" id="match-close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
-      <h2 id="match-title">Head-to-head</h2>
+      <h2 id="match-title">SendOff</h2>
       <div id="match-body"></div>
     </div>
   </div>
@@ -473,7 +473,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="admin-del-title">
       <h2 id="admin-del-title">Delete account</h2>
       <div class="admin-detail" id="admin-detail"></div>
-      <p class="admin-warn">This permanently deletes the account and all of its data. Their completed matches stay on other players' records as “Deleted climber.” This cannot be undone.</p>
+      <p class="admin-warn">This permanently deletes the account and all of its data. Their completed SendOffs stay on other players' records as “Deleted climber.” This cannot be undone.</p>
       <label>Type <b id="admin-del-handle"></b> to confirm
         <input type="text" id="admin-del-input" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="username" />
       </label>
@@ -510,7 +510,7 @@
     <div class="gate" id="gate" hidden>
       <div class="gate-card">
         <span class="logo-tile lg gate-mark"><svg class="ico"><use href="#i-kbpeak"/></svg></span>
-        <h2>Sign in to GymTrack</h2>
+        <h2>Sign in to SendOff</h2>
         <p class="muted">Track your climbing, build your Send Score, and climb the leaderboard — synced across all your devices.</p>
         <!-- One-tap social sign-in. Each button appears only when its client id
              is configured (supabase-config.js); otherwise email stays the path.
@@ -883,7 +883,7 @@
 
         <!-- Head-to-head matches: challenges, active match, history -->
         <div class="panel" id="matches-panel" hidden>
-          <h3>Matches</h3>
+          <h3>SendOffs</h3>
           <p class="muted small">Race a friend — each of you plays against your own level, so anyone can win. Winner takes elo.</p>
           <ul class="feed" id="matches-list"></ul>
         </div>
@@ -1042,10 +1042,10 @@
   <!-- Motion (motion.dev) — vanilla animation engine, vendored same-origin and
        precached by the SW for offline. Loaded before app.js so window.Motion is
        ready when the app boots; app.js degrades gracefully if it's ever absent. -->
-  <script src="vendor/motion.min.js?v=2026-07-20p"></script>
+  <script src="vendor/motion.min.js?v=2026-07-22a"></script>
   <!-- versioned like app.js/styles.css: the SW precaches assets cache-first,
        so an untagged config would serve stale (old client IDs) after deploys -->
-  <script src="supabase-config.js?v=2026-07-20p"></script>
-  <script src="app.js?v=2026-07-20p"></script>
+  <script src="supabase-config.js?v=2026-07-22a"></script>
+  <script src="app.js?v=2026-07-22a"></script>
 </body>
 </html>
