@@ -15,6 +15,7 @@ export interface Climb {
   notes?: string;
   color?: string;
   created_at?: string;
+  pending?: boolean; // optimistic row queued offline, not yet synced
 }
 
 // --- grades ---
@@ -177,3 +178,17 @@ export interface ProfileStats {
   hardestBoulder: string | null; hardestRoute: string | null; longest: number;
 }
 export function climbingProfileStats(climbs: Climb[]): ProfileStats;
+
+// --- offline write queue ---
+export interface QueueOp {
+  kind: 'add' | 'upd' | 'del';
+  id: string;
+  entry?: Partial<Climb>;
+  tries?: number;
+}
+export function applyQueue(serverClimbs: Climb[], ops: QueueOp[]): Climb[];
+export function isPending(ops: QueueOp[], id: string): boolean;
+export function pendingCount(ops: QueueOp[]): number;
+export function enqueueAdd(ops: QueueOp[], id: string, entry: Partial<Climb>): QueueOp[];
+export function enqueueUpd(ops: QueueOp[], id: string, entry: Partial<Climb>): QueueOp[];
+export function enqueueDel(ops: QueueOp[], id: string): QueueOp[];
