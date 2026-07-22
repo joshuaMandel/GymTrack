@@ -1113,14 +1113,15 @@ alter table public.activity drop constraint if exists activity_user_id_kind_occu
 drop index if exists public.activity_user_id_kind_occurred_on_key;
 create unique index if not exists activity_session_key on public.activity (user_id, kind, occurred_on) where kind in ('lift_session','climb_session');
 
--- A user's total match elo adjustment for a group = sum of their per-match
--- deltas across resolved matches whose dominant discipline was that group.
+-- SendOffs no longer touch ratings at all — a match is decided purely by the
+-- raw in-game climb points (the grade ladder), and winning/losing never moves a
+-- climber's Send Score. This is hard-wired to 0 so every downstream rating
+-- (climb_display_rating, the leaderboard, the hero cards) reverts to the pure
+-- per-climb engine, past matches included. (Kept as a function so its many
+-- callers stay valid; the `grp`/`uid` args are now unused.)
 create or replace function public.match_adjustment(uid uuid, grp text)
-returns integer language sql stable security definer set search_path = public as $$
-  select coalesce(sum(case when m.challenger = uid then m.ch_delta else m.op_delta end), 0)::int
-  from public.matches m
-  where m.status = 'resolved' and m.grp = grp and (m.challenger = uid or m.opponent = uid)
-    and not coalesce(m.practice, false)  -- practice never moves your real rating
+returns integer language sql immutable as $$
+  select 0
 $$;
 revoke all on function public.match_adjustment(uuid, text) from public, anon, authenticated;
 
@@ -1419,16 +1420,12 @@ begin
       ops := public.match_score(mid, m.opponent);
     end if;
     win := case when m.forfeited_by = m.challenger then 'opponent' else 'challenger' end;
-    ra := coalesce(public.climb_display_rating(m.challenger, g), 1000);
-    rb := coalesce(public.climb_display_rating(m.opponent, g), 1000);
-    ea := 1 / (1 + power(10, (rb - ra) / 200.0));
-    d := round(kf * ((case win when 'challenger' then 1 else 0 end) - ea));
-    if not coalesce(m.ranked, true) then d := 0; end if;  -- unranked/practice never moves real elo
+    -- No rating stake: forfeiting hands the win over, but no Send Score moves.
     update public.matches set status = 'resolved', resolved_at = now(), grp = g,
-      ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
+      ch_score = chs, op_score = ops, winner = win, ch_delta = 0, op_delta = 0 where id = mid;
     if not coalesce(m.practice, false) then
-      perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
-      perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+      perform public.post_match_result(m.challenger, m.opponent, win, 0, g, chs, ops, mid, true);
+      perform public.post_match_result(m.opponent, m.challenger, win, 0, g, ops, chs, mid, false);
     end if;
     return;
   end if;
@@ -1471,21 +1468,14 @@ begin
     if abs(chs - ops) <= 4 then win := 'draw';
     elsif chs > ops then win := 'challenger'; else win := 'opponent'; end if;
   end if;
-  ra := coalesce(public.climb_display_rating(m.challenger, g), 1000);
-  rb := coalesce(public.climb_display_rating(m.opponent, g), 1000);
-  ea := 1 / (1 + power(10, (rb - ra) / 200.0));
-  d := round(kf * ((case win when 'challenger' then 1 when 'opponent' then 0 else 0.5 end) - ea));
-  -- A genuine draw means both climbers performed equally relative to their OWN
-  -- baselines, so neither out-performed the other: no rating changes hands. (For
-  -- wins/losses the chess-Elo gap still makes upsets pay more than expected wins.)
-  -- Unranked matches never move elo — that's the point of playing unranked.
-  if win = 'draw' or not coalesce(m.ranked, true) then d := 0; end if;
+  -- SendOffs are decided purely by raw in-game climb points (computed above);
+  -- winning or losing never moves a Send Score, so both deltas are always 0.
   update public.matches set status = 'resolved', resolved_at = now(), grp = g,
-    ch_score = chs, op_score = ops, winner = win, ch_delta = d, op_delta = -d where id = mid;
+    ch_score = chs, op_score = ops, winner = win, ch_delta = 0, op_delta = 0 where id = mid;
   -- Practice matches never touch the social feed.
   if not coalesce(m.practice, false) then
-    perform public.post_match_result(m.challenger, m.opponent, win, d,  g, chs, ops, mid, true);
-    perform public.post_match_result(m.opponent, m.challenger, win, -d, g, ops, chs, mid, false);
+    perform public.post_match_result(m.challenger, m.opponent, win, 0, g, chs, ops, mid, true);
+    perform public.post_match_result(m.opponent, m.challenger, win, 0, g, ops, chs, mid, false);
   end if;
 end $$;
 revoke all on function public.match_resolve(uuid) from public, anon, authenticated;
