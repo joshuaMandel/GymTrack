@@ -1722,12 +1722,13 @@ insert into public.profiles (id, username, display_name, is_bot)
   on conflict (id) do update set is_bot = true, display_name = 'Practice Partner';
 
 -- Start a practice match: goes straight to active (no accept step), with the
--- bot's level mirrored to yours so a ranked match is a fair fight. Owner-only.
+-- bot's level mirrored to yours so a ranked match is a fair fight. Limited to
+-- the owner + the practice allowlist (practice_is), not full admins only.
 create or replace function public.match_practice(discipline text default 'boulder', best_n integer default 3, ranked boolean default true)
 returns uuid language plpgsql volatile security definer set search_path = public as $$
 declare me uuid := auth.uid(); bot uuid := public.practice_bot_id(); mid uuid;
 begin
-  if not public.admin_is() then raise exception 'practice mode is owner-only'; end if;
+  if not public.practice_is() then raise exception 'practice mode is not enabled for your account'; end if;
   if discipline is null or discipline not in ('boulder','lead','toprope','agnostic') then raise exception 'invalid discipline'; end if;
   if best_n is null or best_n not in (3,5,7,9) then raise exception 'invalid match length'; end if;
   -- One practice match at a time — clear any in-flight one so you can restart.
@@ -1877,6 +1878,26 @@ create or replace function public.admin_is() returns boolean
 $$;
 revoke all on function public.admin_is() from public, anon;
 grant execute on function public.admin_is() to authenticated;
+
+-- ---------- Practice access (a strict subset of admin) ----------
+-- A short allowlist of emails permitted to start Practice matches WITHOUT any
+-- of admin's other powers (no user list, no deletes). The owner is always in.
+-- To grant/revoke practice access, edit this one array and re-apply the schema.
+create or replace function public.practice_emails() returns text[]
+  language sql immutable as $$
+    select array['joshdpackman@gmail.com', 'langumaudrey@gmail.com']::text[]
+  $$;
+
+-- The gate match_practice calls: the owner, or anyone on the practice allowlist.
+create or replace function public.practice_is() returns boolean
+  language sql stable security definer set search_path = public, auth as $$
+    select public.admin_is() or exists (
+      select 1 from auth.users u
+      where u.id = auth.uid()
+        and lower(u.email) = any (select lower(e) from unnest(public.practice_emails()) e))
+  $$;
+revoke all on function public.practice_is() from public, anon;
+grant execute on function public.practice_is() to authenticated;
 
 -- A simple audit log of deletions.
 create table if not exists public.admin_deletions (
