@@ -3591,6 +3591,19 @@
   // KO faints the target. A miss (project) is a stumble with no drain. Driven by
   // real score changes in renderH2H, so it always matches the server. Reduced
   // motion → no-op (the re-render already set the bar; CSS kills the transition).
+  // Original move-name flavor for a landing send — grade-derived so it reads as
+  // an "attack" (no Nintendo/Pokémon wording). Deterministic per grade+tier.
+  const BT_MOVES = {
+    big: ['APEX SEND', 'SUMMIT STRIKE', 'CRUX CRUSHER', 'PEAK FURY'],
+    mid: ['POWER SEND', 'DYNO SLAM', 'CRIMP CRUSH', 'HEEL-HOOK HIT'],
+    low: ['CLEAN SEND', 'QUICK TICK', 'FLASH JAB', 'CHALK STRIKE']
+  };
+  function battleMove(grade, dmg) {
+    const pool = dmg >= 10 ? BT_MOVES.big : dmg >= 6 ? BT_MOVES.mid : BT_MOVES.low;
+    let h = 0; for (const c of String(grade || '')) h += c.charCodeAt(0);
+    const nm = pool[h % pool.length];
+    return grade ? `${grade} · ${nm}` : nm;
+  }
   function battleHit(side, dmg, opts) {
     opts = opts || {};
     if (!motionOK()) return;
@@ -3599,49 +3612,122 @@
     const attacker = arena.querySelector('.arena-ava.' + (side === 'foe' ? 'hero' : 'foe'));
     const bar = arena.querySelector('.bt-hpbar[data-side="' + side + '"] > span');
     const hpFull = parseInt(arena.dataset.hpfull || '0', 10);
-    if (target) {
-      const ar = arena.getBoundingClientRect(), tr = target.getBoundingClientRect();
-      const dn = document.createElement('div');
-      dn.className = 'bt-dmg' + (opts.miss ? ' miss' : (dmg >= 10 ? ' crit' : ''));
-      dn.textContent = opts.miss ? 'MISS' : '-' + dmg;
-      dn.style.left = (tr.left - ar.left + tr.width / 2 - 18) + 'px';
-      dn.style.top = (tr.top - ar.top + 4) + 'px';
-      arena.appendChild(dn);
-      mAnim(dn, { transform: ['translateY(2px) scale(.6)', 'translateY(-6px) scale(1.15)', 'translateY(-36px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.95, easing: [0.2, 1, 0.4, 1] });
-      maTimers.push(setTimeout(() => dn.remove(), 1000));
+    const ar = arena.getBoundingClientRect();
+    // Unit vector attacker → target, so the strike travels along the line
+    // between the two fighters (hero below → foe above, and vice-versa).
+    let ux = 0, uy = side === 'foe' ? -1 : 1, tr = null, atr = null;
+    if (target) tr = target.getBoundingClientRect();
+    if (attacker) atr = attacker.getBoundingClientRect();
+    if (tr && atr) {
+      const dx = (tr.left + tr.width / 2) - (atr.left + atr.width / 2);
+      const dy = (tr.top + tr.height / 2) - (atr.top + atr.height / 2);
+      const len = Math.hypot(dx, dy) || 1; ux = dx / len; uy = dy / len;
     }
+    // ---- MISS: attacker lunges and whiffs, arena dims + stumbles ----
     if (opts.miss) {
+      if (target) {
+        const dn = document.createElement('div'); dn.className = 'bt-dmg miss'; dn.textContent = 'MISS';
+        dn.style.left = (tr.left - ar.left + tr.width / 2 - 18) + 'px'; dn.style.top = (tr.top - ar.top + 4) + 'px';
+        arena.appendChild(dn);
+        mAnim(dn, { transform: ['translateY(2px) scale(.6)', 'translateY(-6px) scale(1.1)', 'translateY(-30px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.9, easing: [0.2, 1, 0.4, 1] });
+        maTimers.push(setTimeout(() => dn.remove(), 950));
+      }
       arena.classList.add('bt-dim', 'bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-dim', 'bt-shake'), 470));
       if (attacker) { attacker.classList.add('bt-miss'); maTimers.push(setTimeout(() => attacker.classList.remove('bt-miss'), 520)); }
       return;
     }
-    if (attacker) { attacker.classList.add('bt-hit'); maTimers.push(setTimeout(() => attacker.classList.remove('bt-hit'), 340)); }
+    // ---- HIT: a real strike sequence — windup → lunge → impact hold → recoil ----
+    // Timings are chosen so the attacker is AT the target when IMPACT fires and
+    // then HOLDS there briefly (a hitstop) — that hold is what makes a strike
+    // read as a strike instead of a number ticking.
+    const big = dmg >= 10;
+    const LUNGE_MS = 560, IMPACT = 250; // reach the foe at 250ms, hold, then recover
+    // Freeze the HP bar at its PRE-damage level now, so it doesn't show the
+    // drained value during the wind-up; it drains at impact below.
+    let drainTo = null;
     if (bar && hpFull) {
-      const newPct = parseFloat(bar.style.width) || 0;
-      const oldPct = Math.min(100, newPct + 100 * dmg / hpFull);
-      bar.style.transition = 'none'; bar.style.width = oldPct + '%';
-      void bar.offsetWidth; // reflow so the drain animates from the pre-hit level
-      bar.style.transition = ''; requestAnimationFrame(() => { bar.style.width = newPct + '%'; });
+      drainTo = parseFloat(bar.style.width) || 0; // post-damage width from the render
+      const preePct = Math.min(100, drainTo + 100 * dmg / hpFull);
+      bar.style.transition = 'none'; bar.style.width = preePct + '%'; void bar.offsetWidth;
     }
-    if (target) { target.classList.add('bt-hit'); maTimers.push(setTimeout(() => target.classList.remove('bt-hit'), 340)); }
-    if (dmg >= 10 && !opts.ko) { arena.classList.add('bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-shake'), 360)); }
-    if (opts.ko) {
-      // Knockout payoff: white flash + hard shake + a stamped "K.O.!" + the faint.
-      arena.classList.add('bt-shake', 'bt-flash');
-      maTimers.push(setTimeout(() => arena.classList.remove('bt-shake', 'bt-flash'), 540));
-      const ko = document.createElement('div'); ko.className = 'bt-ko'; ko.innerHTML = '<span>K.O.!</span>';
-      arena.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 950));
-      if (target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 300));
-      // My knockout (I emptied the foe's bar) → a burst of confetti to celebrate.
-      if (side === 'foe') {
-        const burst = document.createElement('div'); burst.className = 'bt-burst';
-        const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
-        for (let i = 0; i < 20; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
-        arena.appendChild(burst);
-        [...burst.children].forEach((it, i) => { const ang = (i / 20) * Math.PI * 2, dist = 58 + (i % 4) * 22;
-          mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.15, easing: [0.2, 0.7, 0.3, 1] }); });
-        maTimers.push(setTimeout(() => burst.remove(), 1250));
+    // Move-name banner announces from arena-centre (clear of the turn pill).
+    {
+      const mv = document.createElement('div'); mv.className = 'bt-move' + (big ? ' big' : '');
+      mv.textContent = battleMove(opts.grade, dmg);
+      mv.style.top = (ar.height * 0.46 + (side === 'foe' ? 20 : -34)) + 'px';
+      arena.appendChild(mv);
+      const half = mv.offsetWidth / 2 + 6;
+      mv.style.left = Math.max(half, Math.min(ar.width - half, ar.width / 2)) + 'px';
+      mAnim(mv, { opacity: [0, 1, 1, 0], transform: ['translate(-50%,8px) scale(.85)', 'translate(-50%,-2px) scale(1)', 'translate(-50%,-4px) scale(1)', 'translate(-50%,-12px) scale(.95)'] }, { duration: 1.0, easing: 'ease-out' });
+      maTimers.push(setTimeout(() => mv.remove(), 1050));
+    }
+    // Attacker: small wind-up (pull back) → commit a big lunge into the target →
+    // HOLD at contact (hitstop) → spring home. The doubled peak keyframe = hold.
+    if (attacker) {
+      const L = big ? 46 : 36;
+      mAnim(attacker, { transform: [
+        'translate(0,0)',
+        `translate(${-ux * 11}px,${-uy * 11}px)`,        // wind-up
+        `translate(${ux * L}px,${uy * L}px) scale(1.07)`, // reach the foe
+        `translate(${ux * L}px,${uy * L}px) scale(1.07)`, // hold (hitstop)
+        'translate(0,0)'                                   // recover
+      ] }, { duration: LUNGE_MS / 1000, easing: 'ease-out', offset: [0, 0.16, 0.45, 0.6, 1] });
+    }
+    // Impact beat, fired when the attacker reaches the target.
+    maTimers.push(setTimeout(() => {
+      if (target) {
+        const tr2 = target.getBoundingClientRect();
+        // Contact point: the target's edge facing the attacker.
+        const cx = tr2.left - ar.left + tr2.width / 2 - ux * tr2.width * 0.42;
+        const cy = tr2.top - ar.top + tr2.height / 2 - uy * tr2.height * 0.42;
+        const sp = document.createElement('div'); sp.className = 'bt-spark' + (big ? ' big' : '');
+        sp.style.left = cx + 'px'; sp.style.top = cy + 'px';
+        arena.appendChild(sp);
+        mAnim(sp, { opacity: [1, 1, 0], transform: ['translate(-50%,-50%) scale(.2) rotate(0deg)', 'translate(-50%,-50%) scale(1.3) rotate(35deg)', 'translate(-50%,-50%) scale(1.6) rotate(55deg)'] }, { duration: 0.44, easing: 'ease-out' });
+        maTimers.push(setTimeout(() => sp.remove(), 480));
+        // Target knocks back hard along the strike line + squashes, holds the
+        // recoil pose, then settles — reads as taking the hit.
+        const K = big ? 17 : 11;
+        mAnim(target, { transform: [
+          'translate(0,0) scale(1,1)',
+          `translate(${ux * K}px,${uy * K}px) scale(1.12,.86)`, // squash on impact
+          `translate(${ux * K * 0.7}px,${uy * K * 0.7}px) scale(1,1)`,
+          'translate(0,0) scale(1,1)'
+        ] }, { duration: 0.6, easing: [0.2, 0.9, 0.3, 1], offset: [0, 0.16, 0.4, 1] });
+        // Damage number pops at the contact point.
+        const dn = document.createElement('div'); dn.className = 'bt-dmg' + (big ? ' crit' : '');
+        dn.textContent = '-' + dmg;
+        dn.style.left = (cx - 18) + 'px'; dn.style.top = (cy - 18) + 'px';
+        arena.appendChild(dn);
+        mAnim(dn, { transform: ['translateY(2px) scale(.6)', 'translateY(-6px) scale(1.15)', 'translateY(-36px) scale(1)'], opacity: [0, 1, 1, 0] }, { duration: 0.95, easing: [0.2, 1, 0.4, 1] });
+        maTimers.push(setTimeout(() => dn.remove(), 1000));
       }
+      // Now drain the bar from its held pre-damage level down to the new value.
+      if (bar && hpFull && drainTo != null) { bar.style.transition = ''; requestAnimationFrame(() => { bar.style.width = drainTo + '%'; }); }
+      arena.classList.add('bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-shake'), big ? 420 : 300));
+    }, IMPACT));
+    if (!opts.ko) return;
+    // KO payoff is delayed to land right after the finishing strike connects.
+    maTimers.push(setTimeout(() => battleKO(arena, side), IMPACT + 90));
+  }
+  // Knockout payoff: white flash + hard shake + a stamped "K.O.!" + the faint,
+  // fired right after the finishing strike connects.
+  function battleKO(arena, side) {
+    const target = arena.querySelector('.arena-ava.' + side);
+    arena.classList.add('bt-shake', 'bt-flash');
+    maTimers.push(setTimeout(() => arena.classList.remove('bt-shake', 'bt-flash'), 540));
+    const ko = document.createElement('div'); ko.className = 'bt-ko'; ko.innerHTML = '<span>K.O.!</span>';
+    arena.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 950));
+    if (target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 260));
+    // My knockout (I emptied the foe's bar) → a burst of confetti to celebrate.
+    if (side === 'foe') {
+      const burst = document.createElement('div'); burst.className = 'bt-burst';
+      const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
+      for (let i = 0; i < 20; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
+      arena.appendChild(burst);
+      [...burst.children].forEach((it, i) => { const ang = (i / 20) * Math.PI * 2, dist = 58 + (i % 4) * 22;
+        mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.15, easing: [0.2, 0.7, 0.3, 1] }); });
+      maTimers.push(setTimeout(() => burst.remove(), 1250));
     }
   }
 
@@ -3791,9 +3877,9 @@
       const pThem = h2hPrev.i_am === 'challenger' ? h2hPrev.opponent : h2hPrev.challenger;
       const dFoe = (me.score || 0) - (pMe.score || 0), cFoe = (me.counted || 0) - (pMe.counted || 0);
       const dHero = (them.score || 0) - (pThem.score || 0), cHero = (them.counted || 0) - (pThem.counted || 0);
-      if (dFoe > 0) battleHit('foe', dFoe, { ko: me.score >= hpFull });
+      if (dFoe > 0) battleHit('foe', dFoe, { ko: me.score >= hpFull, grade: me.last && me.last.grade });
       else if (cFoe > 0) battleHit('foe', 0, { miss: true });
-      if (dHero > 0) battleHit('hero', dHero, { ko: them.score >= hpFull });
+      if (dHero > 0) battleHit('hero', dHero, { ko: them.score >= hpFull, grade: them.last && them.last.grade });
       else if (cHero > 0) battleHit('hero', 0, { miss: true });
     }
     const l = $('#h2h-log'); if (l) l.addEventListener('click', () => openQuickLog());

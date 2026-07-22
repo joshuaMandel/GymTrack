@@ -1493,6 +1493,16 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .bt-dmg { position: absolute; z-index: 3; font-family: var(--font-disp); font-weight: 700; font-size: 30px; color: var(--danger); text-shadow: 0 2px 0 rgba(255,255,255,.7); pointer-events: none; }
 .bt-dmg.crit { font-size: 42px; color: #c0392b; -webkit-text-stroke: 1.5px var(--cream); }
 .bt-dmg.miss { color: var(--muted); font-size: 22px; }
+/* move-name banner: original attack flavor floating off the attacker */
+.bt-move { position: absolute; z-index: 3; transform: translate(-50%,0); font-family: var(--font-disp); font-weight: 700; font-size: 11px; letter-spacing: .5px; white-space: nowrap; color: var(--cream); background: var(--ink); border: 1.5px solid var(--cream); box-shadow: 0 0 0 1.5px var(--ink); border-radius: 6px; padding: 2px 8px; pointer-events: none; }
+.bt-move.big { font-size: 12.5px; color: var(--ink); background: #ffd23f; border-color: var(--ink); box-shadow: 0 0 0 1.5px var(--cream), 0 2px 6px rgba(22,24,29,.3); }
+/* impact spark at the contact point — a CSS starburst, event-driven only */
+.bt-spark { position: absolute; z-index: 3; width: 40px; height: 40px; pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #fff 0 16%, #ffd23f 17% 34%, transparent 44%); }
+.bt-spark::before, .bt-spark::after { content: ''; position: absolute; inset: 0; background:
+  conic-gradient(from 0deg, transparent 0 8%, #fff 9% 11%, transparent 12% 33%, #ffd23f 34% 36%, transparent 37% 58%, #fff 59% 61%, transparent 62% 83%, #ffd23f 84% 86%, transparent 87%); }
+.bt-spark::after { transform: rotate(45deg); opacity: .8; }
+.bt-spark.big { width: 60px; height: 60px; }
 /* KO payoff: white flash, stamped verdict, central VS badge */
 .arena.bt-flash::after { content: ''; position: absolute; inset: 0; background: #fff; animation: btFlash .5s ease; pointer-events: none; z-index: 4; }
 @keyframes btFlash { 0% { opacity: 0; } 12% { opacity: .82; } 100% { opacity: 0; } }
@@ -1513,7 +1523,7 @@ body.has-match-dock .container { padding-bottom: calc(var(--dock-h) + 74px + env
 .arena-vs { position: absolute; left: 50%; top: 49%; transform: translate(-50%,-50%) rotate(-6deg); z-index: 2; font-family: var(--font-disp); font-weight: 700; font-size: 14px; color: var(--cream); background: var(--ink); border: 2px solid var(--cream); box-shadow: 0 0 0 2px var(--ink); border-radius: 8px; padding: 2px 9px; letter-spacing: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .arena-ava.bt-hit, .arena-ava.bt-miss, .arena-ava.bt-faint, .arena.bt-shake, .arena.bt-flash::after, .bt-ko span, .arena.bt-dim::after, .bt-narr.won, .bt-narr.lost { animation: none; }
-  .arena.bt-flash::after, .arena.bt-dim::after, .bt-burst { display: none; }
+  .arena.bt-flash::after, .arena.bt-dim::after, .bt-burst, .bt-spark, .bt-move { display: none; }
   .bt-hpbar > span, .md-mini > span { transition: none; }
 }
 /* compact battle bar in the persistent dock */
