@@ -3611,6 +3611,7 @@
       maTimers.push(setTimeout(() => dn.remove(), 1000));
     }
     if (opts.miss) {
+      arena.classList.add('bt-dim', 'bt-shake'); maTimers.push(setTimeout(() => arena.classList.remove('bt-dim', 'bt-shake'), 470));
       if (attacker) { attacker.classList.add('bt-miss'); maTimers.push(setTimeout(() => attacker.classList.remove('bt-miss'), 520)); }
       return;
     }
@@ -3631,6 +3632,16 @@
       const ko = document.createElement('div'); ko.className = 'bt-ko'; ko.innerHTML = '<span>K.O.!</span>';
       arena.appendChild(ko); maTimers.push(setTimeout(() => ko.remove(), 950));
       if (target) maTimers.push(setTimeout(() => target.classList.add('bt-faint'), 300));
+      // My knockout (I emptied the foe's bar) → a burst of confetti to celebrate.
+      if (side === 'foe') {
+        const burst = document.createElement('div'); burst.className = 'bt-burst';
+        const cols = ['#ffd23f', '#e0459b', '#22c1c3', '#7ee06a', '#e2574c', '#a06bff'];
+        for (let i = 0; i < 20; i++) { const it = document.createElement('i'); it.style.background = cols[i % cols.length]; burst.appendChild(it); }
+        arena.appendChild(burst);
+        [...burst.children].forEach((it, i) => { const ang = (i / 20) * Math.PI * 2, dist = 58 + (i % 4) * 22;
+          mAnim(it, { opacity: [1, 1, 0], transform: ['translate(-4px,0) scale(1)', `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 8}px) scale(1)`, `translate(${Math.cos(ang) * dist * 1.4}px,${Math.sin(ang) * dist * 1.4 + 34}px) scale(.6)`] }, { duration: 1.15, easing: [0.2, 0.7, 0.3, 1] }); });
+        maTimers.push(setTimeout(() => burst.remove(), 1250));
+      }
     }
   }
 
@@ -3678,9 +3689,12 @@
           <div class="bt-hprow"><span class="bt-hp" data-side="${isMe ? 'hero' : 'foe'}">${hp}/${hpFull}</span><span class="bt-moves">${used}/${rules.best_n} ${noun}</span></div>
         </div>`;
       };
+      const liveTurn = !resolved && s.status === 'active';
+      const heroTurn = liveTurn && myTurn ? ' is-turn' : '';
+      const foeTurn = liveTurn && s.turn && !myTurn && !myFull ? ' is-turn' : '';
       html += `<div class="arena" data-hpfull="${hpFull}">
-        <div class="arena-row foe">${plate(them, false, me.score)}<div class="arena-ava foe" data-avaside="foe">${avatarHTML(them.uid, them.name, 'lg', them.avatar_v)}</div></div>
-        <div class="arena-row hero"><div class="arena-ava hero" data-avaside="hero">${avatarHTML(me.uid, me.name, 'lg', me.avatar_v)}</div>${plate(me, true, them.score)}</div>
+        <div class="arena-row foe">${plate(them, false, me.score)}<div class="arena-ava foe${foeTurn}" data-avaside="foe">${avatarHTML(them.uid, them.name, 'lg', them.avatar_v)}</div></div>
+        <div class="arena-row hero"><div class="arena-ava hero${heroTurn}" data-avaside="hero">${avatarHTML(me.uid, me.name, 'lg', me.avatar_v)}</div>${plate(me, true, them.score)}</div>
         <div class="arena-vs">VS</div>
       </div>`;
 
@@ -3703,15 +3717,17 @@
       } else if (myFull) {
         html += `<div class="bt-narr">Out of moves — your ${rules.best_n} ${noun} are in. Hold on while ${foeFirst} finishes.</div>`;
       } else {
+        // Deterministic per-turn copy variety (stable for the render diff-guard).
+        const turnIdx = (me.counted || 0) + (them.counted || 0);
+        const pick = (arr) => arr[turnIdx % arr.length];
         const l = them.last;
         let foeLast = '';
         if (l && l.grade) {
-          if (l.result === 'Project') foeLast = `${foeName} whiffed ${escapeHTML(l.grade)} — no damage.`;
-          else { const v = l.points || 0, verb = v >= 10 ? 'CRUSHED' : v >= 6 ? 'nailed' : 'sent'; foeLast = `${foeName} ${verb} ${escapeHTML(l.grade)} for ${v}!`; }
+          if (l.result === 'Project') foeLast = `${foeName} ${pick(['whiffed', 'blew', 'came off'])} ${escapeHTML(l.grade)} — no damage.`;
+          else { const v = l.points || 0, verb = v >= 10 ? pick(['CRUSHED', 'obliterated', 'demolished']) : v >= 6 ? pick(['nailed', 'stuck', 'powered up']) : pick(['sent', 'ticked', 'dispatched']); foeLast = `${foeName} ${verb} ${escapeHTML(l.grade)} for ${v}!`; }
         }
-        const line = myTurn
-          ? (foeLast ? `${foeLast} ⚔ Your move — hit back with a hard send!` : '⚔ Your move — log a send to attack!')
-          : `${foeName} is eyeing the wall…`;
+        const prompts = ['⚔ Your move — hit back with a hard send!', '⚔ Your turn — send big to bite their HP!', '⚔ Fire back — harder grade, bigger hit!'];
+        const line = myTurn ? (foeLast ? `${foeLast} ${pick(prompts)}` : pick(prompts)) : `${foeName} ${pick(['is eyeing the wall…', 'chalks up…', 'reads the next line…'])}`;
         html += `<div class="bt-narr ${myTurn ? 'mine' : ''}">${line}</div>`;
       }
       // Rules cheat-sheet only before the first attack, then it gets out of the way.
@@ -3742,7 +3758,7 @@
         ? `<button class="btn primary" id="h2h-log" disabled>Limit reached · ${rules.best_n} of ${rules.best_n}</button>`
         : (parMode && s.turn && !myTurn && !me.ended)
           ? `<button class="btn primary" id="h2h-log" disabled>${escapeHTML(them.name)}’s turn…</button>`
-          : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
+          : arena ? `<button class="btn primary" id="h2h-log">⚔ Attack</button>` : `<button class="btn primary" id="h2h-log">Log a climb</button>`;
       // Second action: forfeit (quit now, take the loss, no waiting on them) —
       // but if you've already used all your slots there's nothing to give up, so
       // it's just "waiting for them to finish". A tap arms an inline confirm.
